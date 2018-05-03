@@ -19,7 +19,7 @@ var App = require('app');
 
 App.ControlsView = Ember.View.extend({
 
-	classNames: ['display-inline-block'],
+	classNames: ['display-inline-block', 'config-controls'],
 
 	templateName: require('templates/common/configs/controls'),
 
@@ -31,11 +31,11 @@ App.ControlsView = Ember.View.extend({
 
 	showSwitchToGroup: Em.computed.and('!serviceConfigProperty.isEditable', 'serviceConfigProperty.group'),
 
-	showIsFinal: Em.computed.alias('serviceConfigProperty.supportsFinal'),
+	showIsFinal: Em.computed.and('serviceConfigProperty.supportsFinal', '!serviceConfigProperty.isUndefinedLabel'),
 
 	showRemove: Em.computed.and('showActions', 'serviceConfigProperty.isEditable', 'serviceConfigProperty.isRemovable'),
 
-	showOverride: Em.computed.and('showActions', 'serviceConfigProperty.isPropertyOverridable'),
+	showOverride: Em.computed.and('showActions', 'serviceConfigProperty.isPropertyOverridable', 'controller.canEdit'),
 
 	showUndo: Em.computed.and('showActions', 'serviceConfigProperty.isEditable', '!serviceConfigProperty.cantBeUndone', 'serviceConfigProperty.isNotDefaultValue'),
 

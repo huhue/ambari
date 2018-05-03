@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,8 +18,22 @@
 
 package org.apache.ambari.server.stack;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.state.quicklinks.Check;
+import org.apache.ambari.server.state.quicklinks.Host;
 import org.apache.ambari.server.state.quicklinks.Link;
 import org.apache.ambari.server.state.quicklinks.Port;
 import org.apache.ambari.server.state.quicklinks.Protocol;
@@ -27,12 +41,18 @@ import org.apache.ambari.server.state.quicklinks.QuickLinks;
 import org.apache.ambari.server.state.quicklinks.QuickLinksConfiguration;
 import org.junit.Test;
 
-import java.io.File;
-import java.util.List;
-
-import static org.junit.Assert.*;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
 
 public class QuickLinksConfigurationModuleTest {
+
+  @Test
+  public void testAddErrors() {
+    Set<String> errors = ImmutableSet.of("one error", "two errors");
+    QuickLinksConfigurationModule module = new QuickLinksConfigurationModule((File) null);
+    module.addErrors(errors);
+    assertEquals(errors, ImmutableSet.copyOf(module.getErrors()));
+  }
 
   @Test
   public void testResolveInherit() throws Exception{
@@ -72,6 +92,18 @@ public class QuickLinksConfigurationModuleTest {
     assertNotNull(links);
     assertEquals(7, links.size());
     assertEquals(4, parentQuickLinks.getQuickLinksConfiguration().getLinks().size());
+    Link threadStacks = getLink(links, "thread_stacks");
+    assertNotNull("https_regex property should have been inherited",
+        threadStacks.getPort().getHttpsRegex());
+  }
+
+  private Link getLink(Collection<Link> links, String name) {
+    for (Link link: links) {
+      if (name.equals(link.getName())) {
+        return link;
+      }
+    }
+    throw new NoSuchElementException("name");
   }
 
   @Test
@@ -96,6 +128,8 @@ public class QuickLinksConfigurationModuleTest {
         hasLink = true;
         Port port = link.getPort();
         assertEquals("mapred-site", port.getSite());
+        Host host = link.getHost();
+        assertEquals("core-site", host.getSite());
       }
     }
     assertTrue(hasLink);
@@ -111,6 +145,36 @@ public class QuickLinksConfigurationModuleTest {
     }
   }
 
+  @Test
+  public void testResolveOverrideProperties() throws Exception{
+    QuickLinks[] results = resolveQuickLinks("parent_quicklinks_with_attributes.json",
+        "child_quicklinks_with_attributes.json");
+    QuickLinks parentQuickLinks = results[0];
+    QuickLinks childQuickLinks = results[1];
+
+    //resolved quicklinks configuration
+    QuickLinksConfiguration childQuickLinksConfig = childQuickLinks.getQuickLinksConfiguration();
+    assertNotNull(childQuickLinksConfig);
+
+    //links
+    List<Link> links = childQuickLinksConfig.getLinks();
+    assertNotNull(links);
+    assertEquals(3, links.size());
+    Map<String, Link> linksByName = new HashMap<>();
+    for (Link link: links) {
+      linksByName.put(link.getName(), link);
+    }
+    assertEquals("Links are not properly overridden for foo_ui",
+        Lists.newArrayList("authenticated", "sso"),
+        linksByName.get("foo_ui").getAttributes());
+    assertEquals("Parent links for foo_jmx are not inherited.",
+        Lists.newArrayList("authenticated"),
+        linksByName.get("foo_jmx").getAttributes());
+    assertEquals("Links are not properly overridden for foo_logs",
+        new ArrayList<>(),
+        linksByName.get("foo_logs").getAttributes());
+  }
+
   private QuickLinks[] resolveQuickLinks(String parentJson, String childJson) throws AmbariException{
     File parentQuiclinksFile = new File(this.getClass().getClassLoader().getResource(parentJson).getFile());
     File childQuickLinksFile = new File(this.getClass().getClassLoader().getResource(childJson).getFile());
@@ -118,7 +182,7 @@ public class QuickLinksConfigurationModuleTest {
     QuickLinksConfigurationModule parentModule = new QuickLinksConfigurationModule(parentQuiclinksFile);
     QuickLinksConfigurationModule childModule = new QuickLinksConfigurationModule(childQuickLinksFile);
 
-    childModule.resolve(parentModule, null, null);
+    childModule.resolve(parentModule, null, null, null);
 
     QuickLinks parentQuickLinks = parentModule.getModuleInfo().getQuickLinksConfigurationMap().get(QuickLinksConfigurationModule.QUICKLINKS_CONFIGURATION_KEY);
     QuickLinks childQuickLinks = childModule.getModuleInfo().getQuickLinksConfigurationMap().get(QuickLinksConfigurationModule.QUICKLINKS_CONFIGURATION_KEY);

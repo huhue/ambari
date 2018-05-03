@@ -27,6 +27,8 @@ from test_storm_base import TestStormBase
 @patch("resource_management.libraries.functions.get_user_call_output.get_user_call_output", new=MagicMock(return_value=(0, '123', '')))
 class TestStormSupervisor(TestStormBase):
 
+  CONFIG_OVERRIDES = {"serviceName":"STORM", "role":"SUPERVISOR"}
+
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/supervisor_prod.py",
                        classname = "Supervisor",
@@ -48,22 +50,17 @@ class TestStormSupervisor(TestStormBase):
     )
 
     self.assert_configure_default()
-
     self.assertResourceCalled('Execute', 'supervisorctl start storm-supervisor',
       wait_for_finish = False,
     )
-    self.assertResourceCalled('Execute', 'source /etc/storm/conf/storm-env.sh ; export PATH=$JAVA_HOME/bin:$PATH ; storm logviewer > /var/log/storm/logviewer.out 2>&1',
-        wait_for_finish = False,
+    self.assertResourceCalled('Execute', 'source /etc/storm/conf/storm-env.sh ; export PATH=$JAVA_HOME/bin:$PATH ; storm logviewer > /var/log/storm/logviewer.out 2>&1 &\n echo $! > /var/run/storm/logviewer.pid',
         path = ['/usr/bin'],
         user = 'storm',
         not_if = "ambari-sudo.sh su storm -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/storm/logviewer.pid >/dev/null 2>&1 && ps -p `cat /var/run/storm/logviewer.pid` >/dev/null 2>&1'",
     )
-    self.assertResourceCalled('Execute', "/usr/jdk64/jdk1.7.0_45/bin/jps -l  | grep storm.daemon.logviewer$ && /usr/jdk64/jdk1.7.0_45/bin/jps -l  | grep storm.daemon.logviewer$ | awk {'print $1'} > /var/run/storm/logviewer.pid",
-        logoutput = True,
-        path = ['/usr/bin'],
-        tries = 12,
-        user = 'storm',
-        try_sleep = 10,
+    self.assertResourceCalled('File', '/var/run/storm/logviewer.pid',
+        owner = 'storm',
+        group = 'hadoop',
     )
     self.assertNoMoreResources()
 
@@ -118,18 +115,14 @@ class TestStormSupervisor(TestStormBase):
     self.assertResourceCalled('Execute', 'supervisorctl start storm-supervisor',
                         wait_for_finish = False,
     )
-    self.assertResourceCalled('Execute', 'source /etc/storm/conf/storm-env.sh ; export PATH=$JAVA_HOME/bin:$PATH ; storm logviewer > /var/log/storm/logviewer.out 2>&1',
-        wait_for_finish = False,
+    self.assertResourceCalled('Execute', 'source /etc/storm/conf/storm-env.sh ; export PATH=$JAVA_HOME/bin:$PATH ; storm logviewer > /var/log/storm/logviewer.out 2>&1 &\n echo $! > /var/run/storm/logviewer.pid',
         path = ['/usr/bin'],
         user = 'storm',
         not_if = "ambari-sudo.sh su storm -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/storm/logviewer.pid >/dev/null 2>&1 && ps -p `cat /var/run/storm/logviewer.pid` >/dev/null 2>&1'",
     )
-    self.assertResourceCalled('Execute', "/usr/jdk64/jdk1.7.0_45/bin/jps -l  | grep storm.daemon.logviewer$ && /usr/jdk64/jdk1.7.0_45/bin/jps -l  | grep storm.daemon.logviewer$ | awk {'print $1'} > /var/run/storm/logviewer.pid",
-        logoutput = True,
-        path = ['/usr/bin'],
-        tries = 12,
-        user = 'storm',
-        try_sleep = 10,
+    self.assertResourceCalled('File', '/var/run/storm/logviewer.pid',
+        owner = 'storm',
+        group = 'hadoop',
     )
     self.assertNoMoreResources()
 
@@ -167,6 +160,7 @@ class TestStormSupervisor(TestStormBase):
                        classname = "Supervisor",
                        command = "pre_upgrade_restart",
                        config_file="default.json",
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES)
 
@@ -186,20 +180,10 @@ class TestStormSupervisor(TestStormBase):
                      classname = "Supervisor",
                      command = "pre_upgrade_restart",
                      config_dict = json_content,
+                     config_overrides = self.CONFIG_OVERRIDES,
                      stack_version = self.STACK_VERSION,
                      target = RMFTestCase.TARGET_COMMON_SERVICES,
-                     call_mocks = [(0, None, ''), (0, None)],
                      mocks_dict = mocks_dict)
 
     self.assertResourceCalledIgnoreEarlier("Execute", ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'storm-client', '2.3.0.0-1234'), sudo=True)
     self.assertResourceCalled("Execute", ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'storm-supervisor', '2.3.0.0-1234'), sudo=True)
-
-    self.assertEquals(1, mocks_dict['call'].call_count)
-    self.assertEquals(1, mocks_dict['checked_call'].call_count)
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'storm', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[0][0][0])
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'storm', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])
-    self.assertNoMoreResources()

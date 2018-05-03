@@ -25,13 +25,14 @@
         "label": "Ranger Admin UI",
         "requires_user_name": "false",
         "url": "%@://%@:%@",
+        "attributes": ["authenticated", "sso"],
         "port":{
-          "http_property": "http.service.port",
+          "http_property": "ranger.service.http.port",
           "http_default_port": "6080",
-          "https_property": "https.service.port",
+          "https_property": "ranger.service.https.port",
           "https_default_port": "6182",
           "regex": "(\\d*)+",
-          "site": "ranger-site"
+          "site": "ranger-admin-site"
         }
       }
     ]

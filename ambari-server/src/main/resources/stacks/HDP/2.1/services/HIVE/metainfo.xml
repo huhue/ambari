@@ -55,15 +55,10 @@
             <package>
               <name>webhcat-tar-pig</name>
             </package>
-            <package>
-              <name>mysql-connector-java</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_mysl_connector</condition>
-            </package>
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>amazon2015,redhat6,suse11</osFamily>
+          <osFamily>amazonlinux2,redhat6,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>mysql</name>
@@ -72,22 +67,17 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>redhat7</osFamily>
+          <osFamily>redhat7,amazonlinux2</osFamily>
           <packages>
             <package>
-              <name>mysql-community-release</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_mysql</condition>
-            </package>
-            <package>
-              <name>mysql-community-server</name>
+              <name>mariadb-server</name>
               <skipUpgrade>true</skipUpgrade>
               <condition>should_install_mysql</condition>
             </package>
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>amazon2015,redhat6,ubuntu12</osFamily>
+          <osFamily>amazonlinux2,redhat6,ubuntu12</osFamily>
           <packages>
             <package>
               <name>mysql-server</name>
@@ -97,7 +87,7 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>suse11</osFamily>
+          <osFamily>suse11,suse12</osFamily>
           <packages>
             <package>
               <name>mysql-client</name>

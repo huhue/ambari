@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,7 +19,6 @@
 package org.apache.ambari.server.alerts;
 
 import static junit.framework.Assert.assertEquals;
-import static org.easymock.EasyMock.createNiceMock;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
 import static org.easymock.EasyMock.verify;
@@ -30,13 +29,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.persistence.EntityManager;
-
 import org.apache.ambari.server.events.AlertEvent;
 import org.apache.ambari.server.events.AlertReceivedEvent;
 import org.apache.ambari.server.events.MockEventListener;
 import org.apache.ambari.server.events.publishers.AlertEventPublisher;
-import org.apache.ambari.server.orm.DBAccessor;
 import org.apache.ambari.server.orm.dao.AlertDefinitionDAO;
 import org.apache.ambari.server.orm.entities.AlertDefinitionEntity;
 import org.apache.ambari.server.state.Alert;
@@ -45,7 +41,7 @@ import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.Host;
 import org.apache.ambari.server.state.HostState;
-import org.apache.ambari.server.state.stack.OsFamily;
+import org.apache.ambari.server.testutils.PartialNiceMockBinder;
 import org.easymock.EasyMock;
 import org.junit.After;
 import org.junit.Before;
@@ -106,11 +102,11 @@ public class AgentHeartbeatAlertRunnableTest {
     m_synchronizedBus.register(m_listener);
 
     // create the cluster map
-    Map<String,Cluster> clusterMap = new HashMap<String, Cluster>();
+    Map<String,Cluster> clusterMap = new HashMap<>();
     clusterMap.put(CLUSTER_NAME, m_cluster);
 
     // create the host map
-    Map<String, Host> hostMap = new HashMap<String, Host>();
+    Map<String, Host> hostMap = new HashMap<>();
     hostMap.put(HOSTNAME, m_host);
 
     // mock the definition for the alert
@@ -125,7 +121,6 @@ public class AgentHeartbeatAlertRunnableTest {
 
     // mock the cluster
     expect(m_cluster.getClusterId()).andReturn(CLUSTER_ID).atLeastOnce();
-    expect(m_cluster.getClusterName()).andReturn(CLUSTER_NAME).atLeastOnce();
     expect(m_cluster.getHosts()).andReturn(Collections.singleton(m_host)).atLeastOnce();
 
     // mock clusters
@@ -179,9 +174,44 @@ public class AgentHeartbeatAlertRunnableTest {
   }
 
   @Test
-  public void testUnhealthyAlert() {
+  public void testLostHeartbeatAlert() {
     EasyMock.reset(m_host);
     expect(m_host.getState()).andReturn(HostState.HEARTBEAT_LOST).atLeastOnce();
+    replay(m_host);
+
+    // precondition that no events were fired
+    assertEquals(0,
+        m_listener.getAlertEventReceivedCount(AlertReceivedEvent.class));
+
+    // instantiate and inject mocks
+    AgentHeartbeatAlertRunnable runnable = new AgentHeartbeatAlertRunnable(
+        m_definition.getDefinitionName());
+
+    m_injector.injectMembers(runnable);
+
+    // run the alert
+    runnable.run();
+
+    assertEquals(1,
+        m_listener.getAlertEventReceivedCount(AlertReceivedEvent.class));
+
+    List<AlertEvent> events = m_listener.getAlertEventInstances(AlertReceivedEvent.class);
+    assertEquals(1, events.size());
+
+    AlertReceivedEvent event = (AlertReceivedEvent) events.get(0);
+    Alert alert = event.getAlert();
+    assertEquals("AMBARI", alert.getService());
+    assertEquals("AMBARI_SERVER", alert.getComponent());
+    assertEquals(AlertState.CRITICAL, alert.getState());
+    assertEquals(DEFINITION_NAME, alert.getName());
+
+    verify(m_definition, m_host, m_cluster, m_clusters, m_definitionDao);
+  }
+
+  @Test
+  public void testUnhealthyHostAlert() {
+    EasyMock.reset(m_host);
+    expect(m_host.getState()).andReturn(HostState.UNHEALTHY).atLeastOnce();
     replay(m_host);
 
     // precondition that no events were fired
@@ -222,14 +252,8 @@ public class AgentHeartbeatAlertRunnableTest {
      */
     @Override
     public void configure(Binder binder) {
-      Cluster cluster = EasyMock.createNiceMock(Cluster.class);
-
-      binder.bind(Clusters.class).toInstance(createNiceMock(Clusters.class));
-      binder.bind(OsFamily.class).toInstance(createNiceMock(OsFamily.class));
-      binder.bind(DBAccessor.class).toInstance(createNiceMock(DBAccessor.class));
-      binder.bind(Cluster.class).toInstance(cluster);
-      binder.bind(AlertDefinitionDAO.class).toInstance(createNiceMock(AlertDefinitionDAO.class));
-      binder.bind(EntityManager.class).toInstance(createNiceMock(EntityManager.class));
+      PartialNiceMockBinder.newBuilder().addConfigsBindings()
+          .addAlertDefinitionBinding().build().configure(binder);
     }
   }
 }

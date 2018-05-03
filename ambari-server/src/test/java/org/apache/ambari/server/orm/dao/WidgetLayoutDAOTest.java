@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,9 +18,12 @@
 
 package org.apache.ambari.server.orm.dao;
 
-import com.google.inject.Guice;
-import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
+import java.sql.SQLException;
+import java.util.LinkedList;
+import java.util.List;
+
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
 import org.apache.ambari.server.orm.OrmTestHelper;
@@ -32,8 +35,8 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.LinkedList;
-import java.util.List;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
 
 /**
  * WidgetLayoutDAO unit tests.
@@ -48,7 +51,7 @@ public class WidgetLayoutDAOTest {
 
 
   @Before
-  public void before() {
+  public void before() throws Exception {
     injector = Guice.createInjector(new InMemoryDefaultTestModule());
     widgetLayoutDAO = injector.getInstance(WidgetLayoutDAO.class);
     widgetDAO = injector.getInstance(WidgetDAO.class);
@@ -75,7 +78,7 @@ public class WidgetLayoutDAOTest {
     widgetLayoutEntity2.setScope("CLUSTER");
     widgetLayoutEntity2.setDisplayName("displ_name2");
 
-    List<WidgetLayoutUserWidgetEntity> widgetLayoutUserWidgetEntityList = new LinkedList<WidgetLayoutUserWidgetEntity>();
+    List<WidgetLayoutUserWidgetEntity> widgetLayoutUserWidgetEntityList = new LinkedList<>();
 
     for (int i=0; i<3; i++) {
       WidgetEntity widgetEntity = new WidgetEntity();
@@ -129,8 +132,8 @@ public class WidgetLayoutDAOTest {
   }
 
   @After
-  public void after() {
-    injector.getInstance(PersistService.class).stop();
+  public void after() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
     injector = null;
   }
 }

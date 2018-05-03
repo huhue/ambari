@@ -21,23 +21,19 @@ require('controllers/wizard/step7_controller');
 
 App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecurityConfigs, App.ToggleIsRequiredMixin, App.KDCCredentialsControllerMixin, {
   name: 'kerberosWizardStep4Controller',
-  isWithinAddService: Em.computed.equal('wizardController.name', 'addServiceController'),
 
   // stores configurations loaded by ConfigurationsController.getConfigsByTags
   servicesConfigurations: null,
 
   clearStep: function() {
     this.set('isRecommendedLoaded', false);
+    this.set('submitButtonClicked', false);
     this.set('selectedService', null);
     this.set('stepConfigs', []);
   },
 
   loadStep: function() {
     var self, stored;
-    if (this.get('wizardController.skipConfigureIdentitiesStep')) {
-      App.router.send('next');
-      return;
-    }
     self = this;
     this.clearStep();
     stored = this.get('wizardController').loadCachedStepConfigValues(this) || [];
@@ -47,7 +43,7 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
       // when configurations were stored no need to apply recommendations again
       if (App.get('supports.kerberosStackAdvisor') && !stored.length) {
         self.bootstrapRecommendationPayload(kerberosDescriptor).then(function(recommendations) {
-          self.loadServerSideConfigsRecommendations(recommendations).done(function() {
+          self.loadServerSideConfigsRecommendations(recommendations).always(function() {
             self.applyServiceConfigs(stepConfigs);
           });
         });
@@ -70,22 +66,12 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
    * @returns {$.Deferred}
    */
   getDescriptor: function() {
-    var self = this;
     var dfd = $.Deferred();
     var successCallback = function(data) {
       dfd.resolve(data);
     };
-    if (this.get('isWithinAddService')) {
-      App.ajax.send({
-        sender: this,
-        name: 'admin.kerberize.cluster_descriptor_artifact'
-      }).always(function(data, status) {
-        self.storeClusterDescriptorStatus(status === 'success');
-        self.loadClusterDescriptorConfigs().then(successCallback);
-      });
-    } else {
-      this.loadStackDescriptorConfigs().then(successCallback);
-    }
+
+    this.loadClusterDescriptorConfigs(false).then(successCallback);
     return dfd.promise();
   },
 
@@ -205,8 +191,8 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
   prepareConfigProperties: function(configs) {
     var self = this;
     // stored configs from previous steps (Configure Kerberos or Customize Services for ASW)
-    var storedServiceConfigs = this.get('wizardController').getDBProperty('serviceConfigProperties');
-    var installedServiceNames = ['Cluster'].concat(App.Service.find().mapProperty('serviceName'));
+    var storedServiceConfigs = this.get('wizardController.content.serviceConfigProperties');
+    var installedServiceNames = ['Cluster', 'AMBARI'].concat(App.Service.find().mapProperty('serviceName'));
     var configProperties = configs.slice(0);
     var siteProperties = App.configsCollection.getAll();
     var realmValue;
@@ -236,6 +222,7 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
         var observedValue = Em.get(allConfigs.findProperty('name', property.get('observesValueFrom')), 'value');
         property.set('value', observedValue);
         property.set('recommendedValue', observedValue);
+        property.set('isVisible', true);
       }
       if (property.get('serviceName') === 'Cluster') {
         property.set('category', 'Global');
@@ -307,6 +294,7 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
   },
 
   submit: function() {
+    this.set('submitButtonClicked', true);
     this.saveConfigurations();
     App.router.send('next');
   },
@@ -358,13 +346,30 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
         stackVersionUrl: App.get('stackVersionURL'),
         dataToSend: {
           recommend: 'configurations',
-          hosts: this.get('hostNames'),
+          hosts: App.get('allHostNames'),
           services: this.get('serviceNames'),
           recommendations: recommendations
         }
       },
       'success': 'loadRecommendationsSuccess',
       'error': 'loadRecommendationsError'
+    });
+  },
+
+  loadRecommendationsError: function(req, ajaxOpts, error, opt) {
+    var resp;
+    try {
+      resp = $.parseJSON(req.responseText);
+    } catch (e) { }
+    return App.ModalPopup.show({
+      header: Em.I18n.t('common.error'),
+      secondary: false,
+      bodyClass: App.AjaxDefaultErrorPopupBodyView.extend({
+        type: opt.type || 'GET',
+        url: opt.url,
+        status: req.status,
+        message: resp && resp.message || req.responseText
+      })
     });
   },
 
@@ -435,7 +440,7 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
     var self = this;
     var configs, servicesConfigurations;
     if (this.get('isWithinAddService')) {
-      configs = this.get('wizardController').getDBProperty('serviceConfigProperties');
+      configs = this.get('content.serviceConfigProperties');
       servicesConfigurations = configs.reduce(function(configTags, property) {
         var fileName = App.config.getConfigTagFromFileName(property.filename),
             configType;
@@ -459,27 +464,6 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
     }
 
     return dfd.promise();
-  },
-
-  /**
-   * Returns payload for recommendations request.
-   * Takes services' configurations and merge them with kerberos descriptor properties.
-   *
-   * @param {object[]} configurations services' configurations fetched from API
-   * @param {App.ServiceConfigProperty[]} kerberosDescriptor descriptor configs
-   * @returns {object} payload for recommendations request
-   */
-  getBlueprintPayloadObject: function(configurations, kerberosDescriptor) {
-    var recommendations = this.get('hostGroups');
-    var mergedConfigurations = this.mergeDescriptorToConfigurations(configurations, this.createServicesStackDescriptorConfigs(kerberosDescriptor));
-
-    recommendations.blueprint.configurations = mergedConfigurations.reduce(function(p, c) {
-      p[c.type] = {};
-      p[c.type].properties = c.properties;
-      return p;
-    }, {});
-
-    return recommendations;
   },
 
   /**
@@ -507,7 +491,7 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
     Array.prototype.push.apply(self.getServicesConfigObject().get('configs'), newProperties);
     Em.keys(groupedProperties.update).forEach(function(fileName) {
       Em.keys(groupedProperties.update[fileName]).forEach(function(propertyName) {
-        var configProperty = allConfigs.findProperty('name', propertyName);
+        var configProperty = allConfigs.filterProperty('filename', fileName).findProperty('name', propertyName);
         if (configProperty) {
           self._updateConfigByRecommendation(configProperty, groupedProperties.update[fileName][propertyName], true, false);
         }
@@ -528,89 +512,6 @@ App.KerberosWizardStep4Controller = App.WizardStep7Controller.extend(App.AddSecu
    */
   getServicesConfigObject: function() {
     return this.get('stepConfigs').findProperty('name', 'ADVANCED');
-  },
-
-  /**
-   * Returns map with appropriate action and properties to process with.
-   * Key is an action e.g. `add`, `update`, `delete` and value is  an object `fileName` -> `propertyName`: `propertyValue`.
-   *
-   * @param {object} recommendedConfigurations
-   * @param {object[]} servicesConfigurations services' configurations fetched from API
-   * @param {App.ServiceConfigProperty[]} allConfigs all current configurations stored in controller, basically kerberos descriptor
-   * @returns {object}
-   */
-  groupRecommendationProperties: function(recommendedConfigurations, servicesConfigurations, allConfigs) {
-    var resultMap = {
-      update: {},
-      add: {},
-      delete: {}
-    };
-
-    /**
-     * Adds property to associated group `add`,`delete`,`update`.
-     *
-     * @param {object} propertyMap <code>resultMap</code> object
-     * @param {string} name property name
-     * @param {string} propertyValue property value
-     * @param {string} fileName property file name
-     * @return {object} <code>resultMap</code>
-     * @param {string} group, `add`,`delete`,`update`
-     */
-    var addProperty = function(propertyMap, name, propertyValue, fileName, group) {
-      var ret = $.extend(true, {}, propertyMap);
-      if (ret.hasOwnProperty(group)) {
-        if (!ret[group].hasOwnProperty(fileName)) {
-          ret[group][fileName] = {};
-        }
-        ret[group][fileName][name] = propertyValue;
-      }
-      return ret;
-    };
-
-    return Em.keys(recommendedConfigurations || {}).reduce(function(acc, fileName) {
-      var propertyMap = acc;
-      var recommendedProperties = Em.getWithDefault(recommendedConfigurations, fileName + '.properties', {});
-      var recommendedAttributes = Em.getWithDefault(recommendedConfigurations, fileName + '.property_attributes', {});
-      // check for properties that should be delted
-      Em.keys(recommendedAttributes).forEach(function(propertyName) {
-        var attribute = recommendedAttributes[propertyName];
-        // delete properties which are present in kerberos descriptor
-        if (attribute.hasOwnProperty('delete') && allConfigs.filterProperty('filename', fileName).someProperty('name', propertyName)) {
-          propertyMap = addProperty(propertyMap, propertyName, '', fileName, 'delete');
-        }
-      });
-
-      return Em.keys(recommendedProperties).reduce(function(a, propertyName) {
-        var propertyValue = recommendedProperties[propertyName];
-        // check if property exist in saved configurations on server
-        var isExist = Em.getWithDefault(servicesConfigurations.findProperty('type', fileName) || {}, 'properties', {}).hasOwnProperty(propertyName);
-        if (!isExist) {
-          return addProperty(a, propertyName, propertyValue, fileName, 'add');
-        }
-        // when property exist check that it present in current step configs (kerberos descriptor)
-        // and add it as property to `update`
-        if (allConfigs.filterProperty('filename', fileName).someProperty('name', propertyName)) {
-          return addProperty(a, propertyName, propertyValue, fileName, 'update');
-        }
-        return a;
-      }, propertyMap);
-    }, resultMap);
-  },
-
-  /**
-   *
-   * @method getServiceByFilename
-   * @param {string}fileName
-   * @returns {string}
-   */
-  getServiceByFilename: function(fileName) {
-    // core-site properties goes to HDFS
-    if (fileName === 'core-site' && App.Service.find().someProperty('serviceName', 'HDFS')) {
-      return 'HDFS';
-    }
-    var associatedService = App.StackService.find().filter(function(service) {
-      return Em.keys(service.get('configTypes')).contains(fileName);
-    })[0];
-    return associatedService ? associatedService.get('serviceName') : '';
   }
+
 });

@@ -40,6 +40,20 @@ class TestServiceCheck(RMFTestCase):
                       stack_version = self.STACK_VERSION,
                       target = RMFTestCase.TARGET_COMMON_SERVICES
     )
+    self.assertResourceCalled('HdfsResource', '/user/ambari-qa',
+                              immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
+                             security_enabled = False,
+                              hadoop_bin_dir = '/usr/bin',
+                              keytab = UnknownConfigurationMock(),
+                              kinit_path_local = '/usr/bin/kinit',
+                              user = 'hdfs',
+                              dfs_type = '',
+                              mode = 0770,
+                              owner = 'ambari-qa',
+                              action = ['create_on_execute'], hdfs_resource_ignore_file='/var/lib/ambari-agent/data/.hdfs_resource_ignore', hdfs_site=self.getConfig()['configurations']['hdfs-site'], principal_name=UnknownConfigurationMock(), default_fs='hdfs://c6401.ambari.apache.org:8020',
+                              hadoop_conf_dir = '/etc/hadoop/conf',
+                              type = 'directory',
+                              )
     self.assertResourceCalled('HdfsResource', '/user/ambari-qa/mapredsmokeoutput',
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
         security_enabled = False,
@@ -91,8 +105,7 @@ class TestServiceCheck(RMFTestCase):
     )
     self.assertNoMoreResources()
 
-  @patch("resource_management.libraries.functions.security_commons.cached_kinit_executor")
-  def test_service_check_secured(self, cached_kinit_mock):
+  def test_service_check_secured(self):
 
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/mapred_service_check.py",
                       classname="MapReduce2ServiceCheck",
@@ -101,6 +114,20 @@ class TestServiceCheck(RMFTestCase):
                       stack_version = self.STACK_VERSION,
                       target = RMFTestCase.TARGET_COMMON_SERVICES
     )
+    self.assertResourceCalled('HdfsResource', '/user/ambari-qa',
+                              immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
+                              security_enabled = True,
+                              hadoop_bin_dir = '/usr/bin',
+                              keytab = '/etc/security/keytabs/hdfs.headless.keytab',
+                              kinit_path_local = '/usr/bin/kinit',
+                              user = 'hdfs',
+                              dfs_type = '',
+                              mode = 0770,
+                              owner = 'ambari-qa',
+                              action = ['create_on_execute'], hdfs_resource_ignore_file='/var/lib/ambari-agent/data/.hdfs_resource_ignore', hdfs_site=self.getConfig()['configurations']['hdfs-site'], principal_name='hdfs', default_fs='hdfs://c6401.ambari.apache.org:8020',
+                              hadoop_conf_dir = '/etc/hadoop/conf',
+                              type = 'directory',
+                              )
     self.assertResourceCalled('HdfsResource', '/user/ambari-qa/mapredsmokeoutput',
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
         security_enabled = True,
@@ -137,12 +164,9 @@ class TestServiceCheck(RMFTestCase):
         action = ['execute'], hdfs_resource_ignore_file='/var/lib/ambari-agent/data/.hdfs_resource_ignore', hdfs_site=self.getConfig()['configurations']['hdfs-site'], principal_name='hdfs', default_fs='hdfs://c6401.ambari.apache.org:8020',
         hadoop_conf_dir = '/etc/hadoop/conf',
     )
-
-    self.assertTrue(2, cached_kinit_mock.call_count)
-    cached_kinit_mock.assert_called_with('/usr/bin/kinit', 'ambari-qa',
-                                         '/etc/security/keytabs/smokeuser.headless.keytab',
-                                         'ambari-qa@EXAMPLE.COM', 'c6401.ambari.apache.org', '/tmp')
-
+    self.assertResourceCalled('Execute', '/usr/bin/kinit -kt /etc/security/keytabs/smokeuser.headless.keytab ambari-qa@EXAMPLE.COM;',
+        user = 'ambari-qa',
+    )
     self.assertResourceCalled('ExecuteHadoop', 'jar /usr/lib/hadoop-mapreduce/hadoop-mapreduce-examples-2.*.jar wordcount /user/ambari-qa/mapredsmokeinput /user/ambari-qa/mapredsmokeoutput',
                       logoutput = True,
                       try_sleep = 5,
@@ -151,6 +175,9 @@ class TestServiceCheck(RMFTestCase):
                       user = 'ambari-qa',
                       conf_dir = '/etc/hadoop/conf',
     )
+    self.assertResourceCalled('Execute', '/usr/bin/kinit -kt /etc/security/keytabs/smokeuser.headless.keytab ambari-qa@EXAMPLE.COM;',
+                              user = 'ambari-qa',
+                              )
     self.assertResourceCalled('ExecuteHadoop', 'fs -test -e /user/ambari-qa/mapredsmokeoutput',
                       user = 'ambari-qa',
                       bin_dir = "/bin:/usr/bin:/usr/lib/hadoop-yarn/bin",

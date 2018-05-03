@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,18 +19,25 @@ package org.apache.ambari.server.state.services;
 
 import static org.easymock.EasyMock.createNiceMock;
 import static org.easymock.EasyMock.createStrictMock;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.RuntimeMXBean;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.EnumSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
+import java.util.Vector;
 import java.util.concurrent.Executor;
 
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
@@ -38,30 +45,54 @@ import org.apache.ambari.server.notifications.DispatchFactory;
 import org.apache.ambari.server.notifications.Notification;
 import org.apache.ambari.server.notifications.NotificationDispatcher;
 import org.apache.ambari.server.notifications.TargetConfigurationResult;
-import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
+import org.apache.ambari.server.notifications.dispatchers.AmbariSNMPDispatcher;
+import org.apache.ambari.server.orm.dao.AlertDefinitionDAO;
 import org.apache.ambari.server.orm.dao.AlertDispatchDAO;
+import org.apache.ambari.server.orm.dao.AlertsDAO;
 import org.apache.ambari.server.orm.entities.AlertDefinitionEntity;
 import org.apache.ambari.server.orm.entities.AlertHistoryEntity;
 import org.apache.ambari.server.orm.entities.AlertNoticeEntity;
 import org.apache.ambari.server.orm.entities.AlertTargetEntity;
 import org.apache.ambari.server.state.AlertState;
+import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.NotificationState;
 import org.apache.ambari.server.state.alert.Scope;
 import org.apache.ambari.server.state.alert.SourceType;
+import org.apache.ambari.server.state.alert.TargetType;
+import org.apache.ambari.server.testutils.PartialNiceMockBinder;
 import org.easymock.EasyMock;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.powermock.api.easymock.PowerMock;
+import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.powermock.modules.junit4.PowerMockRunner;
+import org.snmp4j.CommandResponder;
+import org.snmp4j.CommandResponderEvent;
+import org.snmp4j.PDU;
+import org.snmp4j.Snmp;
+import org.snmp4j.TransportMapping;
+import org.snmp4j.mp.SnmpConstants;
+import org.snmp4j.smi.Address;
+import org.snmp4j.smi.GenericAddress;
+import org.snmp4j.smi.Integer32;
+import org.snmp4j.smi.OID;
+import org.snmp4j.smi.OctetString;
+import org.snmp4j.smi.TimeTicks;
+import org.snmp4j.smi.VariableBinding;
+import org.snmp4j.transport.DefaultUdpTransportMapping;
 
 import com.google.inject.Binder;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Module;
-import com.google.inject.util.Modules;
 
 /**
  * Tests the {@link AlertNoticeDispatchService}.
  */
+@RunWith(PowerMockRunner.class)
+@PrepareForTest({ AmbariSNMPDispatcher.class, ManagementFactory.class })
 public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
 
   final static String ALERT_NOTICE_UUID_1 = UUID.randomUUID().toString();
@@ -74,9 +105,10 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
   private DispatchFactory m_dispatchFactory = null;
   private AlertDispatchDAO m_dao = null;
   private Injector m_injector;
+  private RuntimeMXBean m_runtimeMXBean;
 
-  List<AlertDefinitionEntity> m_definitions = new ArrayList<AlertDefinitionEntity>();
-  List<AlertHistoryEntity> m_histories = new ArrayList<AlertHistoryEntity>();
+  List<AlertDefinitionEntity> m_definitions = new ArrayList<>();
+  List<AlertHistoryEntity> m_histories = new ArrayList<>();
 
   @Before
   public void before() {
@@ -85,8 +117,7 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
     m_metaInfo = createNiceMock(AmbariMetaInfo.class);
 
     // create an injector which will inject the mocks
-    m_injector = Guice.createInjector(Modules.override(
-        new InMemoryDefaultTestModule()).with(new MockModule()));
+    m_injector = Guice.createInjector(new MockModule());
 
     Assert.assertNotNull(m_injector);
 
@@ -132,7 +163,17 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
         m_histories.add(history);
       }
     }
-  }
+
+    // mock out the uptime to be a while (since most tests are not testing
+    // system uptime)
+    m_runtimeMXBean = EasyMock.createNiceMock(RuntimeMXBean.class);
+    PowerMock.mockStatic(ManagementFactory.class);
+    expect(ManagementFactory.getRuntimeMXBean()).andReturn(m_runtimeMXBean).atLeastOnce();
+    PowerMock.replay(ManagementFactory.class);
+    expect(m_runtimeMXBean.getUptime()).andReturn(360000L).atLeastOnce();
+
+    replay( m_runtimeMXBean);
+    }
 
   /**
    * Tests the parsing of the {@link AlertHistoryEntity} list into
@@ -184,7 +225,7 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
   @Test
   public void testNoDispatch() throws Exception {
     EasyMock.expect(m_dao.findPendingNotices()).andReturn(
-        new ArrayList<AlertNoticeEntity>()).once();
+      new ArrayList<>()).once();
 
     // m_dispatchFactory should not be called at all
     EasyMock.replay(m_dao, m_dispatchFactory);
@@ -234,22 +275,46 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
     assertTrue(notification.Body.contains(ALERT_UNIQUE_TEXT));
   }
 
+  @Test
+  public void testExceptionHandling() throws Exception {
+    List<AlertNoticeEntity> notices = getSingleMockNotice("EMAIL");
+    AlertNoticeEntity notice = notices.get(0);
+
+    EasyMock.expect(m_dao.findPendingNotices()).andReturn(notices).once();
+    EasyMock.expect(m_dispatchFactory.getDispatcher("EMAIL")).andReturn(null).once();
+    EasyMock.expect(m_dao.merge(notice)).andReturn(notice).atLeastOnce();
+
+    EasyMock.replay(m_dao, m_dispatchFactory);
+
+    // "startup" the service so that its initialization is done
+    AlertNoticeDispatchService service = m_injector.getInstance(AlertNoticeDispatchService.class);
+    service.startUp();
+
+    // service trigger with mock executor that blocks
+    service.setExecutor(new MockExecutor());
+    // no exceptions should be thrown
+    service.runOneIteration();
+
+    EasyMock.verify(m_dao, m_dispatchFactory);
+  }
+
   /**
    * Tests a digest dispatch for SNMP.
    *
    * @throws Exception
    */
   @Test
-  public void testSingleDispatch() throws Exception {
+  public void testSingleSnmpDispatch() throws Exception {
     MockSnmpDispatcher dispatcher = new MockSnmpDispatcher();
 
-    List<AlertNoticeEntity> notices = getSingleMockNotice(dispatcher.getType());
-    AlertNoticeEntity notice = notices.get(0);
+    List<AlertNoticeEntity> notices = getSnmpMockNotices("SNMP");
+    AlertNoticeEntity notice1 = notices.get(0);
+    AlertNoticeEntity notice2 = notices.get(1);
 
-    EasyMock.expect(m_dao.findPendingNotices()).andReturn(getSnmpMockNotices()).once();
-    EasyMock.expect(m_dao.merge(notice)).andReturn(notice).atLeastOnce();
-    EasyMock.expect(m_dispatchFactory.getDispatcher("SNMP")).andReturn(
-        dispatcher).atLeastOnce();
+    EasyMock.expect(m_dao.findPendingNotices()).andReturn(notices).once();
+    EasyMock.expect(m_dao.merge(notice1)).andReturn(notice1).once();
+    EasyMock.expect(m_dao.merge(notice2)).andReturn(notice2).once();
+    EasyMock.expect(m_dispatchFactory.getDispatcher("SNMP")).andReturn(dispatcher).atLeastOnce();
 
     EasyMock.replay(m_dao, m_dispatchFactory);
 
@@ -265,6 +330,106 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
 
     List<Notification> notifications = dispatcher.getNotifications();
     assertEquals(2, notifications.size());
+  }
+
+  /**
+   * Tests a digest dispatch for Ambari SNMP.
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testAmbariSnmpSingleDispatch() throws Exception {
+    MockAmbariSnmpDispatcher dispatcher = new MockAmbariSnmpDispatcher();
+
+    List<AlertNoticeEntity> notices = getSnmpMockNotices("AMBARI_SNMP");
+    AlertNoticeEntity notice1 = notices.get(0);
+    AlertNoticeEntity notice2 = notices.get(1);
+
+    EasyMock.expect(m_dao.findPendingNotices()).andReturn(notices).once();
+    EasyMock.expect(m_dao.merge(notice1)).andReturn(notice1).once();
+    EasyMock.expect(m_dao.merge(notice2)).andReturn(notice2).once();
+    EasyMock.expect(m_dispatchFactory.getDispatcher("AMBARI_SNMP")).andReturn(dispatcher).atLeastOnce();
+
+    EasyMock.replay(m_dao, m_dispatchFactory);
+
+    // "startup" the service so that its initialization is done
+    AlertNoticeDispatchService service = m_injector.getInstance(AlertNoticeDispatchService.class);
+    service.startUp();
+
+    // service trigger with mock executor that blocks
+    service.setExecutor(new MockExecutor());
+    service.runOneIteration();
+
+    EasyMock.verify(m_dao, m_dispatchFactory);
+
+    List<Notification> notifications = dispatcher.getNotifications();
+    assertEquals(2, notifications.size());
+  }
+
+  /**
+   * Tests a real dispatch for Ambari SNMP.
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testAmbariSnmpRealDispatch() throws Exception {
+    AmbariSNMPDispatcher dispatcher = new AmbariSNMPDispatcher(8081);
+
+    List<AlertNoticeEntity> notices = getSnmpMockNotices("AMBARI_SNMP");
+    AlertNoticeEntity notice1 = notices.get(0);
+    AlertNoticeEntity notice2 = notices.get(1);
+
+    EasyMock.expect(m_dao.findPendingNotices()).andReturn(notices).once();
+    EasyMock.expect(m_dao.merge(notice1)).andReturn(notice1).once();
+    EasyMock.expect(m_dao.merge(notice2)).andReturn(notice2).once();
+    EasyMock.expect(m_dispatchFactory.getDispatcher("AMBARI_SNMP")).andReturn(dispatcher).once();
+    EasyMock.expect(m_dao.findNoticeByUuid(ALERT_NOTICE_UUID_1)).andReturn(notice1).once();
+    EasyMock.expect(m_dao.merge(notice1)).andReturn(notice1).once();
+    EasyMock.expect(m_dao.findNoticeByUuid(ALERT_NOTICE_UUID_2)).andReturn(notice2).once();
+    EasyMock.expect(m_dao.merge(notice2)).andReturn(notice2).once();
+    EasyMock.replay(m_dao, m_dispatchFactory);
+
+    // "startup" the service so that its initialization is done
+    AlertNoticeDispatchService service = m_injector.getInstance(AlertNoticeDispatchService.class);
+    service.startUp();
+
+    // service trigger with mock executor that blocks
+    service.setExecutor(new MockExecutor());
+    SnmpReceiver snmpReceiver = new SnmpReceiver();
+
+    service.runOneIteration();
+    Thread.sleep(1000);
+
+    EasyMock.verify(m_dao, m_dispatchFactory);
+
+    List<Vector> expectedTrapVectors = new LinkedList<>();
+    Vector firstVector = new Vector();
+    firstVector.add(new VariableBinding(SnmpConstants.sysUpTime, new TimeTicks(360000L)));
+    firstVector.add(new VariableBinding(SnmpConstants.snmpTrapOID, new OID(AmbariSNMPDispatcher.AMBARI_ALERT_TRAP_OID)));    
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_DEFINITION_ID_OID), new Integer32(new BigDecimal(1L).intValueExact())));
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_DEFINITION_NAME_OID), new OctetString("alert-definition-1")));
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_DEFINITION_HASH_OID), new OctetString("1")));
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_NAME_OID), new OctetString("Alert Definition 1")));
+
+    Vector secondVector = new Vector(firstVector);
+
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_TEXT_OID), new OctetString(ALERT_UNIQUE_TEXT)));
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_STATE_OID), new Integer32(0)));
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_HOST_NAME_OID), new OctetString("null")));
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_SERVICE_NAME_OID), new OctetString("HDFS")));
+    firstVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_COMPONENT_NAME_OID), new OctetString("null")));
+
+    secondVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_TEXT_OID), new OctetString(ALERT_UNIQUE_TEXT + " CRITICAL")));
+    secondVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_STATE_OID), new Integer32(3)));
+    secondVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_HOST_NAME_OID), new OctetString("null")));
+    secondVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_SERVICE_NAME_OID), new OctetString("HDFS")));
+    secondVector.add(new VariableBinding(new OID(AmbariSNMPDispatcher.AMBARI_ALERT_COMPONENT_NAME_OID), new OctetString("null")));
+
+    expectedTrapVectors.add(firstVector);
+    expectedTrapVectors.add(secondVector);
+    assertNotNull(snmpReceiver.receivedTrapsVectors);
+    assertTrue(snmpReceiver.receivedTrapsVectors.size() == 2);
+    assertEquals(expectedTrapVectors, snmpReceiver.receivedTrapsVectors);
   }
 
   /**
@@ -376,18 +541,18 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
     notice.setAlertHistory(history);
     notice.setNotifyState(NotificationState.PENDING);
 
-    ArrayList<AlertNoticeEntity> notices = new ArrayList<AlertNoticeEntity>();
+    ArrayList<AlertNoticeEntity> notices = new ArrayList<>();
     notices.add(notice);
 
     return notices;
   }
 
   /**
-   * Gets 2 PENDING notices for SNMP.
+   * Gets 2 PENDING notices for SNMP or AMBARI_SNMP notificationType.
    *
    * @return
    */
-  private List<AlertNoticeEntity> getSnmpMockNotices() {
+  private List<AlertNoticeEntity> getSnmpMockNotices(String notificationType) {
     AlertDefinitionEntity definition = new AlertDefinitionEntity();
     definition.setDefinitionId(1L);
     definition.setDefinitionName("alert-definition-1");
@@ -416,9 +581,10 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
     target.setAlertStates(EnumSet.allOf(AlertState.class));
     target.setTargetName("Alert Target");
     target.setDescription("Mock Target");
-    target.setNotificationType("SNMP");
+    target.setNotificationType(notificationType);
 
-    String properties = "{ \"foo\" : \"bar\" }";
+    String properties = "{ \"ambari.dispatch.snmp.version\": \"SNMPv1\", \"ambari.dispatch.snmp.port\": \"8000\"," +
+                         " \"ambari.dispatch.recipients\": [\"127.0.0.1\"],\"ambari.dispatch.snmp.community\":\"\" }";
     target.setProperties(properties);
 
     AlertNoticeEntity notice1 = new AlertNoticeEntity();
@@ -433,7 +599,7 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
     notice2.setAlertHistory(history2);
     notice2.setNotifyState(NotificationState.PENDING);
 
-    ArrayList<AlertNoticeEntity> notices = new ArrayList<AlertNoticeEntity>();
+    ArrayList<AlertNoticeEntity> notices = new ArrayList<>();
     notices.add(notice1);
     notices.add(notice2);
 
@@ -492,10 +658,10 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
   /**
    * A mock dispatcher that captures the {@link Notification}.
    */
-  private static final class MockSnmpDispatcher implements
+  private static class MockSnmpDispatcher implements
       NotificationDispatcher {
 
-    private List<Notification> m_notifications = new ArrayList<Notification>();
+    private List<Notification> m_notifications = new ArrayList<>();
 
     /**
      * {@inheritDoc}
@@ -538,6 +704,11 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
         Map<String, Object> properties) {
       return null;
     }
+  }
+
+  private static final class MockAmbariSnmpDispatcher extends MockSnmpDispatcher {
+    @Override
+    public String getType() { return TargetType.AMBARI_SNMP.name();}
   }
 
   /**
@@ -615,12 +786,43 @@ public class AlertNoticeDispatchServiceTest extends AlertNoticeDispatchService {
      */
     @Override
     public void configure(Binder binder) {
+      Cluster cluster = EasyMock.createNiceMock(Cluster.class);
+      PartialNiceMockBinder.newBuilder().addDBAccessorBinding().addAmbariMetaInfoBinding().build().configure(binder);
+
       binder.bind(AlertDispatchDAO.class).toInstance(m_dao);
       binder.bind(DispatchFactory.class).toInstance(m_dispatchFactory);
       binder.bind(AmbariMetaInfo.class).toInstance(m_metaInfo);
+      binder.bind(Cluster.class).toInstance(cluster);
+      binder.bind(AlertDefinitionDAO.class).toInstance(createNiceMock(AlertDefinitionDAO.class));
+      binder.bind(AlertsDAO.class).toInstance(createNiceMock(AlertsDAO.class));
+
+      binder.bind(AlertNoticeDispatchService.class).toInstance(new AlertNoticeDispatchService());
 
       EasyMock.expect(m_metaInfo.getServerVersion()).andReturn("2.0.0").anyTimes();
       EasyMock.replay(m_metaInfo);
+    }
+  }
+
+  private class SnmpReceiver {
+    private Snmp snmp = null;
+    private Address targetAddress = GenericAddress.parse("udp:127.0.0.1/8000");
+    private TransportMapping transport = null;
+    public List<Vector> receivedTrapsVectors = null;
+    public SnmpReceiver() throws Exception{
+      transport = new DefaultUdpTransportMapping();
+      snmp = new Snmp(transport);
+      receivedTrapsVectors = new LinkedList<>();
+
+      CommandResponder trapPrinter = new CommandResponder() {
+        @Override
+        public synchronized void processPdu(CommandResponderEvent e){
+          PDU command = e.getPDU();
+          if (command != null) {
+            receivedTrapsVectors.add(command.getVariableBindings());
+          }
+        }
+      };
+      snmp.addNotificationListener(targetAddress, trapPrinter);
     }
   }
 }

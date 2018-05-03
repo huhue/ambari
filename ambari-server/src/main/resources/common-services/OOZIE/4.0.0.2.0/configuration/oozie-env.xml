@@ -19,7 +19,6 @@
  * limitations under the License.
  */
 -->
-
 <configuration supports_adding_forbidden="true">
   <property>
     <name>oozie_user</name>
@@ -30,12 +29,24 @@
     <value-attributes>
       <type>user</type>
       <overridable>false</overridable>
+      <user-groups>
+        <property>
+          <type>hadoop-env</type>
+          <name>proxyuser_group</name>
+        </property>
+        <property>
+          <type>cluster-env</type>
+          <name>user_group</name>
+        </property>
+      </user-groups>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_admin_users</name>
     <value>{oozie_user}, oozie-admin</value>
     <description>Oozie admin users.</description>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_database</name>
@@ -44,7 +55,28 @@
     <description>Oozie Server Database.</description>
     <value-attributes>
       <overridable>false</overridable>
+      <type>value-list</type>
+      <entries_editable>false</entries_editable>
+      <entries>
+        <entry>
+          <value>New Derby Database</value>
+          <label>New Derby</label>
+        </entry>
+        <entry>
+          <value>Existing MySQL / MariaDB Database</value>
+          <label>Existing MySQL / MariaDB</label>
+        </entry>
+        <entry>
+          <value>Existing PostgreSQL Database</value>
+          <label>Existing PostgreSQL</label>
+        </entry>
+        <entry>
+          <value>Existing Oracle Database</value>
+          <label>Existing Oracle</label>
+        </entry>
+      </entries>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_data_dir</name>
@@ -56,6 +88,7 @@
       <empty-value-valid>true</empty-value-valid>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_log_dir</name>
@@ -66,6 +99,7 @@
       <type>directory</type>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_tmp_dir</name>
@@ -76,6 +110,7 @@
       <type>directory</type>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="false"/>
   </property>
   <property>
     <name>oozie_pid_dir</name>
@@ -87,6 +122,7 @@
       <editable-only-at-install>true</editable-only-at-install>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_admin_port</name>
@@ -97,31 +133,36 @@
       <overridable>false</overridable>
       <type>int</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_heapsize</name>
     <value>2048</value>
     <description>Oozie heap size.</description>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_permsize</name>
     <value>256</value>
     <description>Oozie permanent generation size.</description>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_user_nofile_limit</name>
     <value>32000</value>
     <description>Max open files limit setting for OOZIE user.</description>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>oozie_user_nproc_limit</name>
     <value>16000</value>
     <description>Max number of processes limit setting for OOZIE user.</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <!-- oozie-env.sh -->
   <property>
     <name>content</name>
+    <display-name>oozie-env template</display-name>
     <description>This is the jinja template for oozie-env.sh file</description>
     <value>
 #!/bin/bash
@@ -186,11 +227,19 @@ export OOZIE_ADMIN_PORT={{oozie_server_admin_port}}
 # The base URL for callback URLs to Oozie
 #
 # export OOZIE_BASE_URL="http://${OOZIE_HTTP_HOSTNAME}:${OOZIE_HTTP_PORT}/oozie"
-export JAVA_LIBRARY_PATH={{hadoop_lib_home}}/native/Linux-amd64-64
+export JAVA_LIBRARY_PATH={{hadoop_lib_home}}/native/Linux-{{architecture}}-64
    </value>
-   <value-attributes>
-     <type>content</type>
-   </value-attributes>
+    <value-attributes>
+      <type>content</type>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
+  <property>
+    <name>service_check_job_name</name>
+    <value>no-op</value>
+    <description>
+      Job name from Oozie examples that will be executed at each Oozie service check action.
+    </description>
+    <on-ambari-upgrade add="true"/>
+  </property>
 </configuration>

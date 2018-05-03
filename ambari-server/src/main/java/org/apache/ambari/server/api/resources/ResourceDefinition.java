@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,16 +18,15 @@
 
 package org.apache.ambari.server.api.resources;
 
-import org.apache.ambari.server.api.query.render.Renderer;
-import org.apache.ambari.server.api.services.Request;
-import org.apache.ambari.server.controller.spi.Resource;
-import org.apache.ambari.server.api.util.TreeNode;
-
-import org.apache.ambari.server.api.services.ResultPostProcessor;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+
+import org.apache.ambari.server.api.query.render.Renderer;
+import org.apache.ambari.server.api.services.Request;
+import org.apache.ambari.server.api.services.ResultPostProcessor;
+import org.apache.ambari.server.api.util.TreeNode;
+import org.apache.ambari.server.controller.spi.Resource;
 
 /**
  * Resource Definition.
@@ -79,6 +78,15 @@ public interface ResourceDefinition {
    * @throws IllegalArgumentException if name is invalid for this resource
    */
   Renderer getRenderer(String name) throws IllegalArgumentException;
+
+  /**
+   * Obtain the set of read directives for the resource.  A get directive is
+   * information that can be provided in the query string of a GET operation for
+   * the resource.  These directives are not predicates but are put into the
+   * map of request info properties used by the resource provider when getting
+   * the resource.
+   */
+  Collection<String> getReadDirectives();
 
   /**
    * Obtain the set of create directives for the resource.  A create directive is

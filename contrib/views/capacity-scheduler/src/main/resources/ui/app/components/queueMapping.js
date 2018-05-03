@@ -22,8 +22,8 @@
    layoutName: 'components/queueMapping',
 
    queues: null,
-   mappings: '',
-   mappingsOverrideEnable: false,
+   mappings: null,
+   mappingsOverrideEnable: null,
 
    isShowing: false,
    queueMappings: [],
@@ -33,6 +33,9 @@
    customGroupMappings: '',
    selectedLeafQueueNameForUsers: null,
    selectedLeafQueueNameForGroups: null,
+   isQueueMappingsDirty: false,
+   scheduler: null,
+   isOperator: false,
 
    actions: {
      showMappingOptions: function(){
@@ -47,6 +50,16 @@
      },
      removeQueueMapping: function(qm){
        this.get('queueMappings').removeObject(qm);
+     },
+     toggleMappingOverride: function() {
+       this.toggleProperty('mappingsOverrideEnable');
+     },
+     rollbackProp: function(prop, item) {
+       if (prop === "queue_mappings") {
+         var oldMappings = (item.changedAttributes()[prop][0])? item.changedAttributes()[prop][0].split(',') : [];
+         this.set('queueMappings', oldMappings);
+       }
+       this.sendAction("rollbackProp", prop, item);
      }
    },
 
@@ -57,10 +70,12 @@
    },
 
    parseMappings: function(){
-     var mappings = this.get('mappings') || '';
-     this.set('queueMappings', mappings.split(',').filter(function(mapping){
-       return mapping !== "";
-     }) || []);
+     var mappings = this.get('mappings') || null;
+     if (mappings) {
+       this.set('queueMappings', mappings.split(',').filter(function(mapping){
+         return mapping !== "";
+       }) || []);
+     }
    }.observes('mappings').on('init'),
 
    extractLeafQueueNames: function(){
@@ -91,15 +106,16 @@
    },
 
    queueMappingsDidChange: function(){
-     var csMappings = this.get('queueMappings').join(',') || '';
+     var csMappings = this.get('queueMappings').join(',') || null;
      this.set('mappings', csMappings);
    }.observes('queueMappings', 'queueMappings.length', 'queueMappings.@each'),
 
    addCustomQueueMappings: function(csValues, selectedLeafQName){
      var that = this;
-     csValues = csValues.trim() || '',
-     userOrGroupNames = csValues.split(',') || [],
-     mappingPattern = this.get('selectedMapping');
+       csValues = csValues.trim() || '',
+       userOrGroupNames = csValues.split(',') || [],
+       mappingPattern = this.get('selectedMapping');
+
      userOrGroupNames.forEach(function(ugname){
        that.get('queueMappings').pushObject(mappingPattern.replace('%name', ugname).replace('%qname', selectedLeafQName));
      });
@@ -125,7 +141,7 @@
      }.property('selection')
    }),
 
-   isCollapsed: true,
+   isCollapsed: false,
    doExpandCollapse: function(){
      var that = this;
      this.$('#collapseQueueMappingsBtn').on('click', function(e){
@@ -137,5 +153,13 @@
 
    destroyEventListeners: function() {
      this.$('#collapseQueueMappingsBtn').off('click');
-   }.on('willDestroyElement')
+   }.on('willDestroyElement'),
+
+   isMappingsDirty: function() {
+     return this.get('scheduler').changedAttributes().hasOwnProperty('queue_mappings');
+   }.property('scheduler.queue_mappings'),
+
+   isOverrideEnableDirty: function() {
+     return this.get('scheduler').changedAttributes().hasOwnProperty('queue_mappings_override_enable');
+   }.property('scheduler.queue_mappings_override_enable')
  });

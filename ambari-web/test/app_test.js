@@ -20,7 +20,7 @@ var App = require('app');
 require('views/common/quick_view_link_view');
 require('models/host_component');
 require('models/stack_service_component');
-App.auth = ["AMBARI.ADD_DELETE_CLUSTERS", "AMBARI.ASSIGN_ROLES", "AMBARI.EDIT_STACK_REPOS", "AMBARI.MANAGE_GROUPS", "AMBARI.MANAGE_STACK_VERSIONS", "AMBARI.MANAGE_USERS", "AMBARI.MANAGE_VIEWS", "AMBARI.RENAME_CLUSTER", "AMBARI.SET_SERVICE_USERS_GROUPS", "CLUSTER.TOGGLE_ALERTS", "CLUSTER.TOGGLE_KERBEROS", "CLUSTER.UPGRADE_DOWNGRADE_STACK", "CLUSTER.VIEW_ALERTS", "CLUSTER.VIEW_CONFIGS", "CLUSTER.VIEW_METRICS", "CLUSTER.VIEW_STACK_DETAILS", "CLUSTER.VIEW_STATUS_INFO", "HOST.ADD_DELETE_COMPONENTS", "HOST.ADD_DELETE_HOSTS", "HOST.TOGGLE_MAINTENANCE", "HOST.VIEW_CONFIGS", "HOST.VIEW_METRICS", "HOST.VIEW_STATUS_INFO", "SERVICE.ADD_DELETE_SERVICES", "SERVICE.COMPARE_CONFIGS", "SERVICE.DECOMMISSION_RECOMMISSION", "SERVICE.ENABLE_HA", "SERVICE.MANAGE_CONFIG_GROUPS", "SERVICE.MODIFY_CONFIGS", "SERVICE.MOVE", "SERVICE.RUN_CUSTOM_COMMAND", "SERVICE.RUN_SERVICE_CHECK", "SERVICE.START_STOP", "SERVICE.TOGGLE_ALERTS", "SERVICE.TOGGLE_MAINTENANCE", "SERVICE.VIEW_ALERTS", "SERVICE.VIEW_CONFIGS", "SERVICE.VIEW_METRICS", "SERVICE.VIEW_STATUS_INFO", "VIEW.USE"];
+App.auth = ["AMBARI.ADD_DELETE_CLUSTERS", "AMBARI.ASSIGN_ROLES", "AMBARI.EDIT_STACK_REPOS", "AMBARI.MANAGE_GROUPS", "AMBARI.MANAGE_STACK_VERSIONS", "AMBARI.MANAGE_USERS", "AMBARI.MANAGE_VIEWS", "AMBARI.RENAME_CLUSTER", "SERVICE.SET_SERVICE_USERS_GROUPS", "CLUSTER.TOGGLE_ALERTS", "CLUSTER.TOGGLE_KERBEROS", "CLUSTER.UPGRADE_DOWNGRADE_STACK", "CLUSTER.VIEW_ALERTS", "CLUSTER.VIEW_CONFIGS", "CLUSTER.VIEW_METRICS", "CLUSTER.VIEW_STACK_DETAILS", "CLUSTER.VIEW_STATUS_INFO", "HOST.ADD_DELETE_COMPONENTS", "HOST.ADD_DELETE_HOSTS", "HOST.TOGGLE_MAINTENANCE", "HOST.VIEW_CONFIGS", "HOST.VIEW_METRICS", "HOST.VIEW_STATUS_INFO", "SERVICE.ADD_DELETE_SERVICES", "SERVICE.COMPARE_CONFIGS", "SERVICE.DECOMMISSION_RECOMMISSION", "SERVICE.ENABLE_HA", "SERVICE.MANAGE_CONFIG_GROUPS", "SERVICE.MODIFY_CONFIGS", "SERVICE.MOVE", "SERVICE.RUN_CUSTOM_COMMAND", "SERVICE.RUN_SERVICE_CHECK", "SERVICE.START_STOP", "SERVICE.TOGGLE_ALERTS", "SERVICE.TOGGLE_MAINTENANCE", "SERVICE.VIEW_ALERTS", "SERVICE.VIEW_CONFIGS", "SERVICE.VIEW_METRICS", "SERVICE.VIEW_STATUS_INFO", "VIEW.USE"];
 
 describe('App', function () {
 
@@ -406,9 +406,11 @@ describe('App', function () {
 
     testCases.forEach(function (test) {
       it(test.key + ' should contain ' + test.result, function () {
-        expect(App.get('components.' + test.key)).to.eql(test.result);
-      })
-    })
+        var key = 'components.' + test.key;
+        App.components.propertyDidChange(test.key);
+        expect(App.get(key)).to.eql(test.result);
+      });
+    });
   });
 
   describe('#upgradeIsRunning', function () {
@@ -441,7 +443,7 @@ describe('App', function () {
   describe('#upgradeSuspended', function () {
     var cases = [
       {
-        upgradeState: 'INIT',
+        upgradeState: 'NOT_REQUIRED',
         isSuspended: false,
         upgradeSuspended: false
       },
@@ -478,7 +480,7 @@ describe('App', function () {
 
     var cases = [
       {
-        upgradeState: 'INIT',
+        upgradeState: 'NOT_REQUIRED',
         isSuspended: false,
         upgradeAborted: false
       },
@@ -514,7 +516,7 @@ describe('App', function () {
   describe('#wizardIsNotFinished', function () {
     var cases = [
       {
-        upgradeState: 'INIT',
+        upgradeState: 'NOT_REQUIRED',
         wizardIsNotFinished: false
       },
       {
@@ -547,7 +549,7 @@ describe('App', function () {
   describe("#upgradeHolding", function () {
     var cases = [
       {
-        upgradeState: 'INIT',
+        upgradeState: 'NOT_REQUIRED',
         upgradeAborted: false,
         upgradeHolding: false
       },
@@ -562,7 +564,7 @@ describe('App', function () {
         upgradeHolding: true
       },
       {
-        upgradeState: 'INIT',
+        upgradeState: 'NOT_REQUIRED',
         upgradeAborted: true,
         upgradeHolding: true
       }

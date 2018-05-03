@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,17 +18,6 @@
 
 package org.apache.ambari.server.view;
 
-import org.apache.ambari.server.configuration.Configuration;
-import org.apache.ambari.server.controller.internal.URLStreamProvider;
-import org.apache.ambari.server.proxy.ProxyService;
-import org.apache.ambari.view.URLConnectionProvider;
-import org.apache.ambari.view.ViewContext;
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.lang.StringUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.http.client.utils.URIBuilder;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -41,12 +30,23 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.controller.internal.URLStreamProvider;
+import org.apache.ambari.server.proxy.ProxyService;
+import org.apache.ambari.view.URLConnectionProvider;
+import org.apache.ambari.view.ViewContext;
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.lang.StringUtils;
+import org.apache.http.client.utils.URIBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Wrapper around an internal URL stream provider.
  */
 public class ViewURLStreamProvider implements org.apache.ambari.view.URLStreamProvider, URLConnectionProvider {
 
-  private static final Log LOG = LogFactory.getLog(ViewContextImpl.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ViewContextImpl.class);
 
   /**
    * The key for the "doAs" header.
@@ -87,12 +87,12 @@ public class ViewURLStreamProvider implements org.apache.ambari.view.URLStreamPr
    * @return
    */
   private HostPortRestrictionHandler getHostPortRestrictionHandler() {
-    if (this.hostPortRestrictionHandler == null) {
+    if (hostPortRestrictionHandler == null) {
       HostPortRestrictionHandler hostPortRestrictionHandlerTmp =
-          new HostPortRestrictionHandler(this.viewContext.getAmbariProperty(Configuration.PROXY_ALLOWED_HOST_PORTS));
-      this.hostPortRestrictionHandler = hostPortRestrictionHandlerTmp;
+          new HostPortRestrictionHandler(viewContext.getAmbariProperty(Configuration.PROXY_ALLOWED_HOST_PORTS.getKey()));
+      hostPortRestrictionHandler = hostPortRestrictionHandlerTmp;
     }
-    return this.hostPortRestrictionHandler;
+    return hostPortRestrictionHandler;
   }
 
   // ----- URLStreamProvider -----------------------------------------------
@@ -232,7 +232,7 @@ public class ViewURLStreamProvider implements org.apache.ambari.view.URLStreamPr
 
     // adapt the headers to the internal URLStreamProvider processURL signature
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     for (Map.Entry<String, String> entry : headers.entrySet()) {
       headerMap.put(entry.getKey(), Collections.singletonList(entry.getValue()));
     }
@@ -245,14 +245,15 @@ public class ViewURLStreamProvider implements org.apache.ambari.view.URLStreamPr
    * @return
    */
   protected boolean isProxyCallAllowed(String spec) {
-    if (StringUtils.isNotBlank(spec) && this.getHostPortRestrictionHandler().proxyCallRestricted()) {
+    if (StringUtils.isNotBlank(spec) && getHostPortRestrictionHandler().proxyCallRestricted()) {
       try {
         URL url = new URL(spec);
-        return this.getHostPortRestrictionHandler().allowProxy(url.getHost(),
+        return getHostPortRestrictionHandler().allowProxy(url.getHost(),
                                                                Integer.toString(url.getPort() == -1
                                                                                     ? url.getDefaultPort()
                                                                                     : url.getPort()));
-      } catch (MalformedURLException ex) {
+      } catch (MalformedURLException ignored) {
+        // actual connection attempt will throw
       }
     }
 
@@ -269,7 +270,7 @@ public class ViewURLStreamProvider implements org.apache.ambari.view.URLStreamPr
 
     public HostPortRestrictionHandler(String allowedHostPortsValue) {
       this.allowedHostPortsValue = allowedHostPortsValue;
-      LOG.debug("Proxy restriction will be derived from " + allowedHostPortsValue);
+      LOG.debug("Proxy restriction will be derived from {}", allowedHostPortsValue);
     }
 
     /**
@@ -281,23 +282,23 @@ public class ViewURLStreamProvider implements org.apache.ambari.view.URLStreamPr
      * @return if the host and port combination is allowed
      */
     public boolean allowProxy(String host, String port) {
-      LOG.debug("Checking host " + host + " port " + port + " against allowed list.");
+      LOG.debug("Checking host {} port {} against allowed list.", host, port);
       if (StringUtils.isNotBlank(host)) {
         String hostToCompare = host.trim().toLowerCase();
-        if (this.allowedHostPorts == null) {
+        if (allowedHostPorts == null) {
           initializeAllowedHostPorts();
         }
 
-        if (this.isProxyCallRestricted) {
-          if (this.allowedHostPorts.containsKey(hostToCompare)) {
-            if (this.allowedHostPorts.get(hostToCompare).contains("*")) {
+        if (isProxyCallRestricted) {
+          if (allowedHostPorts.containsKey(hostToCompare)) {
+            if (allowedHostPorts.get(hostToCompare).contains("*")) {
               return true;
             }
             String portToCompare = "";
             if (StringUtils.isNotBlank(port)) {
               portToCompare = port.trim();
             }
-            if (this.allowedHostPorts.get(hostToCompare).contains(portToCompare)) {
+            if (allowedHostPorts.get(hostToCompare).contains(portToCompare)) {
               return true;  // requested host port allowed
             }
             return false;
@@ -313,32 +314,32 @@ public class ViewURLStreamProvider implements org.apache.ambari.view.URLStreamPr
      */
     private void initializeAllowedHostPorts() {
       boolean proxyCallRestricted = false;
-      Map<String, HashSet<String>> allowed = new HashMap<String, HashSet<String>>();
+      Map<String, HashSet<String>> allowed = new HashMap<>();
       if (StringUtils.isNotBlank(allowedHostPortsValue)) {
         String allowedStr = allowedHostPortsValue.toLowerCase();
-        if (!allowedStr.equals(Configuration.PROXY_ALLOWED_HOST_PORTS_DEFAULT)) {
+        if (!allowedStr.equals(Configuration.PROXY_ALLOWED_HOST_PORTS.getDefaultValue())) {
           proxyCallRestricted = true;
           String[] hostPorts = allowedStr.trim().split(",");
           for (String hostPortStr : hostPorts) {
             String[] hostAndPort = hostPortStr.trim().split(":");
             if (hostAndPort.length == 1) {
               if (!allowed.containsKey(hostAndPort[0])) {
-                allowed.put(hostAndPort[0], new HashSet<String>());
+                allowed.put(hostAndPort[0], new HashSet<>());
               }
               allowed.get(hostAndPort[0]).add("*");
-              LOG.debug("Allow proxy to host " + hostAndPort[0] + " and all ports.");
+              LOG.debug("Allow proxy to host {} and all ports.", hostAndPort[0]);
             } else {
               if (!allowed.containsKey(hostAndPort[0])) {
-                allowed.put(hostAndPort[0], new HashSet<String>());
+                allowed.put(hostAndPort[0], new HashSet<>());
               }
               allowed.get(hostAndPort[0]).add(hostAndPort[1]);
-              LOG.debug("Allow proxy to host " + hostAndPort[0] + " and port " + hostAndPort[1]);
+              LOG.debug("Allow proxy to host {} and port {}", hostAndPort[0], hostAndPort[1]);
             }
           }
         }
       }
-      this.allowedHostPorts = allowed;
-      this.isProxyCallRestricted = proxyCallRestricted;
+      allowedHostPorts = allowed;
+      isProxyCallRestricted = proxyCallRestricted;
     }
 
     /**
@@ -346,10 +347,10 @@ public class ViewURLStreamProvider implements org.apache.ambari.view.URLStreamPr
      * @return
      */
     public Boolean proxyCallRestricted() {
-      if (this.allowedHostPorts == null) {
+      if (allowedHostPorts == null) {
         initializeAllowedHostPorts();
       }
-      return this.isProxyCallRestricted;
+      return isProxyCallRestricted;
     }
   }
 }

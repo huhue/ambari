@@ -36,11 +36,12 @@ from alerts.script_alert import ScriptAlert
 from alerts.web_alert import WebAlert
 from alerts.recovery_alert import RecoveryAlert
 from ambari_agent.ExitHelper import ExitHelper
+from ambari_agent.FileCache import FileCache
+from ambari_agent.Utils import Utils
 
 logger = logging.getLogger(__name__)
 
 class AlertSchedulerHandler():
-  FILENAME = 'definitions.json'
   TYPE_PORT = 'PORT'
   TYPE_METRIC = 'METRIC'
   TYPE_AMS = 'AMS'
@@ -48,43 +49,54 @@ class AlertSchedulerHandler():
   TYPE_WEB = 'WEB'
   TYPE_RECOVERY = 'RECOVERY'
 
-  def __init__(self, cachedir, stacks_dir, common_services_dir, host_scripts_dir,
-      cluster_configuration, config, recovery_manager, in_minutes=True):
+  def __init__(self, initializer_module, in_minutes=True):
 
-    self.cachedir = cachedir
-    self.stacks_dir = stacks_dir
-    self.common_services_dir = common_services_dir
-    self.host_scripts_dir = host_scripts_dir
+    self.cachedir = initializer_module.config.alerts_cachedir
+    self.stacks_dir = initializer_module.config.stacks_dir
+    self.common_services_dir = initializer_module.config.common_services_dir
+    self.extensions_dir = initializer_module.config.extensions_dir
+    self.host_scripts_dir = initializer_module.config.host_scripts_dir
+    self.configuration_builder = initializer_module.configuration_builder
 
-    self._cluster_configuration = cluster_configuration
+    self._cluster_configuration = initializer_module.configurations_cache
+    self.alert_definitions_cache = initializer_module.alert_definitions_cache
 
-    # a mapping between a cluster name and a unique hash for all definitions
-    self._cluster_hashes = {}
+    self.config = initializer_module.config
 
     # the amount of time, in seconds, that an alert can run after it's scheduled time
-    alert_grace_period = int(config.get('agent', 'alert_grace_period', 5))
+    alert_grace_period = int(self.config.get('agent', 'alert_grace_period', 5))
 
-    if not os.path.exists(cachedir):
-      try:
-        os.makedirs(cachedir)
-      except:
-        logger.critical("[AlertScheduler] Could not create the cache directory {0}".format(cachedir))
+    apscheduler_standalone = False
 
     self.APS_CONFIG = {
       'apscheduler.threadpool.core_threads': 3,
       'apscheduler.coalesce': True,
-      'apscheduler.standalone': False,
-      'apscheduler.misfire_grace_time': alert_grace_period
+      'apscheduler.standalone': apscheduler_standalone,
+      'apscheduler.misfire_grace_time': alert_grace_period,
+      'apscheduler.threadpool.context_injector': self._job_context_injector if not apscheduler_standalone else None,
+      'apscheduler.threadpool.agent_config': self.config
     }
 
     self._collector = AlertCollector()
     self.__scheduler = Scheduler(self.APS_CONFIG)
     self.__in_minutes = in_minutes
-    self.config = config
-    self.recovery_manger = recovery_manager
+    self.recovery_manger = initializer_module.recovery_manager
 
     # register python exit handler
     ExitHelper().register(self.exit_handler)
+
+  def _job_context_injector(self, config):
+    """
+    apscheduler hack to inject monkey-patching, context and configuration to all jobs inside scheduler in case if scheduler running
+    in embedded mode
+
+    Please note, this function called in job context thus all injects should be time-running optimized
+
+    :type config AmbariConfig.AmbariConfig
+    """
+    if not config.use_system_proxy_setting():
+      from ambari_commons.network import reconfigure_urllib2_opener
+      reconfigure_urllib2_opener(ignore_system_proxy=True)
 
 
   def exit_handler(self):
@@ -94,37 +106,18 @@ class AlertSchedulerHandler():
     self.stop()
 
 
-  def update_definitions(self, heartbeat):
+  def update_definitions(self, event_type):
     """
     Updates the persisted alert definitions JSON.
-    :param heartbeat:
     :return:
     """
-    if 'alertDefinitionCommands' not in heartbeat:
-      logger.warning("There are no alert definition commands in the heartbeat; unable to update definitions")
-      return
-
     # prune out things we don't want to store
     alert_definitions = []
-    for command in heartbeat['alertDefinitionCommands']:
-      command_copy = command.copy()
-
-      # no need to store these since we always use the in-memory cached values
-      if 'configurations' in command_copy:
-        del command_copy['configurations']
-
+    for cluster_id, command in self.alert_definitions_cache.iteritems():
+      command_copy = Utils.get_mutable_copy(command)
       alert_definitions.append(command_copy)
 
-    # write out the new definitions
-    with open(os.path.join(self.cachedir, self.FILENAME), 'w') as f:
-      json.dump(alert_definitions, f, indent=2)
-
-    # determine how to reschedule the jobs
-    reschedule_all = False
-    if "clusterName" in command_copy and command_copy["clusterName"] not in self._cluster_hashes:
-      reschedule_all = True
-
-    if reschedule_all is True:
+    if event_type == "CREATE":
       # reschedule all jobs, creating new instances
       self.reschedule_all()
     else:
@@ -252,39 +245,30 @@ class AlertSchedulerHandler():
     :return:
     """
     definitions = []
-
-    alerts_definitions_path = os.path.join(self.cachedir, self.FILENAME)
-    try:
-      with open(alerts_definitions_path) as fp:
-        all_commands = json.load(fp)
-    except:
-      logger.warning('[AlertScheduler] {0} not found or invalid. No alerts will be scheduled until registration occurs.'.format(alerts_definitions_path))
-      return definitions
-
-    for command_json in all_commands:
+    for cluster_id, command_json in self.alert_definitions_cache.iteritems():
       clusterName = '' if not 'clusterName' in command_json else command_json['clusterName']
       hostName = '' if not 'hostName' in command_json else command_json['hostName']
+      publicHostName = '' if not 'publicHostName' in command_json else command_json['publicHostName']
       clusterHash = None if not 'hash' in command_json else command_json['hash']
 
       # cache the cluster and cluster hash after loading the JSON
       if clusterName != '' and clusterHash is not None:
         logger.info('[AlertScheduler] Caching cluster {0} with alert hash {1}'.format(clusterName, clusterHash))
-        self._cluster_hashes[clusterName] = clusterHash
 
       for definition in command_json['alertDefinitions']:
-        alert = self.__json_to_callable(clusterName, hostName, definition)
+        alert = self.__json_to_callable(clusterName, hostName, publicHostName, Utils.get_mutable_copy(definition))
 
         if alert is None:
           continue
 
-        alert.set_helpers(self._collector, self._cluster_configuration)
+        alert.set_helpers(self._collector, self._cluster_configuration, self.configuration_builder)
 
         definitions.append(alert)
 
     return definitions
 
 
-  def __json_to_callable(self, clusterName, hostName, json_definition):
+  def __json_to_callable(self, clusterName, hostName, publicHostName, json_definition):
     """
     converts the json that represents all aspects of a definition
     and makes an object that extends BaseAlert that is used for individual
@@ -308,6 +292,7 @@ class AlertSchedulerHandler():
       elif source_type == AlertSchedulerHandler.TYPE_SCRIPT:
         source['stacks_directory'] = self.stacks_dir
         source['common_services_directory'] = self.common_services_dir
+        source['extensions_directory'] = self.extensions_dir
         source['host_scripts_directory'] = self.host_scripts_dir
         alert = ScriptAlert(json_definition, source, self.config)
       elif source_type == AlertSchedulerHandler.TYPE_WEB:
@@ -316,7 +301,7 @@ class AlertSchedulerHandler():
         alert = RecoveryAlert(json_definition, source, self.config, self.recovery_manger)
 
       if alert is not None:
-        alert.set_cluster(clusterName, hostName)
+        alert.set_cluster(clusterName, json_definition['clusterId'], hostName, publicHostName)
 
     except Exception, exception:
       logger.exception("[AlertScheduler] Unable to load an invalid alert definition. It will be skipped.")
@@ -382,8 +367,9 @@ class AlertSchedulerHandler():
 
         clusterName = '' if not 'clusterName' in execution_command else execution_command['clusterName']
         hostName = '' if not 'hostName' in execution_command else execution_command['hostName']
+        publicHostName = '' if not 'publicHostName' in execution_command else execution_command['publicHostName']
 
-        alert = self.__json_to_callable(clusterName, hostName, alert_definition)
+        alert = self.__json_to_callable(clusterName, hostName, publicHostName, alert_definition)
 
         if alert is None:
           continue
@@ -391,7 +377,7 @@ class AlertSchedulerHandler():
         logger.info("[AlertScheduler] Executing on-demand alert {0} ({1})".format(alert.get_name(),
             alert.get_uuid()))
 
-        alert.set_helpers(self._collector, self._cluster_configuration)
+        alert.set_helpers(self._collector, self._cluster_configuration, self.configuration_builder)
         alert.collect()
       except:
         logger.exception("[AlertScheduler] Unable to execute the alert outside of the job scheduler")
@@ -401,10 +387,10 @@ def main():
   args = list(sys.argv)
   del args[0]
 
-  
+
   ash = AlertSchedulerHandler(args[0], args[1], args[2], False)
   ash.start()
-  
+
   i = 0
   try:
     while i < 10:
@@ -412,12 +398,10 @@ def main():
       i += 1
   except KeyboardInterrupt:
     pass
-    
+
   print str(ash.collector().alerts())
-      
+
   ash.stop()
 
 if __name__ == "__main__":
   main()
-  
-      

@@ -23,7 +23,8 @@ App.serviceMapper = App.QuickDataMapper.create({
   config: {
     id: 'ServiceInfo.service_name',
     service_name: 'ServiceInfo.service_name',
-    work_status: 'ServiceInfo.state'
+    work_status: 'ServiceInfo.state',
+    desired_repository_version_id: 'ServiceInfo.desired_repository_version_id'
   },
   initialAppLoad: false,
   passiveStateMap: {},
@@ -41,7 +42,8 @@ App.serviceMapper = App.QuickDataMapper.create({
         var serviceData = {
           ServiceInfo: {
             service_name: service.ServiceInfo.service_name,
-            state: service.ServiceInfo.state
+            state: service.ServiceInfo.state,
+            desired_repository_version_id: service.ServiceInfo.desired_repository_version_id
           },
           host_components: [],
           components: []
@@ -57,16 +59,34 @@ App.serviceMapper = App.QuickDataMapper.create({
         return self.parseIt(item, self.get('config'));
       });
       parsedCacheServices = misc.sortByOrder(App.StackService.find().mapProperty('serviceName'), parsedCacheServices);
-      App.store.loadMany(this.get('model'), parsedCacheServices);
-      App.store.commit();
+      App.store.safeLoadMany(this.get('model'), parsedCacheServices);
       this.set('initialAppLoad', true);
     }
-
-    for (var service in passiveStateMap) {
-      if (passiveStateMap.hasOwnProperty(service)) {
-        App.Service.find(service).set('passiveState', passiveStateMap[service]);
+    this.servicesLoading().done(function setMaintenanceState() {
+      for (var service in passiveStateMap) {
+        if (passiveStateMap.hasOwnProperty(service)) {
+          App.Service.find(service).set('passiveState', passiveStateMap[service]);
+        }
       }
-    }
+    });
+
     console.timeEnd("App.serviceMapper execution time");
+  },
+
+  servicesLoading: function () {
+    var dfd = $.Deferred();
+    var isAllServicesLoaded = App.store.findAll(App.Service).everyProperty('isLoaded', true);
+    if (isAllServicesLoaded) {
+      dfd.resolve();
+    } else {
+      var interval = setInterval(function checkIfServicesLoaded() {
+        var isAllServicesLoaded = App.store.findAll(App.Service).everyProperty('isLoaded', true);
+        if (isAllServicesLoaded) {
+          dfd.resolve();
+          clearInterval(interval);
+        }
+      }, 5);
+    }
+    return dfd.promise();
   }
 });

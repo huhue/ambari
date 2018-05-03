@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,17 +18,17 @@
 
 package org.apache.ambari.server.controller.logging;
 
-import org.codehaus.jackson.annotate.JsonProperty;
-import org.codehaus.jackson.map.util.JSONPObject;
-
-import java.util.LinkedList;
 import java.util.List;
+
+import org.codehaus.jackson.annotate.JsonIgnoreProperties;
+import org.codehaus.jackson.annotate.JsonProperty;
 
 /**
  * This class respresents the results of a LogSearch query, as returned by
  * a call to the LogSearch service.
  *
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class LogQueryResponse {
 
 

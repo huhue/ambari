@@ -629,7 +629,7 @@ describe('App.InstallerStep9Controller', function () {
       },
       {
         expected: [],
-        text: 'should return server info',
+        message: 'should return server info',
         controllerName: 'addServiceController',
         services: Em.A([
           Em.Object.create({
@@ -646,7 +646,7 @@ describe('App.InstallerStep9Controller', function () {
       },
       {
         expected: [],
-        text: 'should return default data',
+        message: 'should return default data',
         controllerName: 'addHostContro',
         hosts: Em.A([
           Em.Object.create({
@@ -1687,6 +1687,7 @@ describe('App.InstallerStep9Controller', function () {
     });
     Em.A([
         {
+          m: 'Launch start service after install services completed',
           jsonData: {Requests: {id: 2}},
           e: {
             hostHasClientsOnly: false,
@@ -1794,6 +1795,13 @@ describe('App.InstallerStep9Controller', function () {
       sinon.stub(c, 'launchStartServices', Em.K);
       sinon.stub(c, 'saveClusterStatus', Em.K);
       c.set('hosts', hosts);
+      c.set('content', Em.Object.create({
+        slaveComponentHosts: [
+          {hosts: [{isInstalled: true, hostName: 'h1'}]},
+          {hosts: [{isInstalled: false, hostName: 'h2'}]}
+        ],
+        masterComponentHosts: []
+      }));
       c.isAllComponentsInstalledSuccessCallback(jsonData);
       this.clusterStatus = c.saveClusterStatus.args[0][0];
     });
@@ -1849,6 +1857,66 @@ describe('App.InstallerStep9Controller', function () {
       data.RootServiceComponents.properties['skip.service.checks'] = 'false';
       c.loadDoServiceChecksFlagSuccessCallback(data);
       expect(c.get('skipServiceChecks')).to.be.false;
+    });
+
+  });
+
+  describe('#isNextButtonDisabled', function () {
+
+    var cases = [
+      {
+        nextBtnClickInProgress: true,
+        isSubmitDisabled: true,
+        isNextButtonDisabled: true,
+        description: 'button clicked, submit disabled',
+        title: 'next button disabled'
+      },
+      {
+        nextBtnClickInProgress: true,
+        isSubmitDisabled: false,
+        isNextButtonDisabled: true,
+        description: 'button clicked, submit not disabled',
+        title: 'next button disabled'
+      },
+      {
+        nextBtnClickInProgress: false,
+        isSubmitDisabled: true,
+        isNextButtonDisabled: true,
+        description: 'no button clicked, submit disabled',
+        title: 'next button disabled'
+      },
+      {
+        nextBtnClickInProgress: false,
+        isSubmitDisabled: false,
+        isNextButtonDisabled: false,
+        description: 'no button clicked, submit not disabled',
+        title: 'next button enabled'
+      }
+    ];
+
+    cases.forEach(function (item) {
+
+      describe(item.description, function () {
+
+        beforeEach(function () {
+          c.reopen({
+            isSubmitDisabled: item.isSubmitDisabled
+          });
+          sinon.stub(App, 'get').withArgs('router.nextBtnClickInProgress').returns(item.nextBtnClickInProgress);
+          c.propertyDidChange('isSubmitDisabled');
+          c.propertyDidChange('App.router.nextBtnClickInProgress');
+        });
+
+        afterEach(function () {
+          App.get.restore();
+        });
+
+        it(item.title, function () {
+          expect(c.get('isNextButtonDisabled')).to.equal(item.isNextButtonDisabled);
+        });
+
+      });
+
     });
 
   });

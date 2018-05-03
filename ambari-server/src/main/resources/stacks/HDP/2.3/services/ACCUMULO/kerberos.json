@@ -6,7 +6,7 @@
         {
           "name": "accumulo",
           "principal": {
-            "value": "${accumulo-env/accumulo_user}-${cluster_name|toLower()}@${realm}",
+            "value": "${accumulo-env/accumulo_user}${principal_suffix}@${realm}",
             "type" : "user",
             "configuration": "accumulo-env/accumulo_principal_name",
             "local_username": "${accumulo-env/accumulo_user}"
@@ -48,7 +48,7 @@
         {
           "name": "accumulo_tracer",
           "principal": {
-            "value": "tracer-${cluster_name|toLower()}@${realm}",
+            "value": "tracer${principal_suffix}@${realm}",
             "type" : "user",
             "configuration": "accumulo-site/trace.user",
             "local_username": "${accumulo-env/accumulo_user}"
@@ -67,7 +67,8 @@
           }
         },
         {
-          "name": "/smokeuser"
+          "name": "accumulo_smokeuser",
+          "reference": "/smokeuser"
         }
       ],
       "configurations": [
@@ -93,7 +94,8 @@
           "name": "ACCUMULO_MASTER",
           "identities": [
             {
-              "name": "/HDFS/NAMENODE/hdfs"
+              "name": "accumulo_accumulo_master_hdfs",
+              "reference": "/HDFS/NAMENODE/hdfs"
             }
           ]
         },

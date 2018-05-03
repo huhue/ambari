@@ -23,6 +23,7 @@
 <configuration>
   <property>
     <name>hbase.rootdir</name>
+    <display-name>HBase root directory</display-name>
     <value>file:///C:/hadoop/hbase-ams</value>
     <description>
       Ambari Metrics service uses HBase as default storage backend. Set the rootdir for
@@ -31,6 +32,7 @@
       default HBase writes into /tmp. Change this configuration else all data
       will be lost on machine restart.
     </description>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>hbase.tmp.dir</name>
@@ -41,5 +43,6 @@
       than '/tmp' (The '/tmp' directory is often cleared on
       machine restart).
     </description>
+    <on-ambari-upgrade add="true"/>
   </property>
 </configuration>

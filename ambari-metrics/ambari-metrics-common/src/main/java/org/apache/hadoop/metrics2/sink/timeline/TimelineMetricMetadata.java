@@ -17,6 +17,8 @@
  */
 package org.apache.hadoop.metrics2.sink.timeline;
 
+import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.codehaus.jackson.annotate.JsonIgnore;
@@ -32,10 +34,13 @@ import javax.xml.bind.annotation.XmlRootElement;
 public class TimelineMetricMetadata {
   private String metricName;
   private String appId;
+  private String instanceId;
+  private byte[] uuid;
   private String units;
   private String type = "UNDEFINED";
   private Long seriesStartTime;
   boolean supportsAggregates = true;
+  boolean isWhitelisted = false;
   // Serialization ignored helper flag
   boolean isPersisted = false;
 
@@ -50,15 +55,17 @@ public class TimelineMetricMetadata {
   public TimelineMetricMetadata() {
   }
 
-  public TimelineMetricMetadata(String metricName, String appId, String units,
+  public TimelineMetricMetadata(String metricName, String appId, String instanceId, String units,
                                 String type, Long seriesStartTime,
-                                boolean supportsAggregates) {
+                                boolean supportsAggregates, boolean isWhitelisted) {
     this.metricName = metricName;
     this.appId = appId;
+    this.instanceId = instanceId;
     this.units = units;
     this.type = type;
     this.seriesStartTime = seriesStartTime;
     this.supportsAggregates = supportsAggregates;
+    this.isWhitelisted = isWhitelisted;
   }
 
   @XmlElement(name = "metricname")
@@ -78,6 +85,24 @@ public class TimelineMetricMetadata {
 
   public void setAppId(String appId) {
     this.appId = appId;
+  }
+
+  @XmlElement(name = "instanceId")
+  public String getInstanceId() {
+    return instanceId;
+  }
+
+  public void setInstanceId(String instanceId) {
+    this.instanceId = instanceId;
+  }
+
+  @XmlElement(name = "uuid")
+  public byte[] getUuid() {
+    return uuid;
+  }
+
+  public void setUuid(byte[] uuid) {
+    this.uuid = uuid;
   }
 
   @XmlElement(name = "units")
@@ -100,7 +125,7 @@ public class TimelineMetricMetadata {
 
   @XmlElement(name = "seriesStartTime")
   public Long getSeriesStartTime() {
-    return seriesStartTime;
+    return (seriesStartTime != null) ? seriesStartTime : 0l;
   }
 
   public void setSeriesStartTime(Long seriesStartTime) {
@@ -110,6 +135,11 @@ public class TimelineMetricMetadata {
   @XmlElement(name = "supportsAggregation")
   public boolean isSupportsAggregates() {
     return supportsAggregates;
+  }
+
+  @XmlElement(name = "isWhitelisted")
+  public boolean isWhitelisted() {
+    return isWhitelisted;
   }
 
   public void setSupportsAggregates(boolean supportsAggregates) {
@@ -131,16 +161,18 @@ public class TimelineMetricMetadata {
    */
   public boolean needsToBeSynced(TimelineMetricMetadata metadata) throws MetadataException {
     if (!this.metricName.equals(metadata.getMetricName()) ||
-        !this.appId.equals(metadata.getAppId())) {
+        !this.appId.equals(metadata.getAppId()) ||
+      !(StringUtils.isNotEmpty(instanceId) ? instanceId.equals(metadata.instanceId) : StringUtils.isEmpty(metadata.instanceId))) {
       throw new MetadataException("Unexpected argument: metricName = " +
-        metadata.getMetricName() + ", appId = " + metadata.getAppId());
+        metadata.getMetricName() + ", appId = " + metadata.getAppId() + ", instanceId = " + metadata.getInstanceId());
     }
 
     // Series start time should never change
     return (this.units != null && !this.units.equals(metadata.getUnits())) ||
       (this.type != null && !this.type.equals(metadata.getType())) ||
       //!this.lastRecordedTime.equals(metadata.getLastRecordedTime()) || // TODO: support
-      !this.supportsAggregates == metadata.isSupportsAggregates();
+      !this.supportsAggregates == metadata.isSupportsAggregates() ||
+      this.isWhitelisted != metadata.isWhitelisted;
   }
 
   @Override
@@ -151,14 +183,15 @@ public class TimelineMetricMetadata {
     TimelineMetricMetadata that = (TimelineMetricMetadata) o;
 
     if (!metricName.equals(that.metricName)) return false;
-    return !(appId != null ? !appId.equals(that.appId) : that.appId != null);
-
+    if (!appId.equals(that.appId)) return false;
+    return (StringUtils.isNotEmpty(instanceId) ? instanceId.equals(that.instanceId) : StringUtils.isEmpty(that.instanceId));
   }
 
   @Override
   public int hashCode() {
     int result = metricName.hashCode();
     result = 31 * result + (appId != null ? appId.hashCode() : 0);
+    result = 31 * result + (instanceId != null ? instanceId.hashCode() : 0);
     return result;
   }
 }

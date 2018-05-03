@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,7 +18,8 @@
 
 package org.apache.ambari.server.orm.entities;
 
-import com.google.gson.Gson;
+import java.util.Collections;
+import java.util.Map;
 
 import javax.persistence.Basic;
 import javax.persistence.Column;
@@ -29,10 +30,8 @@ import javax.persistence.NamedQueries;
 import javax.persistence.NamedQuery;
 import javax.persistence.Table;
 import javax.persistence.Transient;
-import java.util.Collections;
-import java.util.Map;
-import java.util.TreeMap;
 
+import com.google.gson.Gson;
 /**
  * Entity representing an Artifact.
  */
@@ -112,7 +111,7 @@ public class ArtifactEntity {
    *
    * @param foreignKeys  ordered map of foreign key property names to values
    */
-  public void setForeignKeys(TreeMap<String, String> foreignKeys) {
+  public void setForeignKeys(Map<String, String> foreignKeys) {
     this.foreignKeys = serializeForeignKeys(foreignKeys);
   }
 
@@ -123,7 +122,7 @@ public class ArtifactEntity {
    */
   public Map<String, String> getForeignKeys() {
     return foreignKeys == null ?
-        Collections.<String, String>emptyMap() :
+        Collections.emptyMap() :
         jsonSerializer.<Map<String, String>>fromJson(foreignKeys, Map.class);
   }
 
@@ -134,7 +133,7 @@ public class ArtifactEntity {
    *
    * @return string representation of the foreign keys map
    */
-  public static String serializeForeignKeys(TreeMap<String, String> foreignKeys) {
+  public static String serializeForeignKeys(Map<String, String> foreignKeys) {
     return jsonSerializer.toJson(foreignKeys);
   }
 }

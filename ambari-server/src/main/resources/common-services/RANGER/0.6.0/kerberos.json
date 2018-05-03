@@ -4,16 +4,22 @@
       "name": "RANGER",
       "identities": [
         {
-          "name": "/spnego"
+          "name": "ranger_spnego",
+          "reference": "/spnego"
         },
         {
-          "name": "/smokeuser"
+          "name": "ranger_smokeuser",
+          "reference": "/smokeuser"
         }
       ],
       "configurations": [
         {
           "ranger-admin-site": {
-            "ranger.admin.kerberos.cookie.domain": "{{ranger_host}}"
+            "xasecure.audit.jaas.Client.loginModuleName": "com.sun.security.auth.module.Krb5LoginModule",
+            "xasecure.audit.jaas.Client.loginModuleControlFlag": "required",
+            "xasecure.audit.jaas.Client.option.useKeyTab": "true",
+            "xasecure.audit.jaas.Client.option.storeKey": "false",
+            "xasecure.audit.jaas.Client.option.serviceName": "solr"
           }
         }
       ],
@@ -55,12 +61,27 @@
               }
             },
             {
-              "name": "/spnego",
-              "principal": {
-                "configuration": "ranger-admin-site/ranger.spnego.kerberos.principal"
-              },
+              "name": "ranger_ranger_admin_spnego",
+              "reference": "/spnego",
               "keytab": {
                 "configuration": "ranger-admin-site/ranger.spnego.kerberos.keytab"
+              }
+            },
+            {
+              "name": "ranger_ranger_admin_rangeradmin",
+              "reference": "/RANGER/RANGER_ADMIN/rangeradmin",
+              "principal": {
+                "configuration": "ranger-admin-site/xasecure.audit.jaas.Client.option.principal"
+              },
+              "keytab": {
+                "configuration": "ranger-admin-site/xasecure.audit.jaas.Client.option.keyTab"
+              }
+            },
+            {
+              "name": "ranger_ranger_admin_infra-solr",
+              "reference": "/AMBARI_INFRA_SOLR/INFRA_SOLR/infra-solr",
+              "when" : {
+                "contains" : ["services", "AMBARI_INFRA_SOLR"]
               }
             }
           ]
@@ -105,6 +126,29 @@
                   "access": "r"
                 },
                 "configuration": "ranger-tagsync-site/ranger.tagsync.kerberos.keytab"
+              }
+            },
+            {
+              "name": "ranger_ranger_tagsync_rangertagsync",
+              "reference": "/RANGER/RANGER_TAGSYNC/rangertagsync",
+              "principal": {
+                "configuration": "tagsync-application-properties/atlas.jaas.KafkaClient.option.principal"
+              },
+              "keytab": {
+                "configuration": "tagsync-application-properties/atlas.jaas.KafkaClient.option.keyTab"
+              }
+            }
+          ],
+          "configurations": [
+            {
+              "tagsync-application-properties": {
+                "atlas.jaas.KafkaClient.loginModuleName": "com.sun.security.auth.module.Krb5LoginModule",
+                "atlas.jaas.KafkaClient.loginModuleControlFlag": "required",
+                "atlas.jaas.KafkaClient.option.useKeyTab": "true",
+                "atlas.jaas.KafkaClient.option.storeKey": "true",
+                "atlas.jaas.KafkaClient.option.serviceName": "kafka",
+                "atlas.kafka.sasl.kerberos.service.name": "kafka",
+                "atlas.kafka.security.protocol": "PLAINTEXTSASL"
               }
             }
           ]

@@ -18,9 +18,6 @@
 
 package org.apache.ambari.server.orm.dao;
 
-import static org.apache.ambari.server.orm.DBAccessor.DbType.ORACLE;
-import static org.apache.ambari.server.orm.dao.DaoUtils.ORACLE_LIST_LIMIT;
-
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -42,15 +39,23 @@ import javax.persistence.metamodel.SingularAttribute;
 import org.apache.ambari.annotations.TransactionalLock;
 import org.apache.ambari.annotations.TransactionalLock.LockArea;
 import org.apache.ambari.annotations.TransactionalLock.LockType;
+import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
+import org.apache.ambari.server.actionmanager.HostRoleCommand;
+import org.apache.ambari.server.actionmanager.HostRoleCommandFactory;
 import org.apache.ambari.server.actionmanager.HostRoleStatus;
+import org.apache.ambari.server.agent.AgentCommand.AgentCommandType;
 import org.apache.ambari.server.api.query.JpaPredicateVisitor;
 import org.apache.ambari.server.api.query.JpaSortBuilder;
+import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.controller.spi.PageRequest;
 import org.apache.ambari.server.controller.spi.Predicate;
 import org.apache.ambari.server.controller.spi.Request;
 import org.apache.ambari.server.controller.spi.SortRequest;
 import org.apache.ambari.server.controller.utilities.PredicateHelper;
+import org.apache.ambari.server.events.TaskCreateEvent;
+import org.apache.ambari.server.events.TaskUpdateEvent;
+import org.apache.ambari.server.events.publishers.TaskEventPublisher;
 import org.apache.ambari.server.orm.RequiresSession;
 import org.apache.ambari.server.orm.TransactionalLocks;
 import org.apache.ambari.server.orm.entities.HostEntity;
@@ -60,10 +65,13 @@ import org.apache.ambari.server.orm.entities.StageEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Function;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.LoadingCache;
+import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
@@ -138,10 +146,20 @@ public class HostRoleCommandDAO {
 
 
   @Inject
-  Provider<EntityManager> entityManagerProvider;
+  private Provider<EntityManager> entityManagerProvider;
 
   @Inject
-  DaoUtils daoUtils;
+  private DaoUtils daoUtils;
+
+  @Inject
+  private Configuration configuration;
+
+
+  @Inject
+  HostRoleCommandFactory hostRoleCommandFactory;
+
+  @Inject
+  private TaskEventPublisher taskEventPublisher;
 
   /**
    * Used to ensure that methods which rely on the completion of
@@ -221,7 +239,7 @@ public class HostRoleCommandDAO {
    */
   @RequiresSession
   private Map<Long, HostRoleCommandStatusSummaryDTO> loadAggregateCounts(Long requestId) {
-    Map<Long, HostRoleCommandStatusSummaryDTO> map = new HashMap<Long, HostRoleCommandStatusSummaryDTO>();
+    Map<Long, HostRoleCommandStatusSummaryDTO> map = new HashMap<>();
 
     EntityManager entityManager = entityManagerProvider.get();
     TypedQuery<HostRoleCommandStatusSummaryDTO> query = entityManager.createQuery(SUMMARY_DTO,
@@ -278,10 +296,10 @@ public class HostRoleCommandDAO {
         "ORDER BY task.taskId",
       HostRoleCommandEntity.class);
 
-    if (daoUtils.getDbType().equals(ORACLE) && taskIds.size() > ORACLE_LIST_LIMIT) {
-      List<HostRoleCommandEntity> result = new ArrayList<HostRoleCommandEntity>();
+    if (taskIds.size() > configuration.getTaskIdListLimit()) {
+      List<HostRoleCommandEntity> result = new ArrayList<>();
 
-      List<List<Long>> lists = Lists.partition(new ArrayList<Long>(taskIds), ORACLE_LIST_LIMIT);
+      List<List<Long>> lists = Lists.partition(new ArrayList<>(taskIds), configuration.getTaskIdListLimit());
       for (List<Long> list : lists) {
         result.addAll(daoUtils.selectList(query, list));
       }
@@ -348,10 +366,10 @@ public class HostRoleCommandDAO {
             "ORDER BY task.taskId", Long.class
     );
 
-    if (daoUtils.getDbType().equals(ORACLE) && taskIds.size() > ORACLE_LIST_LIMIT) {
-      List<Long> result = new ArrayList<Long>();
+    if (taskIds.size() > configuration.getTaskIdListLimit()) {
+      List<Long> result = new ArrayList<>();
 
-      List<List<Long>> lists = Lists.partition(new ArrayList<Long>(taskIds), ORACLE_LIST_LIMIT);
+      List<List<Long>> lists = Lists.partition(new ArrayList<>(taskIds), configuration.getTaskIdListLimit());
       for (List<Long> taskIdList : lists) {
         result.addAll(daoUtils.selectList(query, requestIds, taskIdList));
       }
@@ -409,11 +427,11 @@ public class HostRoleCommandDAO {
         "ORDER BY hostRoleCommand.hostEntity.hostName, hostRoleCommand.taskId", HostRoleCommandEntity.class);
     List<HostRoleCommandEntity> commandEntities = daoUtils.selectList(query, stageEntity);
 
-    Map<String, List<HostRoleCommandEntity>> hostCommands = new HashMap<String, List<HostRoleCommandEntity>>();
+    Map<String, List<HostRoleCommandEntity>> hostCommands = new HashMap<>();
 
     for (HostRoleCommandEntity commandEntity : commandEntities) {
       if (!hostCommands.containsKey(commandEntity.getHostName())) {
-        hostCommands.put(commandEntity.getHostName(), new ArrayList<HostRoleCommandEntity>());
+        hostCommands.put(commandEntity.getHostName(), new ArrayList<>());
       }
 
       hostCommands.get(commandEntity.getHostName()).add(commandEntity);
@@ -431,6 +449,26 @@ public class HostRoleCommandDAO {
         "ORDER BY hostRoleCommand.taskId", Long.class);
 
     return daoUtils.selectList(query, requestId, stageId);
+  }
+
+  @RequiresSession
+  public Map<Long, Integer> getHostIdToCountOfCommandsWithStatus(Collection<HostRoleStatus> statuses) {
+    Map<Long, Integer> hostIdToCount = new HashMap<>();
+
+    String queryName = "SELECT command.hostId FROM HostRoleCommandEntity command WHERE command.status IN :statuses";
+    TypedQuery<Long> query = entityManagerProvider.get().createQuery(queryName, Long.class);
+    query.setParameter("statuses", statuses);
+    List<Long> results = query.getResultList();
+
+    for (Long hostId : results) {
+      if (hostIdToCount.containsKey(hostId)) {
+        hostIdToCount.put(hostId, hostIdToCount.get(hostId) + 1);
+      } else {
+        hostIdToCount.put(hostId, 1);
+      }
+    }
+
+    return hostIdToCount;
   }
 
   @RequiresSession
@@ -608,11 +646,17 @@ public class HostRoleCommandDAO {
   @Transactional
   @TransactionalLock(lockArea = LockArea.HRC_STATUS_CACHE, lockType = LockType.WRITE)
   public HostRoleCommandEntity merge(HostRoleCommandEntity entity) {
+    entity = mergeWithoutPublishEvent(entity);
+    publishTaskUpdateEvent(Collections.singletonList(hostRoleCommandFactory.createExisting(entity)));
+    return entity;
+  }
+
+  @Transactional
+  @TransactionalLock(lockArea = LockArea.HRC_STATUS_CACHE, lockType = LockType.WRITE)
+  public HostRoleCommandEntity mergeWithoutPublishEvent(HostRoleCommandEntity entity) {
     EntityManager entityManager = entityManagerProvider.get();
     entity = entityManager.merge(entity);
-
     invalidateHostRoleCommandStatusSummaryCache(entity);
-
     return entity;
   }
 
@@ -628,7 +672,7 @@ public class HostRoleCommandDAO {
   @TransactionalLock(lockArea = LockArea.HRC_STATUS_CACHE, lockType = LockType.WRITE)
   public List<HostRoleCommandEntity> mergeAll(Collection<HostRoleCommandEntity> entities) {
     Set<Long> requestsToInvalidate = new LinkedHashSet<>();
-    List<HostRoleCommandEntity> managedList = new ArrayList<HostRoleCommandEntity>(entities.size());
+    List<HostRoleCommandEntity> managedList = new ArrayList<>(entities.size());
     for (HostRoleCommandEntity entity : entities) {
       EntityManager entityManager = entityManagerProvider.get();
       entity = entityManager.merge(entity);
@@ -646,15 +690,56 @@ public class HostRoleCommandDAO {
     }
 
     invalidateHostRoleCommandStatusSummaryCache(requestsToInvalidate);
-
+    publishTaskUpdateEvent(getHostRoleCommands(entities));
     return managedList;
   }
+
+  /**
+   *
+   * @param entities
+   */
+  public List<HostRoleCommand> getHostRoleCommands(Collection<HostRoleCommandEntity> entities) {
+    Function<HostRoleCommandEntity, HostRoleCommand> transform = new Function<HostRoleCommandEntity, HostRoleCommand> () {
+      @Override
+      public HostRoleCommand apply(HostRoleCommandEntity entity) {
+        return hostRoleCommandFactory.createExisting(entity);
+      }
+    };
+    return FluentIterable.from(entities)
+        .transform(transform)
+        .toList();
+
+  }
+
+  /**
+   *
+   * @param hostRoleCommands
+   */
+  public void publishTaskUpdateEvent(List<HostRoleCommand> hostRoleCommands) {
+    if (!hostRoleCommands.isEmpty()) {
+      TaskUpdateEvent taskUpdateEvent = new TaskUpdateEvent(hostRoleCommands);
+      taskEventPublisher.publish(taskUpdateEvent);
+    }
+  }
+
+  /**
+   *
+   * @param hostRoleCommands
+   */
+  public void publishTaskCreateEvent(List<HostRoleCommand> hostRoleCommands) {
+    if (!hostRoleCommands.isEmpty()) {
+      TaskCreateEvent taskCreateEvent = new TaskCreateEvent(hostRoleCommands);
+      taskEventPublisher.publish(taskCreateEvent);
+    }
+  }
+
+
 
   @Transactional
   @TransactionalLock(lockArea = LockArea.HRC_STATUS_CACHE, lockType = LockType.WRITE)
   public void remove(HostRoleCommandEntity entity) {
     EntityManager entityManager = entityManagerProvider.get();
-    entityManager.remove(merge(entity));
+    entityManager.remove(entity);
     invalidateHostRoleCommandStatusSummaryCache(entity);
   }
 
@@ -814,7 +899,7 @@ public class HostRoleCommandDAO {
     // sorting
     SortRequest sortRequest = request.getSortRequest();
     if (null != sortRequest) {
-      JpaSortBuilder<HostRoleCommandEntity> sortBuilder = new JpaSortBuilder<HostRoleCommandEntity>();
+      JpaSortBuilder<HostRoleCommandEntity> sortBuilder = new JpaSortBuilder<>();
       List<Order> sortOrders = sortBuilder.buildSortOrders(sortRequest, visitor);
       query.orderBy(sortOrders);
     }
@@ -829,6 +914,72 @@ public class HostRoleCommandDAO {
     }
 
     return daoUtils.selectList(typedQuery);
+  }
+
+  /**
+   * Gets a lists of hosts with commands in progress given a range of requests.
+   * The range of requests should include all requests with at least 1 stage in
+   * progress.
+   *
+   * @return the list of hosts with commands in progress.
+   * @see HostRoleStatus#IN_PROGRESS_STATUSES
+   */
+  @RequiresSession
+  public List<String> getHostsWithPendingTasks(long iLowestRequestIdInProgress,
+      long iHighestRequestIdInProgress) {
+    TypedQuery<String> query = entityManagerProvider.get().createNamedQuery(
+        "HostRoleCommandEntity.findHostsByCommandStatus", String.class);
+
+    query.setParameter("iLowestRequestIdInProgress", iLowestRequestIdInProgress);
+    query.setParameter("iHighestRequestIdInProgress", iHighestRequestIdInProgress);
+    query.setParameter("statuses", HostRoleStatus.IN_PROGRESS_STATUSES);
+    return daoUtils.selectList(query);
+  }
+
+  /**
+   * Gets a lists of hosts with commands in progress which occurr before the
+   * specified request ID. This will only return commands which are not
+   * {@link AgentCommandType#BACKGROUND_EXECUTION_COMMAND} as thsee commands do
+   * not block future requests.
+   *
+   * @param lowerRequestIdInclusive
+   *          the lowest request ID to consider (inclusive) when getting any
+   *          blocking hosts.
+   * @param requestId
+   *          the request ID to calculate any blocking hosts for (essentially,
+   *          the upper limit exclusive)
+   * @return the list of hosts from older running requests which will block
+   *         those same hosts in the specified request ID.
+   * @see HostRoleStatus#IN_PROGRESS_STATUSES
+   */
+  @RequiresSession
+  public List<String> getBlockingHostsForRequest(long lowerRequestIdInclusive,
+      long requestId) {
+    TypedQuery<String> query = entityManagerProvider.get().createNamedQuery(
+        "HostRoleCommandEntity.getBlockingHostsForRequest", String.class);
+
+    query.setParameter("lowerRequestIdInclusive", lowerRequestIdInclusive);
+    query.setParameter("upperRequestIdExclusive", requestId);
+    query.setParameter("statuses", HostRoleStatus.IN_PROGRESS_STATUSES);
+    return daoUtils.selectList(query);
+  }
+
+  /**
+   * Gets the most recently run service check grouped by the command's role
+   * (which is the only way to identify the service it was for!?)
+   *
+   * @param clusterId
+   *          the ID of the cluster to get the service checks for.
+   */
+  @RequiresSession
+  public List<LastServiceCheckDTO> getLatestServiceChecksByRole(long clusterId) {
+    TypedQuery<LastServiceCheckDTO> query = entityManagerProvider.get().createNamedQuery(
+        "HostRoleCommandEntity.findLatestServiceChecksByRole", LastServiceCheckDTO.class);
+
+    query.setParameter("clusterId", clusterId);
+    query.setParameter("roleCommand", RoleCommand.SERVICE_CHECK);
+
+    return daoUtils.selectList(query);
   }
 
   /**
@@ -860,6 +1011,50 @@ public class HostRoleCommandDAO {
     @Override
     public List<? extends SingularAttribute<?, ?>> getPredicateMapping(String propertyId) {
       return HostRoleCommandEntity_.getPredicateMapping().get(propertyId);
+    }
+  }
+
+  public Set<Long> findTaskIdsByRequestStageIds(List<RequestDAO.StageEntityPK> requestStageIds) {
+    EntityManager entityManager = entityManagerProvider.get();
+    List<Long> taskIds = new ArrayList<>();
+    for (RequestDAO.StageEntityPK requestIds : requestStageIds) {
+      TypedQuery<Long> hostRoleCommandQuery =
+              entityManager.createNamedQuery("HostRoleCommandEntity.findTaskIdsByRequestStageIds", Long.class);
+
+      hostRoleCommandQuery.setParameter("requestId", requestIds.getRequestId());
+      hostRoleCommandQuery.setParameter("stageId", requestIds.getStageId());
+
+      taskIds.addAll(daoUtils.selectList(hostRoleCommandQuery));
+    }
+
+    return Sets.newHashSet(taskIds);
+  }
+
+  /**
+   * A simple DTO for storing the most recent service check time for a given
+   * {@link Role}.
+   */
+  public static class LastServiceCheckDTO {
+
+    /**
+     * The role.
+     */
+    public final String role;
+
+    /**
+     * The time that the service check ended.
+     */
+    public final long endTime;
+
+    /**
+     * Constructor.
+     *
+     * @param role
+     * @param endTime
+     */
+    public LastServiceCheckDTO(String role, long endTime) {
+      this.role = role;
+      this.endTime = endTime;
     }
   }
 }

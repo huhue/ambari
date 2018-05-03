@@ -17,34 +17,36 @@
  */
 package org.apache.ambari.server.checks;
 
+import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.util.Arrays;
+import java.util.Collections;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.Role;
-import org.apache.ambari.server.RoleCommand;
+import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.controller.PrereqCheckRequest;
-import org.apache.ambari.server.controller.spi.Predicate;
-import org.apache.ambari.server.controller.spi.Request;
+import org.apache.ambari.server.metadata.ActionMetadata;
 import org.apache.ambari.server.orm.dao.HostRoleCommandDAO;
+import org.apache.ambari.server.orm.dao.HostRoleCommandDAO.LastServiceCheckDTO;
 import org.apache.ambari.server.orm.dao.ServiceConfigDAO;
-import org.apache.ambari.server.orm.entities.HostRoleCommandEntity;
 import org.apache.ambari.server.orm.entities.ServiceConfigEntity;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.MaintenanceState;
 import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.ServiceComponent;
+import org.apache.ambari.server.state.StackId;
 import org.apache.ambari.server.state.stack.PrereqCheckStatus;
 import org.apache.ambari.server.state.stack.PrerequisiteCheck;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Provider;
@@ -54,7 +56,6 @@ public class ServiceCheckValidityCheckTest {
   private static final long CLUSTER_ID = 1L;
   private static final String SERVICE_NAME = "HDFS";
   private static final long CONFIG_CREATE_TIMESTAMP = 1461518722202L;
-  private static final String COMMAND_DETAIL = "HDFS service check";
   private static final long SERVICE_CHECK_START_TIME = CONFIG_CREATE_TIMESTAMP - 2000L;
   private static final String SERVICE_COMPONENT_NAME = "service component";
   private ServiceCheckValidityCheck serviceCheckValidityCheck;
@@ -62,7 +63,8 @@ public class ServiceCheckValidityCheckTest {
   private ServiceConfigDAO serviceConfigDAO;
   private HostRoleCommandDAO hostRoleCommandDAO;
   private Service service;
-
+  private AmbariMetaInfo ambariMetaInfo;
+  private ActionMetadata actionMetadata;
 
   @Before
   public void setUp() throws Exception {
@@ -70,6 +72,8 @@ public class ServiceCheckValidityCheckTest {
     service = mock(Service.class);
     serviceConfigDAO = mock(ServiceConfigDAO.class);
     hostRoleCommandDAO = mock(HostRoleCommandDAO.class);
+    ambariMetaInfo = mock(AmbariMetaInfo.class);
+    actionMetadata = new ActionMetadata();
 
     serviceCheckValidityCheck = new ServiceCheckValidityCheck();
     serviceCheckValidityCheck.hostRoleCommandDAOProvider = new Provider<HostRoleCommandDAO>() {
@@ -90,14 +94,60 @@ public class ServiceCheckValidityCheckTest {
         return clusters;
       }
     };
+    serviceCheckValidityCheck.actionMetadataProvider = new Provider<ActionMetadata>() {
+      @Override
+      public ActionMetadata get() {
+        return actionMetadata;
+      }
+    };
 
     Cluster cluster = mock(Cluster.class);
     when(clusters.getCluster(CLUSTER_NAME)).thenReturn(cluster);
     when(cluster.getClusterId()).thenReturn(CLUSTER_ID);
     when(cluster.getServices()).thenReturn(ImmutableMap.of(SERVICE_NAME, service));
-
+    when(cluster.getCurrentStackVersion()).thenReturn(new StackId("HDP", "2.2"));
     when(service.getName()).thenReturn(SERVICE_NAME);
+    when(service.getDesiredStackId()).thenReturn(new StackId("HDP", "2.2"));
 
+
+    serviceCheckValidityCheck.ambariMetaInfo = new Provider<AmbariMetaInfo>() {
+      @Override
+      public AmbariMetaInfo get() {
+        return ambariMetaInfo;
+      }
+    };
+
+    when(ambariMetaInfo.isServiceWithNoConfigs(Mockito.anyString(), Mockito.anyString(),
+        Mockito.anyString())).thenReturn(false);
+
+    actionMetadata.addServiceCheckAction("HDFS");
+  }
+
+  @Test
+  public void testWithNullCommandDetailAtCommand() throws AmbariException {
+    ServiceComponent serviceComponent = mock(ServiceComponent.class);
+    when(serviceComponent.isVersionAdvertised()).thenReturn(true);
+
+    when(service.getMaintenanceState()).thenReturn(MaintenanceState.OFF);
+    when(service.getServiceComponents()).thenReturn(ImmutableMap.of(SERVICE_COMPONENT_NAME, serviceComponent));
+
+    ServiceConfigEntity serviceConfigEntity = new ServiceConfigEntity();
+    serviceConfigEntity.setServiceName(SERVICE_NAME);
+    serviceConfigEntity.setCreateTimestamp(CONFIG_CREATE_TIMESTAMP);
+
+    LastServiceCheckDTO lastServiceCheckDTO1 = new LastServiceCheckDTO(Role.ZOOKEEPER_QUORUM_SERVICE_CHECK.name(), SERVICE_CHECK_START_TIME);
+    LastServiceCheckDTO lastServiceCheckDTO2 = new LastServiceCheckDTO(Role.HDFS_SERVICE_CHECK.name(), SERVICE_CHECK_START_TIME);
+
+    when(serviceConfigDAO.getLastServiceConfig(eq(CLUSTER_ID), eq(SERVICE_NAME))).thenReturn(serviceConfigEntity);
+    when(hostRoleCommandDAO.getLatestServiceChecksByRole(any(Long.class))).thenReturn(asList(lastServiceCheckDTO1, lastServiceCheckDTO2));
+
+    PrerequisiteCheck check = new PrerequisiteCheck(null, CLUSTER_NAME);
+    try {
+      serviceCheckValidityCheck.perform(check, new PrereqCheckRequest(CLUSTER_NAME));
+    } catch (NullPointerException ex){
+      Assert.fail("serviceCheckValidityCheck failed due to null at start_time were not handled");
+    }
+    Assert.assertEquals(PrereqCheckStatus.FAIL, check.getStatus());
   }
 
   @Test
@@ -112,14 +162,31 @@ public class ServiceCheckValidityCheckTest {
     serviceConfigEntity.setServiceName(SERVICE_NAME);
     serviceConfigEntity.setCreateTimestamp(CONFIG_CREATE_TIMESTAMP);
 
-    HostRoleCommandEntity hostRoleCommandEntity = new HostRoleCommandEntity();
-    hostRoleCommandEntity.setRoleCommand(RoleCommand.SERVICE_CHECK);
-    hostRoleCommandEntity.setCommandDetail(COMMAND_DETAIL);
-    hostRoleCommandEntity.setStartTime(SERVICE_CHECK_START_TIME);
-    hostRoleCommandEntity.setRole(Role.HDFS_SERVICE_CHECK);
+    LastServiceCheckDTO lastServiceCheckDTO = new LastServiceCheckDTO(Role.HDFS_SERVICE_CHECK.name(), SERVICE_CHECK_START_TIME);
 
     when(serviceConfigDAO.getLastServiceConfig(eq(CLUSTER_ID), eq(SERVICE_NAME))).thenReturn(serviceConfigEntity);
-    when(hostRoleCommandDAO.findAll(any(Request.class), any(Predicate.class))).thenReturn(singletonList(hostRoleCommandEntity));
+    when(hostRoleCommandDAO.getLatestServiceChecksByRole(any(Long.class))).thenReturn(singletonList(lastServiceCheckDTO));
+
+    PrerequisiteCheck check = new PrerequisiteCheck(null, CLUSTER_NAME);
+    serviceCheckValidityCheck.perform(check, new PrereqCheckRequest(CLUSTER_NAME));
+    Assert.assertEquals(PrereqCheckStatus.FAIL, check.getStatus());
+  }
+
+
+  @Test
+  public void testFailWhenServiceWithNoServiceCheckExists() throws AmbariException {
+    ServiceComponent serviceComponent = mock(ServiceComponent.class);
+    when(serviceComponent.isVersionAdvertised()).thenReturn(true);
+
+    when(service.getMaintenanceState()).thenReturn(MaintenanceState.OFF);
+    when(service.getServiceComponents()).thenReturn(ImmutableMap.of(SERVICE_COMPONENT_NAME, serviceComponent));
+
+    ServiceConfigEntity serviceConfigEntity = new ServiceConfigEntity();
+    serviceConfigEntity.setServiceName(SERVICE_NAME);
+    serviceConfigEntity.setCreateTimestamp(CONFIG_CREATE_TIMESTAMP);
+
+    when(serviceConfigDAO.getLastServiceConfig(eq(CLUSTER_ID), eq(SERVICE_NAME))).thenReturn(serviceConfigEntity);
+    when(hostRoleCommandDAO.getLatestServiceChecksByRole(any(Long.class))).thenReturn(Collections.<LastServiceCheckDTO>emptyList());
 
     PrerequisiteCheck check = new PrerequisiteCheck(null, CLUSTER_NAME);
     serviceCheckValidityCheck.perform(check, new PrereqCheckRequest(CLUSTER_NAME));
@@ -138,23 +205,49 @@ public class ServiceCheckValidityCheckTest {
     serviceConfigEntity.setServiceName(SERVICE_NAME);
     serviceConfigEntity.setCreateTimestamp(CONFIG_CREATE_TIMESTAMP);
 
-    HostRoleCommandEntity hostRoleCommandEntity1 = new HostRoleCommandEntity();
-    hostRoleCommandEntity1.setRoleCommand(RoleCommand.SERVICE_CHECK);
-    hostRoleCommandEntity1.setCommandDetail(COMMAND_DETAIL);
-    hostRoleCommandEntity1.setStartTime(SERVICE_CHECK_START_TIME);
-    hostRoleCommandEntity1.setRole(Role.HDFS_SERVICE_CHECK);
-
-    HostRoleCommandEntity hostRoleCommandEntity2 = new HostRoleCommandEntity();
-    hostRoleCommandEntity2.setRoleCommand(RoleCommand.SERVICE_CHECK);
-    hostRoleCommandEntity2.setCommandDetail(COMMAND_DETAIL);
-    hostRoleCommandEntity2.setStartTime(SERVICE_CHECK_START_TIME + 3000L);
-    hostRoleCommandEntity2.setRole(Role.HDFS_SERVICE_CHECK);
+    LastServiceCheckDTO lastServiceCheckDTO1 = new LastServiceCheckDTO(Role.HDFS_SERVICE_CHECK.name(), SERVICE_CHECK_START_TIME);
+    LastServiceCheckDTO lastServiceCheckDTO2 = new LastServiceCheckDTO(Role.HDFS_SERVICE_CHECK.name(), CONFIG_CREATE_TIMESTAMP - 1L);
 
     when(serviceConfigDAO.getLastServiceConfig(eq(CLUSTER_ID), eq(SERVICE_NAME))).thenReturn(serviceConfigEntity);
-    when(hostRoleCommandDAO.findAll(any(Request.class), any(Predicate.class))).thenReturn(Arrays.asList(hostRoleCommandEntity1, hostRoleCommandEntity2));
+    when(hostRoleCommandDAO.getLatestServiceChecksByRole(any(Long.class))).thenReturn(asList(lastServiceCheckDTO1, lastServiceCheckDTO2));
 
     PrerequisiteCheck check = new PrerequisiteCheck(null, CLUSTER_NAME);
     serviceCheckValidityCheck.perform(check, new PrereqCheckRequest(CLUSTER_NAME));
-    Assert.assertEquals(PrereqCheckStatus.PASS, check.getStatus());
+    Assert.assertEquals(PrereqCheckStatus.FAIL, check.getStatus());
   }
+
+  /**
+   * Tests that old, oudated service checks for the FOO2 service doesn't cause
+   * problems when checking values for the FOO service.
+   * <p/>
+   * The specific test case here is that the FOO2 service was added a long time
+   * ago and then removed. We don't want old service checks for FOO2 to match
+   * when querying for FOO.
+   *
+   * @throws AmbariException
+   */
+  @Test
+  public void testPassWhenSimilarlyNamedServiceIsOutdated() throws AmbariException {
+    ServiceComponent serviceComponent = mock(ServiceComponent.class);
+    when(serviceComponent.isVersionAdvertised()).thenReturn(true);
+
+    when(service.getMaintenanceState()).thenReturn(MaintenanceState.OFF);
+    when(service.getServiceComponents()).thenReturn(ImmutableMap.of(SERVICE_COMPONENT_NAME, serviceComponent));
+
+    ServiceConfigEntity serviceConfigEntity = new ServiceConfigEntity();
+    serviceConfigEntity.setServiceName(SERVICE_NAME);
+    serviceConfigEntity.setCreateTimestamp(CONFIG_CREATE_TIMESTAMP);
+
+    String hdfsRole = Role.HDFS_SERVICE_CHECK.name();
+    String hdfs2Role = hdfsRole.replace("HDFS", "HDFS2");
+
+    LastServiceCheckDTO lastServiceCheckDTO1 = new LastServiceCheckDTO(hdfsRole, SERVICE_CHECK_START_TIME);
+    LastServiceCheckDTO lastServiceCheckDTO2 = new LastServiceCheckDTO(hdfs2Role, CONFIG_CREATE_TIMESTAMP - 1L);
+
+    when(serviceConfigDAO.getLastServiceConfig(eq(CLUSTER_ID), eq(SERVICE_NAME))).thenReturn(serviceConfigEntity);
+    when(hostRoleCommandDAO.getLatestServiceChecksByRole(any(Long.class))).thenReturn(asList(lastServiceCheckDTO1, lastServiceCheckDTO2));
+
+    PrerequisiteCheck check = new PrerequisiteCheck(null, CLUSTER_NAME);
+    serviceCheckValidityCheck.perform(check, new PrereqCheckRequest(CLUSTER_NAME));
+    Assert.assertEquals(PrereqCheckStatus.FAIL, check.getStatus());  }
 }

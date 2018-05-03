@@ -79,24 +79,6 @@ var serviceConfigProperty,
       isOverridable: true
     }
   ],
-  overriddenFalseData = [
-    {
-      overrides: null,
-      isOriginalSCP: true
-    },
-    {
-      overrides: [],
-      isOriginalSCP: true
-    }
-  ],
-  overriddenTrueData = [
-    {
-      overrides: configsData[0].overrides
-    },
-    {
-      isOriginalSCP: false
-    }
-  ],
   removableFalseData = [
     {
       isEditable: false
@@ -172,8 +154,7 @@ var serviceConfigProperty,
     isEditable: true,
     value: 'value',
     savedValue: 'default'
-  },
-  types = ['componentHost', 'componentHosts', 'radio button'];
+  };
 
 
 function getProperty() {
@@ -186,10 +167,39 @@ describe('App.ServiceConfigProperty', function () {
     serviceConfigProperty = getProperty();
   });
 
-  App.TestAliases.testAsComputedFirstNotBlank(getProperty(), 'placeholder', ['placeholderText', 'savedValue']);
-
   App.TestAliases.testAsComputedAnd(getProperty(), 'hideFinalIcon', ['!isFinal', 'isNotEditable']);
 
+  App.TestAliases.testAsComputedAnd(getProperty(), 'isActive', ['isVisible', '!hiddenBySubSection', '!hiddenBySection']);
+
+  describe('#placeholder', function () {
+      [
+        {
+          placeholderText: 'foo',
+          savedValue: ''
+        },
+        {
+          placeholderText: '',
+          savedValue: 'foo'
+        },
+        {
+          placeholderText: 'foo',
+          savedValue: 'bar'
+        }
+      ].forEach(function (item) {
+        it('should equal foo, placeholder = ' + JSON.stringify(item.placeholderText), function() {
+          serviceConfigProperty.set('isEditable', true);
+          serviceConfigProperty.set('placeholderText', item.placeholderText);
+          serviceConfigProperty.set('savedValue', item.savedValue);
+          expect(serviceConfigProperty.get('placeholder')).to.equal('foo');
+        });
+    });
+    it('should equal null', function() {
+      serviceConfigProperty.set('isEditable', false);
+      serviceConfigProperty.set('placeholderText', 'foo');
+      serviceConfigProperty.set('savedValue', 'bar');
+      expect(serviceConfigProperty.get('placeholder')).to.equal(null);
+    });
+  });
   describe('#isPropertyOverridable', function () {
     overridableFalseData.forEach(function (item) {
       it('should be false', function () {
@@ -205,20 +215,7 @@ describe('App.ServiceConfigProperty', function () {
     });
   });
 
-  describe('#isOverridden', function () {
-    overriddenFalseData.forEach(function (item) {
-      it('should be false', function () {
-        serviceConfigProperty.setProperties(item);
-        expect(serviceConfigProperty.get('isOverridden')).to.be.false;
-      });
-    });
-    overriddenTrueData.forEach(function (item) {
-      it('should be true', function () {
-        serviceConfigProperty.setProperties(item);
-        expect(serviceConfigProperty.get('isOverridden')).to.be.true;
-      });
-    });
-  });
+  App.TestAliases.testAsComputedOr(getProperty(), 'isOverridden', ['overrides.length', '!isOriginalSCP']);
 
   describe('#isRemovable', function () {
     removableFalseData.forEach(function (item) {
@@ -265,18 +262,7 @@ describe('App.ServiceConfigProperty', function () {
     });
   });
 
-  describe('#cantBeUndone', function () {
-    types.forEach(function (item) {
-      it('should be true', function () {
-        serviceConfigProperty.set('displayType', item);
-        expect(serviceConfigProperty.get('cantBeUndone')).to.be.true;
-      });
-    });
-    it('should be false', function () {
-      serviceConfigProperty.set('displayType', 'type');
-      expect(serviceConfigProperty.get('cantBeUndone')).to.be.false;
-    });
-  });
+  App.TestAliases.testAsComputedExistsIn(getProperty(), 'cantBeUndone', 'displayType', ['componentHost', 'componentHosts', 'radio button']);
 
   describe('#isValid', function () {
     it('should be true', function () {
@@ -294,5 +280,34 @@ describe('App.ServiceConfigProperty', function () {
       expect(serviceConfigProperty.get('overrideIsFinalValues')).to.eql([]);
     });
   });
+
+  describe('custom validation for `ranger_admin_password`', function () {
+
+    beforeEach(function () {
+      this.config = App.ServiceConfigProperty.create({
+        name: 'ranger_admin_password',
+        displayType: 'password'
+      });
+    });
+
+    it('value less than 9 symbols is invalid', function () {
+      this.config.set('value', 12345678);
+      this.config.set('retypedPassword', 12345678);
+      expect(this.config.get('isValid')).to.be.false;
+      expect(this.config.get('errorMessage')).to.be.equal(Em.I18n.t('errorMessage.config.password.length').format(9));
+    });
+
+    it('value with 9 symbols is valid', function () {
+      this.config.set('value', 123456789);
+      this.config.set('retypedPassword', 123456789);
+      expect(this.config.get('isValid')).to.be.true;
+      expect(this.config.get('errorMessage')).to.be.equal('');
+    });
+
+  });
+
+  App.TestAliases.testAsComputedOr(getProperty(), 'hasIssues', ['error', 'warn', 'overridesWithIssues.length']);
+
+  App.TestAliases.testAsComputedFilterBy(getProperty(), 'overridesWithIssues', 'overrides', 'hasIssues', true);
 
 });

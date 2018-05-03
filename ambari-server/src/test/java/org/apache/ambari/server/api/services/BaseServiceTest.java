@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,6 +18,27 @@
 
 package org.apache.ambari.server.api.services;
 
+import static org.easymock.EasyMock.capture;
+import static org.easymock.EasyMock.createMock;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.createStrictMock;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.reset;
+import static org.easymock.EasyMock.verify;
+import static org.junit.Assert.assertEquals;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.ws.rs.core.HttpHeaders;
+import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriInfo;
+
 import org.apache.ambari.server.api.resources.ResourceInstance;
 import org.apache.ambari.server.api.services.parsers.BodyParseException;
 import org.apache.ambari.server.api.services.parsers.RequestBodyParser;
@@ -29,26 +50,8 @@ import org.easymock.EasyMockRunner;
 import org.easymock.Mock;
 import org.easymock.MockType;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
-
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static org.easymock.EasyMock.*;
-import static org.easymock.EasyMock.createNiceMock;
-import static org.easymock.EasyMock.createStrictMock;
-
-import static org.junit.Assert.assertEquals;
 
 /**
  * Base class for service unit tests.
@@ -148,7 +151,7 @@ public abstract class BaseServiceTest {
   private void testMethod_bodyParseException(ServiceTestInvocation testMethod) throws Exception {
     addExpectForInitialRequest(testMethod);
 
-    Capture<Result> resultCapture = new Capture<Result>();
+    Capture<Result> resultCapture = EasyMock.newCapture();
     BodyParseException e = new BodyParseException("TEST MSG");
     expect(bodyParser.parse(testMethod.getBody())).andThrow(e);
     expect(serializer.serialize(capture(resultCapture))).andReturn(serializedResult);
@@ -195,7 +198,7 @@ public abstract class BaseServiceTest {
 
   private void addExpectForInitialRequest(ServiceTestInvocation testMethod) {
     RequestBody rb = new RequestBody();
-    rb.setBody("body");
+    rb.setBody(testMethod.getBody());
     expect(requestFactory.createRequest(EasyMock.eq(httpHeaders), EasyMock.anyObject(RequestBody.class), EasyMock.eq(uriInfo),
       EasyMock.eq(testMethod.getRequestType()), EasyMock.eq(resourceInstance))).andReturn(request);
   }
@@ -207,7 +210,7 @@ public abstract class BaseServiceTest {
     private Object[] m_args;
     private String m_body;
 
-    private static final Map<Request.Type, Integer> mapStatusCodes = new HashMap<Request.Type, Integer>();
+    private static final Map<Request.Type, Integer> mapStatusCodes = new HashMap<>();
 
     static {
       mapStatusCodes.put(Request.Type.GET, 200);

@@ -44,26 +44,6 @@
               <primary>true</primary>
             </log>
           </logs>
-          <configFile>
-            <type>properties</type>
-            <fileName>application.properties</fileName>
-            <dictionaryName>application-properties</dictionaryName>
-          </configFile>
-          <configFile>
-            <type>env</type>
-            <fileName>atlas-env.sh</fileName>
-            <dictionaryName>atlas-env</dictionaryName>
-          </configFile>
-          <configFile>
-            <type>env</type>
-            <fileName>atlas-log4j.xml</fileName>
-            <dictionaryName>atlas-log4j</dictionaryName>
-          </configFile>
-          <configFile>
-            <type>xml</type>
-            <fileName>hbase-site.xml</fileName>
-            <dictionaryName>atlas-hbase-site</dictionaryName>
-          </configFile>
         </component>
 
         <component>
@@ -78,26 +58,28 @@
             <script>scripts/atlas_client.py</script>
             <scriptType>PYTHON</scriptType>
           </commandScript>
-          <configFile>
-            <type>properties</type>
-            <fileName>application.properties</fileName>
-            <dictionaryName>application-properties</dictionaryName>
-          </configFile>
-          <configFile>
-            <type>env</type>
-            <fileName>atlas-env.sh</fileName>
-            <dictionaryName>atlas-env</dictionaryName>
-          </configFile>
-          <configFile>
-            <type>env</type>
-            <fileName>atlas-log4j.xml</fileName>
-            <dictionaryName>atlas-log4j</dictionaryName>
-          </configFile>
-          <configFile>
-            <type>xml</type>
-            <fileName>atlas-hbase-site.xml</fileName>
-            <dictionaryName>atlas-hbase-site</dictionaryName>
-          </configFile>
+          <configFiles>
+            <configFile>
+              <type>properties</type>
+              <fileName>application.properties</fileName>
+              <dictionaryName>application-properties</dictionaryName>
+            </configFile>
+            <configFile>
+              <type>env</type>
+              <fileName>atlas-env.sh</fileName>
+              <dictionaryName>atlas-env</dictionaryName>
+            </configFile>
+            <configFile>
+              <type>env</type>
+              <fileName>atlas-log4j.xml</fileName>
+              <dictionaryName>atlas-log4j</dictionaryName>
+            </configFile>
+            <configFile>
+              <type>env</type>
+              <fileName>atlas-solrconfig.xml</fileName>
+              <dictionaryName>atlas-solrconfig</dictionaryName>
+            </configFile>
+          </configFiles>
         </component>
       </components>
 
@@ -107,6 +89,10 @@
           <packages>
             <package>
               <name>atlas-metadata</name>
+            </package>
+            <package>
+              <name>ambari-infra-solr-client</name>
+              <condition>should_install_infra_solr_client</condition>
             </package>
           </packages>
         </osSpecific>
@@ -118,15 +104,12 @@
         <timeout>300</timeout>
       </commandScript>
 
-      <requiredServices>
-        <service>KAFKA</service>
-      </requiredServices>
-
       <configuration-dependencies>
         <config-type>application-properties</config-type>
         <config-type>atlas-env</config-type>
         <config-type>atlas-log4j</config-type>
-        <config-type>atlas-hbase-site</config-type>
+        <config-type>core-site</config-type>
+        <config-type>atlas-solrconfig</config-type>
       </configuration-dependencies>
 
     </service>

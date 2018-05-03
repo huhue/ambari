@@ -18,7 +18,8 @@
  */
 package org.apache.ambari.logfeeder.input.reader;
 
-import java.io.File;
+import org.apache.log4j.Logger;
+
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -26,19 +27,13 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.zip.GZIPInputStream;
 
-import org.apache.log4j.Logger;
+class GZIPReader extends InputStreamReader {
 
-public class GZIPReader extends InputStreamReader {
+  private static final Logger LOG = Logger.getLogger(GZIPReader.class);
 
-  private static Logger logger = Logger.getLogger(GZIPReader.class);
-
-  public GZIPReader(String fileName) throws FileNotFoundException {
+  GZIPReader(String fileName) throws FileNotFoundException {
     super(getStream(fileName));
-    logger.info("Created GZIPReader for file : " + fileName);
-  }
-
-  public GZIPReader(File file) throws FileNotFoundException {
-    super(getStream(file.getName()));
+    LOG.info("Created GZIPReader for file : " + fileName);
   }
 
   private static InputStream getStream(String fileName) {
@@ -48,34 +43,23 @@ public class GZIPReader extends InputStreamReader {
       fileStream = new FileInputStream(fileName);
       gzipStream = new GZIPInputStream(fileStream);
     } catch (Exception e) {
-      logger.error(e, e.getCause());
+      LOG.error(e, e.getCause());
     }
     return gzipStream;
   }
 
   /**
    * validating file based on magic number
-   *
-   * @param fileName
-   * @return
    */
-  public static boolean isValidFile(String fileName) {
+  static boolean isValidFile(String fileName) {
     // TODO make it generic and put in factory itself
-    InputStream is = null;
-    try {
-      is = new FileInputStream(fileName);
+    
+    try (InputStream is = new FileInputStream(fileName)) {
       byte[] signature = new byte[2];
       int nread = is.read(signature); // read the gzip signature
       return nread == 2 && signature[0] == (byte) 0x1f && signature[1] == (byte) 0x8b;
     } catch (IOException e) {
       return false;
-    } finally {
-      if (is != null) {
-        try {
-          is.close();
-        } catch (IOException e) {
-        }
-      }
     }
   }
 }

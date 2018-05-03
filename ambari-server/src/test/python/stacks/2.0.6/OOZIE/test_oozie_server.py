@@ -21,12 +21,55 @@ limitations under the License.
 import json
 from mock.mock import MagicMock, call, patch
 from stacks.utils.RMFTestCase import *
+from resource_management.libraries.script.script import Script
 from resource_management.core import shell
 from resource_management.core.exceptions import Fail
 from resource_management.libraries import functions
 from resource_management.libraries.providers.hdfs_resource import WebHDFSUtil
 import tempfile
 
+REPOSITORY_FILE_DICT = {
+        "resolved": True,
+        "repoVersion": "2.6.4.0-52",
+        "repositories": [
+            {
+                "tags": [],
+                "ambariManaged": True,
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-52",
+                "repoName": "HDP",
+                "repoId": "HDP-2.6-repo-1",
+                "applicableServices": []
+            },
+            {
+                "repoName": "HDP-GPL",
+                "tags": [
+                    "GPL"
+                ],
+                "ambariManaged": True,
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-52",
+                "repoId": "HDP-2.6-GPL-repo-1"
+            },
+            {
+                "repoName": "HDP-UTILS",
+                "tags": [],
+                "ambariManaged": True,
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6",
+                "repoId": "HDP-UTILS-1.1.0.22-repo-1"
+            }
+        ],
+        "feature": {
+            "preInstalled": False,
+            "scoped": True
+        },
+        "stackName": "HDP",
+        "repoVersionId": 1,
+        "repoFileName": "ambari-hdp-1"
+    }
+
+def format_package_name_side_effect(name):
+  return name.replace("${stack_version}", "1_2_3_4")
+
+@patch.object(Script, 'format_package_name', new = MagicMock(side_effect=format_package_name_side_effect))
 @patch("platform.linux_distribution", new = MagicMock(return_value="Linux"))
 @patch.object(WebHDFSUtil, "run_command", new=MagicMock(return_value={}))
 @patch.object(tempfile, "gettempdir", new=MagicMock(return_value="/tmp"))
@@ -37,12 +80,16 @@ class TestOozieServer(RMFTestCase):
   UPGRADE_STACK_VERSION = "2.2"
   DEFAULT_IMMUTABLE_PATHS = ['/apps/hive/warehouse', '/apps/falcon', '/mr-history/done', '/app-logs', '/tmp']
 
+  CONFIG_OVERRIDES = {"serviceName":"OOZIE", "role":"OOZIE_SERVER"}
+
   def setUp(self):
     self.maxDiff = None
 
   @patch.object(shell, "call")
   @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True]))
-  def test_configure_default(self, call_mocks):
+  @patch("os.path.isfile")
+  def test_configure_default(self, isfile_mock, call_mocks):
+    isfile_mock.return_value = True
     call_mocks = MagicMock(return_value=(0, "New Oozie WAR file with added"))
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
                        classname = "OozieServer",
@@ -57,7 +104,10 @@ class TestOozieServer(RMFTestCase):
 
   @patch.object(shell, "call")
   @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, False, True]))
-  def test_configure_default_mysql(self, call_mocks):
+  @patch("os.path.isfile")
+  def test_configure_default_mysql(self, isfile_mock, iscall_mocks):
+    # Mock call when checking if need to copy oozie ext-2.2.zip file
+    isfile_mock.side_effect = [True, False]
     call_mocks = MagicMock(return_value=(0, "New Oozie WAR file with added"))
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
                        classname = "OozieServer",
@@ -123,7 +173,7 @@ class TestOozieServer(RMFTestCase):
                               content=Template("oozie.conf.j2"),
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/oozie-log4j.properties',
-                              content = 'log4jproperties\nline2',
+                              content = InlineTemplate('log4jproperties\nline2'),
                               owner = 'oozie',
                               group = 'hadoop',
                               mode = 0644,
@@ -240,7 +290,7 @@ class TestOozieServer(RMFTestCase):
                               recursive_ownership = True,
     )
     self.assertResourceCalled('File', '/tmp/mysql-connector-java.jar',
-        content = DownloadSource('http://c6401.ambari.apache.org:8080/resources//mysql-connector-java.jar'),
+        content = DownloadSource('http://c6401.ambari.apache.org:8080/resources/mysql-connector-java.jar'),
     )
     self.assertResourceCalled('Execute', ('cp',
      '--remove-destination',
@@ -279,7 +329,10 @@ class TestOozieServer(RMFTestCase):
 
   @patch.object(shell, "call")
   @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, False, True]))
-  def test_configure_existing_sqla(self, call_mocks):
+  @patch("os.path.isfile")
+  def test_configure_existing_sqla(self, isfile_mock, call_mocks):
+    # Mock call when checking if need to copy oozie ext-2.2.zip file
+    isfile_mock.side_effect = [True, False]
     call_mocks = MagicMock(return_value=(0, "New Oozie WAR file with added"))
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
                        classname = "OozieServer",
@@ -351,7 +404,7 @@ class TestOozieServer(RMFTestCase):
                               content=Template("oozie.conf.j2"),
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/oozie-log4j.properties',
-                              content = 'log4jproperties\nline2',
+                              content = InlineTemplate('log4jproperties\nline2'),
                               owner = 'oozie',
                               group = 'hadoop',
                               mode = 0644,
@@ -465,7 +518,7 @@ class TestOozieServer(RMFTestCase):
                               recursive_ownership = True,
                               )
     self.assertResourceCalled('File', '/tmp/sqla-client-jdbc.tar.gz',
-                              content = DownloadSource('http://c6401.ambari.apache.org:8080/resources//sqla-client-jdbc.tar.gz'),
+                              content = DownloadSource('http://c6401.ambari.apache.org:8080/resources/sqla-client-jdbc.tar.gz'),
                               )
     self.assertResourceCalled('Execute', ('tar', '-xvf', '/tmp/sqla-client-jdbc.tar.gz', '-C', '/tmp'),
                               sudo = True,
@@ -508,6 +561,9 @@ class TestOozieServer(RMFTestCase):
   @patch("os.path.isfile")
   @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True]))
   def test_start_default(self, isfile_mock, call_mocks):
+    self._test_start(isfile_mock, call_mocks)
+
+  def _test_start(self, isfile_mock, call_mocks):
     isfile_mock.return_value = True
     call_mocks = MagicMock(return_value=(0, "New Oozie WAR file with added"))
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
@@ -566,6 +622,13 @@ class TestOozieServer(RMFTestCase):
     )
     self.assertNoMoreResources()
 
+  @patch.object(WebHDFSUtil, 'is_webhdfs_available', return_value=False)
+  @patch.object(shell, "call")
+  @patch("os.path.isfile")
+  @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True]))
+  def test_start_no_webhdfs(self, webhdfsutil_mock, isfile_mock, call_mocks):
+    self._test_start(isfile_mock, call_mocks)
+
   def test_stop_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
                          classname = "OozieServer",
@@ -574,7 +637,11 @@ class TestOozieServer(RMFTestCase):
                          stack_version = self.STACK_VERSION,
                          target = RMFTestCase.TARGET_COMMON_SERVICES
     )
-    self.assertResourceCalled('Execute', 'cd /var/tmp/oozie && /usr/lib/oozie/bin/oozie-stop.sh',
+    self.assertResourceCalled('Directory', '/var/tmp/oozie',
+        owner = 'oozie',
+        create_parents = True,
+    )
+    self.assertResourceCalled('Execute', 'cd /var/tmp/oozie && /usr/lib/oozie/bin/oozied.sh stop 60 -force',
         environment = {'OOZIE_CONFIG': '/etc/oozie/conf'},
         only_if = "ambari-sudo.sh su oozie -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/oozie/oozie.pid >/dev/null 2>&1 && ps -p `cat /var/run/oozie/oozie.pid` >/dev/null 2>&1'",
         user = 'oozie',
@@ -585,8 +652,11 @@ class TestOozieServer(RMFTestCase):
     self.assertNoMoreResources()
 
   @patch.object(shell, "call")
-  @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True]))
-  def test_configure_secured(self, call_mocks):
+  @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True, True, True]))
+  @patch("os.path.isfile")
+  def test_configure_secured(self, isfile_mock, call_mocks):
+    # Mock call when checking if need to copy oozie ext-2.2.zip file
+    isfile_mock.side_effect = [True, False]
     call_mocks = MagicMock(return_value=(0, "New Oozie WAR file with added"))
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
                        classname = "OozieServer",
@@ -601,9 +671,44 @@ class TestOozieServer(RMFTestCase):
 
   @patch.object(shell, "call")
   @patch("os.path.isfile")
-  @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True]))
+  @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True, True, True]))
+  def test_configure_secured_ha(self, isfile_mock, call_mocks):
+    # Mock call when checking if need to copy oozie ext-2.2.zip file
+    isfile_mock.side_effects = [True, False]
+    call_mocks = MagicMock(return_value=(0, "New Oozie WAR file with added"))
+
+    config_file = "stacks/2.0.6/configs/secured.json"
+    with open(config_file, "r") as f:
+      secured_json = json.load(f)
+
+    secured_json['configurations']['oozie-site']['oozie.ha.authentication.kerberos.principal'] = "*"
+    secured_json['configurations']['oozie-site']['oozie.ha.authentication.kerberos.keytab'] = "/etc/security/keytabs/oozie_ha.keytab"
+
+    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
+                       classname = "OozieServer",
+                       command = "configure",
+                       config_dict = secured_json,
+                       stack_version = self.STACK_VERSION,
+                       target = RMFTestCase.TARGET_COMMON_SERVICES,
+                       call_mocks = call_mocks
+    )
+
+    # Update the config data to see if
+    #  * configurations/oozie-site/oozie.authentication.kerberos.principal == configurations/oozie-site/oozie.ha.authentication.kerberos.principal
+    #  * configurations/oozie-site/oozie.authentication.kerberos.keytab == configurations/oozie-site/oozie.ha.authentication.kerberos.keytab
+    expected_oozie_site = dict(self.getConfig()['configurations']['oozie-site'])
+    expected_oozie_site['oozie.authentication.kerberos.principal'] = expected_oozie_site['oozie.ha.authentication.kerberos.principal']
+    expected_oozie_site['oozie.authentication.kerberos.keytab'] = expected_oozie_site['oozie.ha.authentication.kerberos.keytab']
+
+    self.assert_configure_secured(expected_oozie_site)
+    self.assertNoMoreResources()
+
+  @patch.object(shell, "call")
+  @patch("os.path.isfile")
+  @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True, True, True]))
   def test_start_secured(self, isfile_mock, call_mocks):
-    isfile_mock.return_value = True
+    # Mock call when checking if need to copy oozie ext-2.2.zip file
+    isfile_mock.side_effects = [True, False]
     call_mocks = MagicMock(return_value=(0, "New Oozie WAR file with added"))
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
                          classname = "OozieServer",
@@ -673,7 +778,11 @@ class TestOozieServer(RMFTestCase):
                          stack_version = self.STACK_VERSION,
                          target = RMFTestCase.TARGET_COMMON_SERVICES
     )
-    self.assertResourceCalled('Execute', 'cd /var/tmp/oozie && /usr/lib/oozie/bin/oozie-stop.sh',
+    self.assertResourceCalled('Directory', '/var/tmp/oozie',
+        owner = 'oozie',
+        create_parents = True,
+    )
+    self.assertResourceCalled('Execute', 'cd /var/tmp/oozie && /usr/lib/oozie/bin/oozied.sh stop 60 -force',
         environment = {'OOZIE_CONFIG': '/etc/oozie/conf'},
         only_if = "ambari-sudo.sh su oozie -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/oozie/oozie.pid >/dev/null 2>&1 && ps -p `cat /var/run/oozie/oozie.pid` >/dev/null 2>&1'",
         user = 'oozie',
@@ -720,7 +829,7 @@ class TestOozieServer(RMFTestCase):
                               mode = 0664,
                               conf_dir = '/etc/oozie/conf',
                               configurations = self.getConfig()['configurations']['oozie-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['oozie-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['oozie-site']
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/oozie-env.sh',
                               owner = 'oozie',
@@ -742,7 +851,7 @@ class TestOozieServer(RMFTestCase):
                               owner = 'oozie',
                               group = 'hadoop',
                               mode = 0644,
-                              content = 'log4jproperties\nline2'
+                              content = InlineTemplate('log4jproperties\nline2')
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/adminusers.txt',
                               owner = 'oozie',
@@ -876,7 +985,7 @@ class TestOozieServer(RMFTestCase):
                               recursive_ownership = True,
     )
 
-  def assert_configure_secured(self):
+  def assert_configure_secured(self, expected_oozie_site = None):
     self.assertResourceCalled('HdfsResource', '/user/oozie',
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
         security_enabled = True,
@@ -909,13 +1018,17 @@ class TestOozieServer(RMFTestCase):
                               group = 'hadoop',
                               create_parents = True
                               )
+
+    if expected_oozie_site is None:
+      expected_oozie_site = self.getConfig()['configurations']['oozie-site']
+
     self.assertResourceCalled('XmlConfig', 'oozie-site.xml',
                               owner = 'oozie',
                               group = 'hadoop',
                               mode = 0664,
                               conf_dir = '/etc/oozie/conf',
-                              configurations = self.getConfig()['configurations']['oozie-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['oozie-site']
+                              configurations = expected_oozie_site,
+                              configuration_attributes = self.getConfig()['configurationAttributes']['oozie-site']
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/oozie-env.sh',
                               owner = 'oozie',
@@ -937,7 +1050,7 @@ class TestOozieServer(RMFTestCase):
                               owner = 'oozie',
                               group = 'hadoop',
                               mode = 0644,
-                              content = 'log4jproperties\nline2'
+                              content = InlineTemplate('log4jproperties\nline2')
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/adminusers.txt',
                               owner = 'oozie',
@@ -1070,16 +1183,24 @@ class TestOozieServer(RMFTestCase):
                               group = 'hadoop',
                               recursive_ownership = True,
     )
+    self.assertResourceCalled('File', '/etc/oozie/conf/zkmigrator_jaas.conf',
+                              owner = 'oozie',
+                              group = 'hadoop',
+                              content = Template('zkmigrator_jaas.conf.j2')
+                              )
 
   @patch.object(shell, "call")
-  @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True]))
-  def test_configure_default_hdp22(self, call_mocks):
+  @patch('os.path.exists', new=MagicMock(side_effect = [False, True, False, True, True]))
+  @patch("os.path.isfile")
+  def test_configure_default_hdp22(self, isfile_mock, call_mocks):
+    # Mock call when checking if need to copy oozie ext-2.2.zip file
+    isfile_mock.side_effect = [True, False]
     call_mocks = MagicMock(return_value=(0, "New Oozie WAR file with added"))
     config_file = "stacks/2.0.6/configs/default.json"
     with open(config_file, "r") as f:
       default_json = json.load(f)
 
-    default_json['hostLevelParams']['stack_version']= '2.2'
+    default_json['clusterLevelParams']['stack_version']= '2.2'
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
                      classname = "OozieServer",
                      command = "configure",
@@ -1090,119 +1211,6 @@ class TestOozieServer(RMFTestCase):
     )
     self.assert_configure_default()
 
-  @patch("resource_management.libraries.functions.security_commons.build_expectations")
-  @patch("resource_management.libraries.functions.security_commons.get_params_from_filesystem")
-  @patch("resource_management.libraries.functions.security_commons.validate_security_config_properties")
-  @patch("resource_management.libraries.functions.security_commons.cached_kinit_executor")
-  @patch("resource_management.libraries.script.Script.put_structured_out")
-  def test_security_status(self, put_structured_out_mock, cached_kinit_executor_mock, validate_security_config_mock, get_params_mock, build_exp_mock):
-    # Test that function works when is called with correct parameters
-    security_params = {
-      "oozie-site": {
-        "oozie.authentication.type": "kerberos",
-        "oozie.service.AuthorizationService.security.enabled": "true",
-        "oozie.service.HadoopAccessorService.kerberos.enabled": "true",
-        "local.realm": "EXAMPLE.COM",
-        "oozie.authentication.kerberos.principal": "principal",
-        "oozie.authentication.kerberos.keytab": "/path/to_keytab",
-        "oozie.service.HadoopAccessorService.kerberos.principal": "principal",
-        "oozie.service.HadoopAccessorService.keytab.file": "/path/to_keytab"}
-    }
-
-    result_issues = []
-    props_value_check = {"oozie.authentication.type": "kerberos",
-                         "oozie.service.AuthorizationService.security.enabled": "true",
-                         "oozie.service.HadoopAccessorService.kerberos.enabled": "true"}
-    props_empty_check = [ "local.realm",
-                          "oozie.authentication.kerberos.principal",
-                          "oozie.authentication.kerberos.keytab",
-                          "oozie.service.HadoopAccessorService.kerberos.principal",
-                          "oozie.service.HadoopAccessorService.keytab.file"]
-    props_read_check = None
-
-    get_params_mock.return_value = security_params
-    validate_security_config_mock.return_value = result_issues
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
-                       classname = "OozieServer",
-                       command = "security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-
-    get_params_mock.assert_called_with("/etc/oozie/conf", {'oozie-site.xml': 'XML'})
-    build_exp_mock.assert_called_with('oozie-site', props_value_check, props_empty_check, props_read_check)
-    put_structured_out_mock.assert_called_with({"securityState": "SECURED_KERBEROS"})
-    self.assertTrue(cached_kinit_executor_mock.call_count, 2)
-    cached_kinit_executor_mock.assert_called_with('/usr/bin/kinit',
-                                                  self.config_dict['configurations']['oozie-env']['oozie_user'],
-                                                  security_params['oozie-site']['oozie.service.HadoopAccessorService.keytab.file'],
-                                                  security_params['oozie-site']['oozie.service.HadoopAccessorService.kerberos.principal'],
-                                                  self.config_dict['hostname'],
-                                                  '/tmp')
-
-    # Testing that the exception throw by cached_executor is caught
-    cached_kinit_executor_mock.reset_mock()
-    cached_kinit_executor_mock.side_effect = Exception("Invalid command")
-
-    try:
-      self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
-                         classname = "OozieServer",
-                         command = "security_status",
-                         config_file="secured.json",
-                         stack_version = self.STACK_VERSION,
-                         target = RMFTestCase.TARGET_COMMON_SERVICES
-      )
-    except:
-      self.assertTrue(True)
-
-    # Testing with a security_params which doesn't contains oozie-site
-    empty_security_params = {}
-    cached_kinit_executor_mock.reset_mock()
-    get_params_mock.reset_mock()
-    put_structured_out_mock.reset_mock()
-    get_params_mock.return_value = empty_security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
-                       classname = "OozieServer",
-                       command = "security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityIssuesFound": "Keytab file or principal are not set property."})
-
-    # Testing with not empty result_issues
-    result_issues_with_params = {
-      'oozie-site': "Something bad happened"
-    }
-
-    validate_security_config_mock.reset_mock()
-    get_params_mock.reset_mock()
-    validate_security_config_mock.return_value = result_issues_with_params
-    get_params_mock.return_value = security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
-                       classname = "OozieServer",
-                       command = "security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-
-    # Testing with security_enable = false
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
-                       classname = "OozieServer",
-                       command = "security_status",
-                       config_file="default.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-
-
   @patch("os.path.isdir")
   @patch("os.path.exists")
   @patch("os.path.isfile")
@@ -1210,8 +1218,8 @@ class TestOozieServer(RMFTestCase):
   @patch("shutil.rmtree", new = MagicMock())
   @patch("glob.iglob")
   @patch("shutil.copy2", new = MagicMock())
-  def test_upgrade(self, glob_mock, remove_mock,
-      isfile_mock, exists_mock, isdir_mock):
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
+  def test_upgrade(self, glob_mock, remove_mock, isfile_mock, exists_mock, isdir_mock):
 
     def exists_mock_side_effect(path):
       if path == '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar':
@@ -1229,40 +1237,60 @@ class TestOozieServer(RMFTestCase):
 
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
      classname = "OozieServer", command = "pre_upgrade_restart", config_file = "oozie-upgrade.json",
+     config_overrides = self.CONFIG_OVERRIDES,
      stack_version = self.UPGRADE_STACK_VERSION,
      target = RMFTestCase.TARGET_COMMON_SERVICES,
      call_mocks = [(0, prepare_war_stdout)])
     
     self.assertTrue(isfile_mock.called)
-    self.assertEqual(isfile_mock.call_count,3)
+    self.assertEqual(isfile_mock.call_count,2)
     isfile_mock.assert_called_with('/usr/share/HDP-oozie/ext-2.2.zip')
 
     self.assertTrue(glob_mock.called)
     self.assertEqual(glob_mock.call_count,1)
     glob_mock.assert_called_with('/usr/hdp/2.2.1.0-2135/hadoop/lib/hadoop-lzo*.jar')
 
-    self.assertResourceCalled('Execute',
-      ('tar', '-zcvhf', '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar', '/usr/hdp/current/oozie-server/conf/'),
-      sudo = True,
-      tries = 3,
-      try_sleep = 1
-    )
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-client', u'2.2.1.0-2135'),
+      sudo = True )
+
     self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-server', u'2.2.1.0-2135'),
       sudo = True )
 
-    self.assertResourceCalled('Execute',
-      ('tar', '-xvf', '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar', '-C', '/usr/hdp/current/oozie-server/conf//'),
-      sudo = True,
-      tries = 3,
-      try_sleep = 1
-    )
-    self.assertResourceCalled('Directory', '/tmp/oozie-upgrade-backup', action = ['delete'])
     self.assertResourceCalled('Directory', '/usr/hdp/current/oozie-server/libext', mode = 0777)
+
+    self.assertResourceCalled('Repository', 'HDP-2.6-repo-1',
+        append_to_file = False,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-52',
+        action = ['create'],
+        components = [u'HDP', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Repository', 'HDP-2.6-GPL-repo-1',
+        append_to_file = True,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-52',
+        action = ['create'],
+        components = [u'HDP-GPL', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Repository', 'HDP-UTILS-1.1.0.22-repo-1',
+        append_to_file = True,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6',
+        action = ['create'],
+        components = [u'HDP-UTILS', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Package', ('lzo'), retry_count=5, retry_on_repo_unavailability= False)
+    self.assertResourceCalled('Package', ('hadooplzo_1_2_3_4'), retry_count = 5, retry_on_repo_unavailability = False)
+    self.assertResourceCalled('Package', ('hadooplzo_1_2_3_4-native'), retry_count = 5, retry_on_repo_unavailability = False)
     self.assertResourceCalled('Execute', ('cp', '/usr/share/HDP-oozie/ext-2.2.zip', '/usr/hdp/current/oozie-server/libext'), sudo=True)
     self.assertResourceCalled('Execute', ('chown', 'oozie:hadoop', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip'), sudo=True)
-    self.assertResourceCalled('File', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip',
-        mode = 0644,
-    )
+    self.assertResourceCalled('File', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip', mode = 0644)
     self.assertNoMoreResources()
 
   @patch("os.path.isdir")
@@ -1272,6 +1300,7 @@ class TestOozieServer(RMFTestCase):
   @patch("shutil.rmtree", new = MagicMock())
   @patch("glob.iglob")
   @patch("shutil.copy2", new = MagicMock())
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_upgrade_23(self, glob_mock, remove_mock,
       isfile_mock, exists_mock, isdir_mock):
 
@@ -1296,61 +1325,166 @@ class TestOozieServer(RMFTestCase):
 
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
+    json_content['repositoryFile'] = REPOSITORY_FILE_DICT
 
     mocks_dict = {}
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
      classname = "OozieServer", command = "pre_upgrade_restart", config_dict = json_content,
+     config_overrides = self.CONFIG_OVERRIDES,
      stack_version = self.UPGRADE_STACK_VERSION,
      target = RMFTestCase.TARGET_COMMON_SERVICES,
-     call_mocks = [(0, None, ''), (0, prepare_war_stdout)],
+     call_mocks = [(0, prepare_war_stdout)],
      mocks_dict = mocks_dict)
 
     self.assertTrue(isfile_mock.called)
-    self.assertEqual(isfile_mock.call_count,3)
+    self.assertEqual(isfile_mock.call_count,2)
     isfile_mock.assert_called_with('/usr/share/HDP-oozie/ext-2.2.zip')
 
     self.assertTrue(glob_mock.called)
     self.assertEqual(glob_mock.call_count,1)
     glob_mock.assert_called_with('/usr/hdp/2.3.0.0-1234/hadoop/lib/hadoop-lzo*.jar')
 
-    self.assertResourceCalled('Execute',
-      ('tar', '-zcvhf', '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar', '/usr/hdp/current/oozie-server/conf/'),
-      sudo = True,
-      tries = 3,
-      try_sleep = 1
-    )
-    self.assertResourceCalled('Link', '/etc/oozie/conf',
-                              to = '/usr/hdp/current/oozie-client/conf',
-    )
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-client', '2.3.0.0-1234'), sudo = True)
     self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-server', '2.3.0.0-1234'), sudo = True)
 
-    self.assertResourceCalled('Execute',
-      ('tar', '-xvf', '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar', '-C', '/usr/hdp/current/oozie-server/conf//'),
-      sudo = True,
-      tries = 3,
-      try_sleep = 1
-    )
-
-    self.assertResourceCalled('Directory', '/tmp/oozie-upgrade-backup', action = ['delete'])
     self.assertResourceCalled('Directory', '/usr/hdp/current/oozie-server/libext', mode = 0777)
+
+    self.assertResourceCalled('Repository', 'HDP-2.6-repo-1',
+        append_to_file = False,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-52',
+        action = ['create'],
+        components = ['HDP', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Repository', 'HDP-2.6-GPL-repo-1',
+        append_to_file = True,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-52',
+        action = ['create'],
+        components = ['HDP-GPL', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Repository', 'HDP-UTILS-1.1.0.22-repo-1',
+        append_to_file = True,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6',
+        action = ['create'],
+        components = ['HDP-UTILS', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Package', ('lzo'), retry_count=5, retry_on_repo_unavailability= False)
+    self.assertResourceCalled('Package', ('hadooplzo_1_2_3_4'), retry_count = 5, retry_on_repo_unavailability = False)
+    self.assertResourceCalled('Package', ('hadooplzo_1_2_3_4-native'), retry_count = 5, retry_on_repo_unavailability = False)
 
     self.assertResourceCalled('Execute', ('cp', '/usr/share/HDP-oozie/ext-2.2.zip', '/usr/hdp/current/oozie-server/libext'), sudo=True)
     self.assertResourceCalled('Execute', ('chown', 'oozie:hadoop', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip'), sudo=True)
-    self.assertResourceCalled('File', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip',
-        mode = 0644,
-    )
+    self.assertResourceCalled('File', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip', mode = 0644)
     self.assertNoMoreResources()
 
-    self.assertEquals(1, mocks_dict['call'].call_count)
-    self.assertEquals(1, mocks_dict['checked_call'].call_count)
+  @patch("os.path.isdir")
+  @patch("os.path.exists")
+  @patch("os.path.isfile")
+  @patch("os.remove")
+  @patch("shutil.rmtree", new = MagicMock())
+  @patch("glob.iglob")
+  @patch("shutil.copy2", new = MagicMock())
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value=True))
+  def test_upgrade_23_with_type(self, glob_mock, remove_mock,
+      isfile_mock, exists_mock, isdir_mock):
 
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'oozie', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[0][0][0])
+    def exists_mock_side_effect(path):
+      if path == '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar':
+        return True
 
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'oozie', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])
+      return False
+
+    isdir_mock.return_value = True
+    exists_mock.side_effect = exists_mock_side_effect
+    isfile_mock.return_value = True
+    glob_mock.return_value = ["/usr/hdp/2.2.1.0-2187/hadoop/lib/hadoop-lzo-0.6.0.2.2.1.0-2187.jar"]
+
+    prepare_war_stdout = """INFO: Adding extension: libext/mysql-connector-java.jar
+    New Oozie WAR file with added 'JARs' at /var/lib/oozie/oozie-server/webapps/oozie.war"""
+
+    config_file = self.get_src_folder()+"/test/python/stacks/2.2/configs/oozie-upgrade.json"
+
+    with open(config_file, "r") as f:
+      json_content = json.load(f)
+
+    version = '2.3.0.0-1234'
+    json_content['commandParams']['version'] = version
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
+    json_content['upgradeSummary'] = {
+      'services': { 'OOZIE': { 'sourceStackId': 'HDP-2.3' }},
+      'direction': 'UPGRADE',
+      'type': 'rolling_upgrade',
+      'orchestration': 'STANDARD'
+    }
+    json_content['repositoryFile'] = REPOSITORY_FILE_DICT
+
+    mocks_dict = {}
+    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
+     classname = "OozieServer", command = "pre_upgrade_restart", config_dict = json_content,
+     command_args = ["rolling"],
+     config_overrides = self.CONFIG_OVERRIDES,
+     stack_version = self.UPGRADE_STACK_VERSION,
+     target = RMFTestCase.TARGET_COMMON_SERVICES,
+     call_mocks = [(0, prepare_war_stdout)],
+     mocks_dict = mocks_dict)
+
+    self.assertTrue(isfile_mock.called)
+    self.assertEqual(isfile_mock.call_count,2)
+    isfile_mock.assert_called_with('/usr/share/HDP-oozie/ext-2.2.zip')
+
+    self.assertTrue(glob_mock.called)
+    self.assertEqual(glob_mock.call_count,1)
+    glob_mock.assert_called_with('/usr/hdp/2.3.0.0-1234/hadoop/lib/hadoop-lzo*.jar')
+
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-client', '2.3.0.0-1234'), sudo = True)
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-server', '2.3.0.0-1234'), sudo = True)
+
+    self.assertResourceCalled('Directory', '/usr/hdp/current/oozie-server/libext', mode = 0777)
+
+    self.assertResourceCalled('Repository', 'HDP-2.6-repo-1',
+        append_to_file = False,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-52',
+        action = ['create'],
+        components = ['HDP', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Repository', 'HDP-2.6-GPL-repo-1',
+        append_to_file = True,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-52',
+        action = ['create'],
+        components = ['HDP-GPL', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Repository', 'HDP-UTILS-1.1.0.22-repo-1',
+        append_to_file = True,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6',
+        action = ['create'],
+        components = ['HDP-UTILS', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Package', ('lzo'), retry_count=5, retry_on_repo_unavailability= False)
+    self.assertResourceCalled('Package', ('hadooplzo_1_2_3_4'), retry_count = 5, retry_on_repo_unavailability = False)
+    self.assertResourceCalled('Package', ('hadooplzo_1_2_3_4-native'), retry_count = 5, retry_on_repo_unavailability = False)
+
+    self.assertResourceCalled('Execute', ('cp', '/usr/share/HDP-oozie/ext-2.2.zip', '/usr/hdp/current/oozie-server/libext'), sudo=True)
+    self.assertResourceCalled('Execute', ('chown', 'oozie:hadoop', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip'), sudo=True)
+    self.assertResourceCalled('File', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip', mode = 0644)
+    self.assertNoMoreResources()
 
 
   @patch("os.path.isdir")
@@ -1359,6 +1493,7 @@ class TestOozieServer(RMFTestCase):
   @patch("os.remove")
   @patch("shutil.rmtree", new = MagicMock())
   @patch("shutil.copy2", new = MagicMock())
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_downgrade_no_compression_library_copy(self, remove_mock,
       isfile_mock, exists_mock, isdir_mock):
 
@@ -1376,31 +1511,17 @@ class TestOozieServer(RMFTestCase):
      call_mocks = [(0, prepare_war_stdout)])
 
     self.assertTrue(isfile_mock.called)
-    self.assertEqual(isfile_mock.call_count,2)
+    self.assertEqual(isfile_mock.call_count,1)
     isfile_mock.assert_called_with('/usr/share/HDP-oozie/ext-2.2.zip')
 
-    self.assertResourceCalled('Execute',
-      ('tar', '-zcvhf', '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar', '/usr/hdp/current/oozie-server/conf/'),
-      sudo = True,
-      tries = 3,
-      try_sleep = 1
-    )
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-client', u'2.2.0.0-0000'), sudo = True)
     self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-server', u'2.2.0.0-0000'), sudo = True)
 
-    self.assertResourceCalled('Execute',
-      ('tar', '-xvf', '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar', '-C', '/usr/hdp/current/oozie-server/conf//'),
-      sudo = True,
-      tries = 3,
-      try_sleep = 1
-    )
-
-    self.assertResourceCalled('Directory', '/tmp/oozie-upgrade-backup', action = ['delete'])
     self.assertResourceCalled('Directory', '/usr/hdp/current/oozie-server/libext',mode = 0777)
+
     self.assertResourceCalled('Execute', ('cp', '/usr/share/HDP-oozie/ext-2.2.zip', '/usr/hdp/current/oozie-server/libext'), sudo=True)
     self.assertResourceCalled('Execute', ('chown', 'oozie:hadoop', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip'), sudo=True)
-    self.assertResourceCalled('File', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip',
-        mode = 0644,
-    )
+    self.assertResourceCalled('File', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip',mode = 0644)
     self.assertNoMoreResources()
 
 
@@ -1418,6 +1539,7 @@ class TestOozieServer(RMFTestCase):
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
     json_content['hostLevelParams']['stack_name'] = "HDP"
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
 
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server_upgrade.py",
       classname = "OozieUpgrade", command = "upgrade_oozie_database_and_sharelib",
@@ -1479,7 +1601,8 @@ class TestOozieServer(RMFTestCase):
 
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
-    json_content['hostLevelParams']['stack_name'] = "HDP"
+    json_content['clusterLevelParams']['stack_name'] = "HDP"
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
 
     # use mysql external database
     json_content['configurations']['oozie-site']['oozie.service.JPAService.jdbc.driver'] = "com.mysql.jdbc.Driver"
@@ -1491,7 +1614,7 @@ class TestOozieServer(RMFTestCase):
       target = RMFTestCase.TARGET_COMMON_SERVICES )
 
     self.assertResourceCalled('File', '/tmp/mysql-connector-java.jar',
-      content = DownloadSource('http://c6401.ambari.apache.org:8080/resources//mysql-connector-java.jar') )
+      content = DownloadSource('http://c6401.ambari.apache.org:8080/resources/mysql-connector-java.jar') )
 
     self.assertResourceCalled('Execute', ('cp', '--remove-destination', '/tmp/mysql-connector-java.jar',
       '/usr/hdp/2.3.0.0-1234/oozie/libext/mysql-connector-java.jar'),
@@ -1546,6 +1669,7 @@ class TestOozieServer(RMFTestCase):
   @patch("shutil.rmtree", new = MagicMock())
   @patch("glob.iglob")
   @patch("shutil.copy2", new = MagicMock())
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_upgrade_23_ensure_falcon_copied(self, glob_mock, remove_mock,
       isfile_mock, exists_mock, isdir_mock):
 
@@ -1571,43 +1695,59 @@ class TestOozieServer(RMFTestCase):
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
     json_content['clusterHostInfo']['falcon_server_hosts'] = ['c6401.ambari.apache.org']
+    json_content['repositoryFile'] = REPOSITORY_FILE_DICT
 
     mocks_dict = {}
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_server.py",
      classname = "OozieServer", command = "pre_upgrade_restart", config_dict = json_content,
      stack_version = self.UPGRADE_STACK_VERSION,
      target = RMFTestCase.TARGET_COMMON_SERVICES,
-     call_mocks = [(0, None, ''), (0, prepare_war_stdout)],
+     call_mocks = [(0, prepare_war_stdout)],
      mocks_dict = mocks_dict)
 
     self.assertTrue(isfile_mock.called)
-    self.assertEqual(isfile_mock.call_count,3)
+    self.assertEqual(isfile_mock.call_count,2)
     isfile_mock.assert_called_with('/usr/share/HDP-oozie/ext-2.2.zip')
 
     self.assertTrue(glob_mock.called)
     self.assertEqual(glob_mock.call_count,1)
     glob_mock.assert_called_with('/usr/hdp/2.3.0.0-1234/hadoop/lib/hadoop-lzo*.jar')
 
-    self.assertResourceCalled('Execute',
-      ('tar', '-zcvhf', '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar', '/usr/hdp/current/oozie-server/conf/'),
-      sudo = True,
-      tries = 3,
-      try_sleep = 1
-    )
-    self.assertResourceCalled('Link', '/etc/oozie/conf',
-                              to = '/usr/hdp/current/oozie-client/conf',
-    )
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-client', '2.3.0.0-1234'), sudo = True)
     self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-server', '2.3.0.0-1234'), sudo = True)
 
-    self.assertResourceCalled('Execute',
-      ('tar', '-xvf', '/tmp/oozie-upgrade-backup/oozie-conf-backup.tar', '-C', '/usr/hdp/current/oozie-server/conf//'),
-      sudo = True,
-      tries = 3,
-      try_sleep = 1
-    )
-
-    self.assertResourceCalled('Directory', '/tmp/oozie-upgrade-backup', action = ['delete'])
     self.assertResourceCalled('Directory', '/usr/hdp/current/oozie-server/libext', mode = 0777)
+
+    self.assertResourceCalled('Repository', 'HDP-2.6-repo-1',
+        append_to_file = False,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-52',
+        action = ['create'],
+        components = ['HDP', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Repository', 'HDP-2.6-GPL-repo-1',
+        append_to_file = True,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-52',
+        action = ['create'],
+        components = ['HDP-GPL', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Repository', 'HDP-UTILS-1.1.0.22-repo-1',
+        append_to_file = True,
+        base_url = 'http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6',
+        action = ['create'],
+        components = ['HDP-UTILS', 'main'],
+        repo_template = UnknownConfigurationMock(),
+        repo_file_name = 'ambari-hdp-1',
+        mirror_list = None,
+    )
+    self.assertResourceCalled('Package', ('lzo'), retry_count=5, retry_on_repo_unavailability= False)
+    self.assertResourceCalled('Package', ('hadooplzo_1_2_3_4'), retry_count = 5, retry_on_repo_unavailability = False)
+    self.assertResourceCalled('Package', ('hadooplzo_1_2_3_4-native'), retry_count = 5, retry_on_repo_unavailability = False)
 
     self.assertResourceCalled('Execute', ('cp', '/usr/share/HDP-oozie/ext-2.2.zip', '/usr/hdp/current/oozie-server/libext'), sudo=True)
     self.assertResourceCalled('Execute', ('chown', 'oozie:hadoop', '/usr/hdp/current/oozie-server/libext/ext-2.2.zip'), sudo=True)
@@ -1619,14 +1759,3 @@ class TestOozieServer(RMFTestCase):
     self.assertResourceCalled('Execute', 'ambari-sudo.sh chown oozie:hadoop /usr/hdp/current/oozie-server/libext/falcon-oozie-el-extension-*.jar')
 
     self.assertNoMoreResources()
-
-    self.assertEquals(1, mocks_dict['call'].call_count)
-    self.assertEquals(1, mocks_dict['checked_call'].call_count)
-
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'oozie', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[0][0][0])
-
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'oozie', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])

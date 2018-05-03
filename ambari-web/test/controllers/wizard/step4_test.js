@@ -24,18 +24,26 @@ require('controllers/wizard/step4_controller');
 describe('App.WizardStep4Controller', function () {
 
   var services = [
-    'HDFS', 'GANGLIA', 'OOZIE', 'HIVE', 'HBASE', 'PIG', 'SCOOP', 'ZOOKEEPER', 'SMARTSENSE',
-    'YARN', 'MAPREDUCE2', 'FALCON', 'TEZ', 'STORM', 'AMBARI_METRICS', 'RANGER', 'SPARK', 'SLIDER'
+    'HDFS', 'GANGLIA', 'OOZIE', 'HIVE', 'HBASE', 'PIG', 'SCOOP', 'ZOOKEEPER', 'SMARTSENSE', 'LOGSEARCH',
+    'YARN', 'MAPREDUCE2', 'FALCON', 'TEZ', 'STORM', 'AMBARI_METRICS', 'RANGER', 'SPARK', 'SLIDER', 'ATLAS', 'AMBARI_INFRA_SOLR'
   ];
+  var controller;
 
-  var controller = App.WizardStep4Controller.create();
+  beforeEach(function() {
+    controller = App.WizardStep4Controller.create();
+    services.forEach(function(serviceName) {
+      controller.pushObject(App.StackService.createRecord({
+        'serviceName':serviceName, 'isSelected': true, 'isHiddenOnSelectServicePage': false, 'isInstalled': false, 'isDisabled': 'HDFS' === serviceName, isDFS: 'HDFS' === serviceName
+      }));
+    });
+  });
 
   var generateSelectedServicesContent = function(selectedServiceNames) {
     var allServices = services.slice(0);
     modelSetup.setupStackServiceComponent();
     if (selectedServiceNames.contains('GLUSTERFS')) allServices.push('GLUSTERFS');
     allServices = allServices.map(function(serviceName) {
-      return [Ember.Object.create({
+      return [App.StackService.createRecord({
         'serviceName': serviceName,
         'isSelected': false,
         'canBeSelected': true,
@@ -43,7 +51,7 @@ describe('App.WizardStep4Controller', function () {
         isPrimaryDFS: serviceName === 'HDFS',
         isDFS: ['HDFS','GLUSTERFS'].contains(serviceName),
         isMonitoringService: ['GANGLIA'].contains(serviceName),
-        requiredServices: App.StackService.find(serviceName).get('requiredServices'),
+        requiredServices: App.StackService.find(serviceName).get('requiredServices') || [],
         displayNameOnSelectServicePage: App.format.role(serviceName, true),
         coSelectedServices: function() {
           return App.StackService.coSelected[this.get('serviceName')] || [];
@@ -58,12 +66,6 @@ describe('App.WizardStep4Controller', function () {
     return allServices;
   };
 
-  services.forEach(function(serviceName) {
-    controller.pushObject(Ember.Object.create({
-      'serviceName':serviceName, 'isSelected': true, 'isHiddenOnSelectServicePage': false, 'isInstalled': false, 'isDisabled': 'HDFS' === serviceName, isDFS: 'HDFS' === serviceName
-    }));
-  });
-
   describe('#isSubmitDisabled', function () {
     it('should return false if at least one selected service is not installed', function () {
       expect(controller.get('isSubmitDisabled')).to.equal(false);
@@ -76,18 +78,41 @@ describe('App.WizardStep4Controller', function () {
   });
 
   describe('#isAllChecked', function () {
-    it('should return true if all services are selected', function () {
+    it('should return true if all non DFS services are selected', function () {
       controller.setEach('isInstalled', false);
-      controller.findProperty('serviceName', 'HDFS').set('isSelected', true);
+      controller.findProperty('serviceName', 'YARN').set('isSelected', true);
+      controller.findProperty('serviceName', 'HDFS').set('isSelected', false);
       expect(controller.get('isAllChecked')).to.equal(true);
     });
 
     it('should return false if at least one service is not selected', function () {
-      controller.findProperty('serviceName', 'HDFS').set('isSelected', false);
+      controller.findProperty('serviceName', 'YARN').set('isSelected', false);
       expect(controller.get('isAllChecked')).to.equal(false);
     });
   });
 
+  describe('#fileSystems', function () {
+    beforeEach(function () {
+      controller.clear();
+      controller.set('content', generateSelectedServicesContent(['HDFS', 'GLUSTERFS', 'YARN']));
+    });
+
+    it('returns only DFS services', function () {
+      expect(controller.get('fileSystems')).to.have.length(2);
+      expect(controller.get('fileSystems').mapProperty('serviceName')).to.contain('GLUSTERFS');
+      expect(controller.get('fileSystems').mapProperty('serviceName')).to.contain('HDFS');
+    });
+
+    it('allows selecting only one DFS at a time', function () {
+      var fileSystems = controller.get('fileSystems');
+      fileSystems[0].set('isSelected', true);
+      expect(fileSystems[0].get('isSelected')).to.equal(true);
+      expect(fileSystems[1].get('isSelected')).to.equal(false);
+      fileSystems[1].set('isSelected', true);
+      expect(fileSystems[0].get('isSelected')).to.equal(false);
+      expect(fileSystems[1].get('isSelected')).to.equal(true);
+    });
+  });
   describe('#multipleDFSs()', function () {
     it('should return true if HDFS is selected and GLUSTERFS is selected', function () {
       controller.set('content', generateSelectedServicesContent(['HDFS', 'GLUSTERFS']));
@@ -165,7 +190,7 @@ describe('App.WizardStep4Controller', function () {
         beforeEach(function () {
           controller.clear();
           Object.keys(testCase.condition).forEach(function (id) {
-            controller.pushObject(Ember.Object.create({
+            controller.pushObject(App.StackService.createRecord({
               serviceName: id,
               isSelected: testCase.condition[id],
               canBeSelected: true,
@@ -318,6 +343,14 @@ describe('App.WizardStep4Controller', function () {
         {
           services: ['SMARTSENSE'],
           errorsExpected: ['ambariMetricsCheck']
+        },
+        {
+          services: ['ATLAS', 'AMBARI_METRICS', 'SMARTSENSE'],
+          errorsExpected: ['ambariInfraCheck']
+        },
+        {
+          services: ['LOGSEARCH', 'AMBARI_METRICS', 'SMARTSENSE'],
+          errorsExpected: ['ambariLogsearchCheck']
         }
       ],
       controllerNames = ['installerController', 'addServiceController'],
@@ -573,47 +606,26 @@ describe('App.WizardStep4Controller', function () {
     })
   });
 
-  describe('#submit for  Next click', function() {
-    var c;
-    beforeEach(function(){
-      c = App.WizardStep4Controller.create();
-      sinon.stub(App.router, 'send', Em.K);
-      App.router.nextBtnClickInProgress = false;
-    });
-    afterEach(function(){
-      App.router.nextBtnClickInProgress = false;
-      App.router.send.restore();
-    });
-    it('if Next button is clicked multiple times before the next step renders, it must not be processed',function(){
-      c.reopen({isSubmitDisabled:false});
-      c.submit();
-      expect(App.router.send.calledWith('next')).to.equal(true);
-
-      App.router.send.reset();
-      c.submit();
-      expect(App.router.send.calledWith('next')).to.equal(false);
-    });
-  });
   describe('#dependencies', function() {
     var tests = [
       {
         services: ['HDFS'],
-        dependencies: ['ZOOKEEPER'] 
+        dependencies: ['ZOOKEEPER']
       },
       {
         services: ['STORM'],
-        dependencies: ['ZOOKEEPER'] 
+        dependencies: ['ZOOKEEPER']
       }
     ];
     tests.forEach(function(test) {
       var message = '{0} dependency should be {1}'.format(test.services.join(','), test.dependencies.join(','));
       it(message, function() {
-        
+
         controller.clear();
         controller.set('content', generateSelectedServicesContent(test.services));
-        
+
         var dependentServicesTest = [];
-        
+
         test.services.forEach(function(serviceName) {
           var service = controller.filterProperty('serviceName', serviceName);
           service.forEach(function(item) {
@@ -996,11 +1008,75 @@ describe('App.WizardStep4Controller', function () {
           this.popup.onClose();
           expect(target.clb.calledWith(id)).to.be.true;
         });
-
       });
+    });
+  });
 
+  describe('#dependentServiceValidation', function() {
+
+    beforeEach(function() {
+      sinon.stub(controller, 'serviceValidation');
     });
 
+    afterEach(function() {
+      controller.serviceValidation.restore();
+      controller.clear();
+    });
+
+    it('serviceValidation should not be called when selected service does not exist', function() {
+      controller.dependentServiceValidation('S1', 'S2', 'check', Em.K);
+      expect(controller.serviceValidation.called).to.be.false;
+    });
+
+    it('serviceValidation should not be called when service not selected', function() {
+      controller.pushObject(App.StackService.createRecord({
+        serviceName: 'S1',
+        isSelected: false
+      }));
+      controller.dependentServiceValidation('S1', 'S2', 'check', Em.K);
+      expect(controller.serviceValidation.called).to.be.false;
+    });
+
+    it('serviceValidation should not be called when dependent service does not exist', function() {
+      controller.pushObjects([
+        App.StackService.createRecord({
+          serviceName: 'S1',
+          isSelected: true
+        })
+      ]);
+      controller.dependentServiceValidation('S1', 'S2', 'check', Em.K);
+      expect(controller.serviceValidation.called).to.be.false;
+    });
+
+    it('serviceValidation should not be called when dependent service is selected', function() {
+      controller.pushObjects([
+        App.StackService.createRecord({
+          serviceName: 'S1',
+          isSelected: true
+        }),
+        Em.Object.create({
+          serviceName: 'S2',
+          isSelected: true
+        })
+      ]);
+      controller.dependentServiceValidation('S1', 'S2', 'check', Em.K);
+      expect(controller.serviceValidation.called).to.be.false;
+    });
+
+    it('serviceValidation should be called when dependent service is not selected', function() {
+      controller.pushObjects([
+        App.StackService.createRecord({
+          serviceName: 'S1',
+          isSelected: true
+        }),
+        Em.Object.create({
+          serviceName: 'S2',
+          isSelected: false
+        })
+      ]);
+      controller.dependentServiceValidation('S1', 'S2', 'check', Em.K);
+      expect(controller.serviceValidation.calledOnce).to.be.true;
+    });
   });
 
 });

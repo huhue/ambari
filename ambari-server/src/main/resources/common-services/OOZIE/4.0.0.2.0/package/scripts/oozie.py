@@ -17,30 +17,43 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+# Python Imports
 import os
+import re
 
+# Resource Management Imports
 from resource_management.core.resources.service import ServiceConfig
 from resource_management.core.resources.system import Directory, Execute, File
 from resource_management.core.source import DownloadSource
 from resource_management.core.source import InlineTemplate
 from resource_management.core.source import Template
 from resource_management.libraries.functions.format import format
+from resource_management.libraries.functions.default import default
 from resource_management.libraries.functions import StackFeature
+from resource_management.libraries.functions.version import format_stack_version
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions.oozie_prepare_war import prepare_war
+from resource_management.libraries.functions.copy_tarball import get_current_version
 from resource_management.libraries.resources.xml_config import XmlConfig
+from resource_management.libraries.functions.lzo_utils import install_lzo_if_needed
 from resource_management.libraries.script.script import Script
+from resource_management.libraries.functions.security_commons import update_credential_provider_path
 from resource_management.core.resources.packaging import Package
-from resource_management.core.shell import as_user
-from resource_management.core.shell import as_sudo
+from resource_management.core.shell import as_user, as_sudo, call, checked_call
+from resource_management.core.exceptions import Fail
+
+from resource_management.libraries.functions.setup_atlas_hook import has_atlas_in_cluster, setup_atlas_hook
+from ambari_commons.constants import SERVICE, UPGRADE_TYPE_NON_ROLLING, UPGRADE_TYPE_ROLLING
+from resource_management.libraries.functions.constants import Direction
 
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
 from ambari_commons import OSConst
 from ambari_commons.inet_utils import download_file
 
+from resource_management.core import Logger
 
 @OsFamilyFuncImpl(os_family=OSConst.WINSRV_FAMILY)
-def oozie(is_server=False):
+def oozie(is_server=False, upgrade_type=None):
   import params
 
   from status_params import oozie_server_win_service_name
@@ -50,7 +63,7 @@ def oozie(is_server=False):
             configurations=params.config['configurations']['oozie-site'],
             owner=params.oozie_user,
             mode='f',
-            configuration_attributes=params.config['configuration_attributes']['oozie-site']
+            configuration_attributes=params.config['configurationAttributes']['oozie-site']
   )
 
   File(os.path.join(params.oozie_conf_dir, "oozie-env.cmd"),
@@ -70,24 +83,24 @@ def oozie(is_server=False):
                   username = params.oozie_user,
                   password = Script.get_password(params.oozie_user))
 
-  download_file(os.path.join(params.config['hostLevelParams']['jdk_location'], "sqljdbc4.jar"),
+  download_file(os.path.join(params.config['ambariLevelParams']['jdk_location'], "sqljdbc4.jar"),
                       os.path.join(params.oozie_root, "extra_libs", "sqljdbc4.jar")
   )
   webapps_sqljdbc_path = os.path.join(params.oozie_home, "oozie-server", "webapps", "oozie", "WEB-INF", "lib", "sqljdbc4.jar")
   if os.path.isfile(webapps_sqljdbc_path):
-    download_file(os.path.join(params.config['hostLevelParams']['jdk_location'], "sqljdbc4.jar"),
+    download_file(os.path.join(params.config['ambariLevelParams']['jdk_location'], "sqljdbc4.jar"),
                         webapps_sqljdbc_path
     )
-  download_file(os.path.join(params.config['hostLevelParams']['jdk_location'], "sqljdbc4.jar"),
+  download_file(os.path.join(params.config['ambariLevelParams']['jdk_location'], "sqljdbc4.jar"),
                       os.path.join(params.oozie_home, "share", "lib", "oozie", "sqljdbc4.jar")
   )
-  download_file(os.path.join(params.config['hostLevelParams']['jdk_location'], "sqljdbc4.jar"),
+  download_file(os.path.join(params.config['ambariLevelParams']['jdk_location'], "sqljdbc4.jar"),
                       os.path.join(params.oozie_home, "temp", "WEB-INF", "lib", "sqljdbc4.jar")
   )
 
 # TODO: see if see can remove this
 @OsFamilyFuncImpl(os_family=OsFamilyImpl.DEFAULT)
-def oozie(is_server=False):
+def oozie(is_server=False, upgrade_type=None):
   import params
 
   if is_server:
@@ -103,10 +116,19 @@ def oozie(is_server=False):
              owner = params.oozie_user,
              group = params.user_group
   )
+
+  params.oozie_site = update_credential_provider_path(params.oozie_site,
+                                                      'oozie-site',
+                                                      os.path.join(params.conf_dir, 'oozie-site.jceks'),
+                                                      params.oozie_user,
+                                                      params.user_group,
+                                                      use_local_jceks=True
+                                                      )
+
   XmlConfig("oozie-site.xml",
     conf_dir = params.conf_dir,
     configurations = params.oozie_site,
-    configuration_attributes=params.config['configuration_attributes']['oozie-site'],
+    configuration_attributes=params.config['configurationAttributes']['oozie-site'],
     owner = params.oozie_user,
     group = params.user_group,
     mode = 0664
@@ -136,7 +158,7 @@ def oozie(is_server=False):
       mode=0644,
       group=params.user_group,
       owner=params.oozie_user,
-      content=params.log4j_props
+      content=InlineTemplate(params.log4j_props)
     )
   elif (os.path.exists(format("{params.conf_dir}/oozie-log4j.properties"))):
     File(format("{params.conf_dir}/oozie-log4j.properties"),
@@ -163,14 +185,19 @@ def oozie(is_server=False):
      params.jdbc_driver_name == "org.postgresql.Driver" or \
      params.jdbc_driver_name == "oracle.jdbc.driver.OracleDriver":
     File(format("/usr/lib/ambari-agent/{check_db_connection_jar_name}"),
-      content = DownloadSource(format("{jdk_location}{check_db_connection_jar_name}")),
+      content = DownloadSource(format("{jdk_location}/{check_db_connection_jar_name}")),
     )
   pass
 
   oozie_ownership()
   
-  if is_server:      
-    oozie_server_specific()
+  if params.lzo_enabled:
+    install_lzo_if_needed()
+    Execute(format('{sudo} cp {hadoop_lib_home}/hadoop-lzo*.jar {oozie_lib_dir}'),
+    )
+  
+  if is_server:
+    oozie_server_specific(upgrade_type)
   
 def oozie_ownership():
   import params
@@ -195,16 +222,36 @@ def oozie_ownership():
     group = params.user_group
   )
 
-def oozie_server_specific():
+def get_oozie_ext_zip_source_paths(upgrade_type, params):
+  """
+  Get an ordered list of Oozie ext zip file paths from the source stack.
+  :param upgrade_type:  Upgrade type will be None if not in the middle of a stack upgrade.
+  :param params: Expected to contain fields for ext_js_path, upgrade_direction, source_stack_name, and ext_js_file
+  :return: Source paths to use for Oozie extension zip file
+  """
+  # Default to /usr/share/$TARGETSTACK-oozie/ext-2.2.zip
+  paths = []
+  source_ext_js_path = params.ext_js_path
+  # Preferred location used by HDP and BigInsights 4.2.5
+  if upgrade_type is not None and params.upgrade_direction == Direction.UPGRADE:
+    source_ext_js_path = "/usr/share/" + params.source_stack_name.upper() + "-oozie/" + params.ext_js_file
+  paths.append(source_ext_js_path)
+
+  # Alternate location used by BigInsights 4.2.0 when migrating to another stack.
+  paths.append("/var/lib/oozie/" + params.ext_js_file)
+
+  return paths
+
+def oozie_server_specific(upgrade_type):
   import params
-  
+
   no_op_test = as_user(format("ls {pid_file} >/dev/null 2>&1 && ps -p `cat {pid_file}` >/dev/null 2>&1"), user=params.oozie_user)
-  
+
   File(params.pid_file,
     action="delete",
     not_if=no_op_test
   )
-  
+
   oozie_server_directories = [format("{oozie_home}/{oozie_tmp_dir}"), params.oozie_pid_dir, params.oozie_log_dir, params.oozie_tmp_dir, params.oozie_data_dir, params.oozie_lib_dir, params.oozie_webapps_dir, params.oozie_webapps_conf_dir, params.oozie_server_dir]
   Directory( oozie_server_directories,
     owner = params.oozie_user,
@@ -213,30 +260,40 @@ def oozie_server_specific():
     create_parents = True,
     cd_access="a",
   )
-  
+
   Directory(params.oozie_libext_dir,
             create_parents = True,
   )
-  
+
   hashcode_file = format("{oozie_home}/.hashcode")
   skip_recreate_sharelib = format("test -f {hashcode_file} && test -d {oozie_home}/share")
 
   untar_sharelib = ('tar','-xvf',format('{oozie_home}/oozie-sharelib.tar.gz'),'-C',params.oozie_home)
 
   Execute( untar_sharelib,    # time-expensive
-    not_if  = format("{no_op_test} || {skip_recreate_sharelib}"), 
+    not_if  = format("{no_op_test} || {skip_recreate_sharelib}"),
     sudo = True,
   )
 
   configure_cmds = []
-  configure_cmds.append(('cp', params.ext_js_path, params.oozie_libext_dir))
-  configure_cmds.append(('chown', format('{oozie_user}:{user_group}'), format('{oozie_libext_dir}/{ext_js_file}')))
-  
-  Execute( configure_cmds,
-    not_if  = no_op_test,
-    sudo = True,
-  )
-  
+  # Default to /usr/share/$TARGETSTACK-oozie/ext-2.2.zip as the first path
+  source_ext_zip_paths = get_oozie_ext_zip_source_paths(upgrade_type, params)
+
+  # Copy the first oozie ext-2.2.zip file that is found.
+  # This uses a list to handle the cases when migrating from some versions of BigInsights to HDP.
+  if source_ext_zip_paths is not None:
+    for source_ext_zip_path in source_ext_zip_paths:
+      if os.path.isfile(source_ext_zip_path):
+        configure_cmds.append(('cp', source_ext_zip_path, params.oozie_libext_dir))
+        configure_cmds.append(('chown', format('{oozie_user}:{user_group}'), format('{oozie_libext_dir}/{ext_js_file}')))
+
+        Execute(configure_cmds,
+                not_if=no_op_test,
+                sudo=True,
+                )
+        break
+
+
   Directory(params.oozie_webapps_conf_dir,
             owner = params.oozie_user,
             group = params.user_group,
@@ -255,14 +312,6 @@ def oozie_server_specific():
     Execute(format('{sudo} chown {oozie_user}:{user_group} {oozie_libext_dir}/falcon-oozie-el-extension-*.jar'),
       not_if  = no_op_test)
 
-  if params.lzo_enabled and len(params.all_lzo_packages) > 0:
-    Package(params.all_lzo_packages,
-            retry_on_repo_unavailability=params.agent_stack_retry_on_unavailability,
-            retry_count=params.agent_stack_retry_count)
-    Execute(format('{sudo} cp {hadoop_lib_home}/hadoop-lzo*.jar {oozie_lib_dir}'),
-      not_if  = no_op_test,
-    )
-
   prepare_war(params)
 
   File(hashcode_file,
@@ -277,10 +326,16 @@ def oozie_server_specific():
         group = params.user_group
     )
     if 'hive-site' in params.config['configurations']:
+      hive_site_config = update_credential_provider_path(params.config['configurations']['hive-site'],
+                                                         'hive-site',
+                                                         os.path.join(params.hive_conf_dir, 'hive-site.jceks'),
+                                                         params.oozie_user,
+                                                         params.user_group
+                                                         )
       XmlConfig("hive-site.xml",
         conf_dir=params.hive_conf_dir,
-        configurations=params.config['configurations']['hive-site'],
-        configuration_attributes=params.config['configuration_attributes']['hive-site'],
+        configurations=hive_site_config,
+        configuration_attributes=params.config['configurationAttributes']['hive-site'],
         owner=params.oozie_user,
         group=params.user_group,
         mode=0644
@@ -289,16 +344,145 @@ def oozie_server_specific():
       XmlConfig( "tez-site.xml",
         conf_dir = params.hive_conf_dir,
         configurations = params.config['configurations']['tez-site'],
-        configuration_attributes=params.config['configuration_attributes']['tez-site'],
+        configuration_attributes=params.config['configurationAttributes']['tez-site'],
         owner = params.oozie_user,
         group = params.user_group,
         mode = 0664
     )
+
+    # If Atlas is also installed, need to generate Atlas Hive hook (hive-atlas-application.properties file) in directory
+    # {stack_root}/{current_version}/atlas/hook/hive/
+    # Because this is a .properties file instead of an xml file, it will not be read automatically by Oozie.
+    # However, should still save the file on this host so that can upload it to the Oozie Sharelib in DFS.
+    if has_atlas_in_cluster():
+      atlas_hook_filepath = os.path.join(params.hive_conf_dir, params.atlas_hook_filename)
+      Logger.info("Has atlas in cluster, will save Atlas Hive hook into location %s" % str(atlas_hook_filepath))
+      setup_atlas_hook(SERVICE.HIVE, params.hive_atlas_application_properties, atlas_hook_filepath, params.oozie_user, params.user_group)
+
   Directory(params.oozie_server_dir,
     owner = params.oozie_user,
     group = params.user_group,
-    recursive_ownership = True,  
+    recursive_ownership = True,
   )
+  if params.security_enabled:
+    File(os.path.join(params.conf_dir, 'zkmigrator_jaas.conf'),
+         owner=params.oozie_user,
+         group=params.user_group,
+         content=Template("zkmigrator_jaas.conf.j2")
+         )
+
+def __parse_sharelib_from_output(output):
+  """
+  Return the parent directory of the first path from the output of the "oozie admin -shareliblist command $comp"
+  Output will match pattern like:
+
+  Potential errors
+  [Available ShareLib]
+  hive
+    hdfs://server:8020/user/oozie/share/lib/lib_20160811235630/hive/file1.jar
+    hdfs://server:8020/user/oozie/share/lib/lib_20160811235630/hive/file2.jar
+  """
+  if output is not None:
+    pattern = re.compile(r"\[Available ShareLib\]\n\S*?\n(.*share.*)", re.IGNORECASE)
+    m = pattern.search(output)
+    if m and len(m.groups()) == 1:
+      jar_path = m.group(1)
+      # Remove leading/trailing spaces and get the containing directory
+      sharelib_dir = os.path.dirname(jar_path.strip())
+      return sharelib_dir
+  return None
+
+def copy_atlas_hive_hook_to_dfs_share_lib(upgrade_type=None, upgrade_direction=None):
+  """
+   If the Atlas Hive Hook direcotry is present, Atlas is installed, and this is the first Oozie Server,
+  then copy the entire contents of that directory to the Oozie Sharelib in DFS, e.g.,
+  /usr/$stack/$current_version/atlas/hook/hive/ -> hdfs:///user/oozie/share/lib/lib_$timetamp/hive
+
+  :param upgrade_type: If in the middle of a stack upgrade, the type as UPGRADE_TYPE_ROLLING or UPGRADE_TYPE_NON_ROLLING
+  :param upgrade_direction: If in the middle of a stack upgrade, the direction as Direction.UPGRADE or Direction.DOWNGRADE.
+  """
+  import params
+
+  # Calculate the effective version since this code can also be called during EU/RU in the upgrade direction.
+  effective_version = params.stack_version_formatted if upgrade_type is None else format_stack_version(params.version)
+  if not check_stack_feature(StackFeature.ATLAS_HOOK_SUPPORT, effective_version):
+    return
+
+  # Important that oozie_server_hostnames is sorted by name so that this only runs on a single Oozie server.
+  if not (len(params.oozie_server_hostnames) > 0 and params.hostname == params.oozie_server_hostnames[0]):
+    Logger.debug("Will not attempt to copy Atlas Hive hook to DFS since this is not the first Oozie Server "
+                 "sorted by hostname.")
+    return
+
+  if not has_atlas_in_cluster():
+    Logger.debug("Will not attempt to copy Atlas Hve hook to DFS since Atlas is not installed on the cluster.")
+    return
+
+  if upgrade_type is not None and upgrade_direction == Direction.DOWNGRADE:
+    Logger.debug("Will not attempt to copy Atlas Hve hook to DFS since in the middle of Rolling/Express upgrade "
+                 "and performing a Downgrade.")
+    return
+
+  effective_version = get_current_version(service="ATLAS")
+  atlas_hive_hook_dir = format("{stack_root}/{effective_version}/atlas/hook/hive/")
+  if not os.path.exists(atlas_hive_hook_dir):
+    Logger.error(format("ERROR. Atlas is installed in cluster but this Oozie server doesn't "
+                        "contain directory {atlas_hive_hook_dir}"))
+    return
+
+  atlas_hive_hook_impl_dir = os.path.join(atlas_hive_hook_dir, "atlas-hive-plugin-impl")
+
+  num_files = len([name for name in os.listdir(atlas_hive_hook_impl_dir) if os.path.exists(os.path.join(atlas_hive_hook_impl_dir, name))])
+  Logger.info("Found %d files/directories inside Atlas Hive hook impl directory %s"% (num_files, atlas_hive_hook_impl_dir))
+
+  # This can return over 100 files, so take the first 5 lines after "Available ShareLib"
+  # Use -oozie http(s):localhost:{oozie_server_admin_port}/oozie as oozie-env does not export OOZIE_URL
+  command = format(r'source {conf_dir}/oozie-env.sh ; oozie admin -oozie {oozie_base_url} -shareliblist hive | grep "\[Available ShareLib\]" -A 5')
+  code, out = checked_call(command, user=params.oozie_user, tries=10, try_sleep=5, logoutput=True)
+
+  hive_sharelib_dir = __parse_sharelib_from_output(out)
+
+  if hive_sharelib_dir is None:
+    raise Fail("Could not parse Hive sharelib from output.")
+
+  Logger.info(format("Parsed Hive sharelib = {hive_sharelib_dir} and will attempt to copy/replace {num_files} files to it from {atlas_hive_hook_impl_dir}"))
+
+  params.HdfsResource(hive_sharelib_dir,
+                      type="directory",
+                      action="create_on_execute",
+                      source=atlas_hive_hook_impl_dir,
+                      user=params.hdfs_user,
+                      owner=params.oozie_user,
+                      group=params.hdfs_user,
+                      mode=0755,
+                      recursive_chown=True,
+                      recursive_chmod=True,
+                      replace_existing_files=True
+                      )
+
+  Logger.info("Copying Atlas Hive hook properties file to Oozie Sharelib in DFS.")
+  atlas_hook_filepath_source = os.path.join(params.hive_conf_dir, params.atlas_hook_filename)
+  atlas_hook_file_path_dest_in_dfs = os.path.join(hive_sharelib_dir, params.atlas_hook_filename)
+  params.HdfsResource(atlas_hook_file_path_dest_in_dfs,
+                      type="file",
+                      source=atlas_hook_filepath_source,
+                      action="create_on_execute",
+                      owner=params.oozie_user,
+                      group=params.hdfs_user,
+                      mode=0755,
+                      replace_existing_files=True
+                      )
+  params.HdfsResource(None, action="execute")
+
+  # Update the sharelib after making any changes
+  # Use -oozie http(s):localhost:{oozie_server_admin_port}/oozie as oozie-env does not export OOZIE_URL
+  Execute(format("source {conf_dir}/oozie-env.sh ; oozie admin -oozie {oozie_base_url} -sharelibupdate"),
+          user=params.oozie_user,
+          tries=5,
+          try_sleep=5,
+          logoutput=True,
+  )
+
 
 def download_database_library_if_needed(target_directory = None):
   """
@@ -316,8 +500,11 @@ def download_database_library_if_needed(target_directory = None):
 
   # check to see if the JDBC driver name is in the list of ones that need to
   # be downloaded
-  if params.jdbc_driver_name not in jdbc_drivers:
+  if params.jdbc_driver_name not in jdbc_drivers or not params.jdbc_driver_jar:
     return
+
+  if params.previous_jdbc_jar and os.path.isfile(params.previous_jdbc_jar):
+    File(params.previous_jdbc_jar, action='delete')
 
   # if the target directory is not specified
   if target_directory is None:

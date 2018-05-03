@@ -18,9 +18,20 @@
 
 package org.apache.ambari.server.controller.internal;
 
-import com.google.inject.AbstractModule;
-import com.google.inject.Guice;
-import com.google.inject.Injector;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.expectLastCall;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import javax.persistence.EntityManager;
+
 import org.apache.ambari.server.controller.spi.Predicate;
 import org.apache.ambari.server.controller.spi.Request;
 import org.apache.ambari.server.controller.spi.Resource;
@@ -38,7 +49,6 @@ import org.apache.ambari.server.orm.dao.ResourceDAO;
 import org.apache.ambari.server.orm.dao.UserDAO;
 import org.apache.ambari.server.orm.dao.ViewInstanceDAO;
 import org.apache.ambari.server.orm.entities.ClusterEntity;
-import org.apache.ambari.server.orm.entities.GroupEntity;
 import org.apache.ambari.server.orm.entities.PermissionEntity;
 import org.apache.ambari.server.orm.entities.PrincipalEntity;
 import org.apache.ambari.server.orm.entities.PrincipalTypeEntity;
@@ -59,18 +69,9 @@ import org.junit.Test;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import javax.persistence.EntityManager;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static org.easymock.EasyMock.*;
-import static org.easymock.EasyMock.anyObject;
+import com.google.inject.AbstractModule;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
 
 /**
  * ClusterPrivilegeResourceProvider tests.
@@ -170,7 +171,7 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
     ClusterEntity clusterEntity = createMockClusterEntity("c1", clusterResourceEntity);
     UserEntity userEntity = createMockUserEntity(principalEntity, "User1");
 
-    Set<PrivilegeEntity> privilegeEntities = new HashSet<PrivilegeEntity>();
+    Set<PrivilegeEntity> privilegeEntities = new HashSet<>();
     privilegeEntities.add(privilegeEntity);
 
     expect(principalEntity.getPrivileges()).andReturn(privilegeEntities).atLeastOnce();
@@ -203,11 +204,11 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
     SecurityContextHolder.getContext().setAuthentication(authentication);
 
     // add the property map to a set for the request.
-    Map<String, Object> properties = new LinkedHashMap<String, Object>();
-    properties.put(PrivilegeResourceProvider.PERMISSION_NAME_PROPERTY_ID, "CLUSTER.OPERATOR");
-    properties.put(PrivilegeResourceProvider.PRINCIPAL_NAME_PROPERTY_ID, "User1");
-    properties.put(PrivilegeResourceProvider.PRINCIPAL_TYPE_PROPERTY_ID, "USER");
-    properties.put(ClusterPrivilegeResourceProvider.PRIVILEGE_CLUSTER_NAME_PROPERTY_ID, "c1");
+    Map<String, Object> properties = new LinkedHashMap<>();
+    properties.put(PrivilegeResourceProvider.PERMISSION_NAME, "CLUSTER.OPERATOR");
+    properties.put(PrivilegeResourceProvider.PRINCIPAL_NAME, "User1");
+    properties.put(PrivilegeResourceProvider.PRINCIPAL_TYPE, "USER");
+    properties.put(ClusterPrivilegeResourceProvider.CLUSTER_NAME, "c1");
 
     // create the request
     Request request = PropertyHelper.getUpdateRequest(properties, null);
@@ -230,19 +231,19 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
     ClusterEntity clusterEntity = createMockClusterEntity("c1", resourceEntity);
     UserEntity userEntity = createMockUserEntity(principalEntity, "joe");
 
-    List<PrincipalEntity> principalEntities = new LinkedList<PrincipalEntity>();
+    List<PrincipalEntity> principalEntities = new LinkedList<>();
     principalEntities.add(principalEntity);
 
-    List<UserEntity> userEntities = new LinkedList<UserEntity>();
+    List<UserEntity> userEntities = new LinkedList<>();
     userEntities.add(userEntity);
 
-    List<PrivilegeEntity> privilegeEntities = new LinkedList<PrivilegeEntity>();
+    List<PrivilegeEntity> privilegeEntities = new LinkedList<>();
     privilegeEntities.add(privilegeEntity);
 
     PrivilegeDAO privilegeDAO = injector.getInstance(PrivilegeDAO.class);
     expect(privilegeDAO.findAll()).andReturn(privilegeEntities);
 
-    List<ClusterEntity> clusterEntities = new LinkedList<ClusterEntity>();
+    List<ClusterEntity> clusterEntities = new LinkedList<>();
     clusterEntities.add(clusterEntity);
 
     ClusterDAO clusterDAO = injector.getInstance(ClusterDAO.class);
@@ -250,9 +251,6 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
 
     UserDAO userDAO = injector.getInstance(UserDAO.class);
     expect(userDAO.findUsersByPrincipal(principalEntities)).andReturn(userEntities);
-
-    GroupDAO groupDAO = injector.getInstance(GroupDAO.class);
-    expect(groupDAO.findGroupsByPrincipal(principalEntities)).andReturn(Collections.<GroupEntity>emptyList());
 
     replayAll();
 
@@ -265,10 +263,10 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
 
     Resource resource = resources.iterator().next();
 
-    Assert.assertEquals("CLUSTER.ADMINISTRATOR", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PERMISSION_NAME_PROPERTY_ID));
-    Assert.assertEquals("Cluster Administrator", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PERMISSION_LABEL_PROPERTY_ID));
-    Assert.assertEquals("joe", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PRINCIPAL_NAME_PROPERTY_ID));
-    Assert.assertEquals("USER", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PRINCIPAL_TYPE_PROPERTY_ID));
+    Assert.assertEquals("CLUSTER.ADMINISTRATOR", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PERMISSION_NAME));
+    Assert.assertEquals("Cluster Administrator", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PERMISSION_LABEL));
+    Assert.assertEquals("joe", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PRINCIPAL_NAME));
+    Assert.assertEquals("USER", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PRINCIPAL_TYPE));
 
     verifyAll();
   }
@@ -285,19 +283,19 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
     ClusterEntity clusterEntity = createMockClusterEntity("c1", resourceEntity);
     UserEntity userEntity = createMockUserEntity(principalEntity, requestedUsername);
 
-    List<PrincipalEntity> principalEntities = new LinkedList<PrincipalEntity>();
+    List<PrincipalEntity> principalEntities = new LinkedList<>();
     principalEntities.add(principalEntity);
 
-    List<UserEntity> userEntities = new LinkedList<UserEntity>();
+    List<UserEntity> userEntities = new LinkedList<>();
     userEntities.add(userEntity);
 
-    List<PrivilegeEntity> privilegeEntities = new LinkedList<PrivilegeEntity>();
+    List<PrivilegeEntity> privilegeEntities = new LinkedList<>();
     privilegeEntities.add(privilegeEntity);
 
     PrivilegeDAO privilegeDAO = injector.getInstance(PrivilegeDAO.class);
     expect(privilegeDAO.findAll()).andReturn(privilegeEntities);
 
-    List<ClusterEntity> clusterEntities = new LinkedList<ClusterEntity>();
+    List<ClusterEntity> clusterEntities = new LinkedList<>();
     clusterEntities.add(clusterEntity);
 
     ClusterDAO clusterDAO = injector.getInstance(ClusterDAO.class);
@@ -305,9 +303,6 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
 
     UserDAO userDAO = injector.getInstance(UserDAO.class);
     expect(userDAO.findUsersByPrincipal(principalEntities)).andReturn(userEntities);
-
-    GroupDAO groupDAO = injector.getInstance(GroupDAO.class);
-    expect(groupDAO.findGroupsByPrincipal(principalEntities)).andReturn(Collections.<GroupEntity>emptyList());
 
     replayAll();
 
@@ -320,10 +315,10 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
 
     Resource resource = resources.iterator().next();
 
-    Assert.assertEquals("CLUSTER.ADMINISTRATOR", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PERMISSION_NAME_PROPERTY_ID));
-    Assert.assertEquals("Cluster Administrator", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PERMISSION_LABEL_PROPERTY_ID));
-    Assert.assertEquals(requestedUsername, resource.getPropertyValue(AmbariPrivilegeResourceProvider.PRINCIPAL_NAME_PROPERTY_ID));
-    Assert.assertEquals("USER", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PRINCIPAL_TYPE_PROPERTY_ID));
+    Assert.assertEquals("CLUSTER.ADMINISTRATOR", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PERMISSION_NAME));
+    Assert.assertEquals("Cluster Administrator", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PERMISSION_LABEL));
+    Assert.assertEquals(requestedUsername, resource.getPropertyValue(AmbariPrivilegeResourceProvider.PRINCIPAL_NAME));
+    Assert.assertEquals("USER", resource.getPropertyValue(AmbariPrivilegeResourceProvider.PRINCIPAL_TYPE));
 
     verifyAll();
   }
@@ -340,7 +335,7 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
     ResourceEntity resourceEntity = createMockResourceEntity(2L, resourceTypeEntity);
     ClusterEntity clusterEntity = createMockClusterEntity("c1", resourceEntity);
 
-    List<ClusterEntity> clusterEntities = new LinkedList<ClusterEntity>();
+    List<ClusterEntity> clusterEntities = new LinkedList<>();
     clusterEntities.add(clusterEntity);
 
     PrincipalTypeEntity principalTypeEntity = createMockPrincipalTypeEntity("USER");
@@ -348,7 +343,7 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
     UserEntity userEntity = createMockUserEntity(principalEntity, requestedUsername);
     PrivilegeEntity privilegeEntity = createMockPrivilegeEntity(1, resourceEntity, principalEntity, permissionEntity);
 
-    List<PrivilegeEntity> privilegeEntities = new ArrayList<PrivilegeEntity>();
+    List<PrivilegeEntity> privilegeEntities = new ArrayList<>();
     privilegeEntities.add(privilegeEntity);
 
     UserDAO userDAO = injector.getInstance(UserDAO.class);
@@ -370,10 +365,10 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
 
     SecurityContextHolder.getContext().setAuthentication(authentication);
 
-    Map<String, Object> properties = new LinkedHashMap<String, Object>();
-    properties.put(PrivilegeResourceProvider.PERMISSION_NAME_PROPERTY_ID, "CLUSTER.OPERATOR");
-    properties.put(PrivilegeResourceProvider.PRINCIPAL_NAME_PROPERTY_ID, requestedUsername);
-    properties.put(PrivilegeResourceProvider.PRINCIPAL_TYPE_PROPERTY_ID, "USER");
+    Map<String, Object> properties = new LinkedHashMap<>();
+    properties.put(PrivilegeResourceProvider.PERMISSION_NAME, "CLUSTER.OPERATOR");
+    properties.put(PrivilegeResourceProvider.PRINCIPAL_NAME, requestedUsername);
+    properties.put(PrivilegeResourceProvider.PRINCIPAL_TYPE, "USER");
 
     Request request = PropertyHelper.getUpdateRequest(properties, null);
 
@@ -394,7 +389,7 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
 
     PrivilegeEntity privilegeEntity1 = createMockPrivilegeEntity(1, clusterResourceEntity, principalEntity1, permissionEntity);
 
-    Set<PrivilegeEntity> privilege1Entities = new HashSet<PrivilegeEntity>();
+    Set<PrivilegeEntity> privilege1Entities = new HashSet<>();
     privilege1Entities.add(privilegeEntity1);
 
     expect(principalEntity1.getPrivileges()).andReturn(privilege1Entities).atLeastOnce();
@@ -479,7 +474,7 @@ public class ClusterPrivilegeResourceProviderTest extends EasyMockSupport {
 
   private Predicate createPredicate(Long id) {
     return new PredicateBuilder()
-        .property(ClusterPrivilegeResourceProvider.PRIVILEGE_ID_PROPERTY_ID)
+        .property(ClusterPrivilegeResourceProvider.PRIVILEGE_ID)
         .equals(id)
         .toPredicate();
   }

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -28,6 +28,8 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.controller.ResourceProviderFactory;
 import org.apache.ambari.server.controller.predicate.AndPredicate;
@@ -46,6 +48,9 @@ import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.orm.entities.StackEntity;
 import org.apache.ambari.server.security.TestAuthenticationFactory;
 import org.apache.ambari.server.stack.StackManager;
+import org.apache.ambari.server.state.Cluster;
+import org.apache.ambari.server.state.Clusters;
+import org.apache.ambari.server.state.repository.VersionDefinitionXml;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.io.IOUtils;
 import org.junit.After;
@@ -57,13 +62,14 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 
 /**
  * Tests the VersionDefinitionResourceProvider class
  */
 public class VersionDefinitionResourceProviderTest {
   private Injector injector;
+
+  private RepositoryVersionEntity parentEntity = null;
 
   @Before
   public void before() throws Exception {
@@ -76,18 +82,19 @@ public class VersionDefinitionResourceProviderTest {
     StackDAO stackDao = injector.getInstance(StackDAO.class);
     StackEntity stack = stackDao.find("HDP", "2.2.0");
 
-    RepositoryVersionEntity entity = new RepositoryVersionEntity();
-    entity.setStack(stack);
-    entity.setDisplayName("2.2.0.0");
-    entity.setVersion("2.3.4.4-1234");
+    parentEntity = new RepositoryVersionEntity();
+    parentEntity.setStack(stack);
+    parentEntity.setDisplayName("2.2.0.0");
+    parentEntity.setVersion("2.3.4.4-1234");
 
     RepositoryVersionDAO dao = injector.getInstance(RepositoryVersionDAO.class);
-    dao.create(entity);
+    dao.create(parentEntity);
+
   }
 
   @After
   public void after() throws Exception {
-    injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
   @Test
@@ -104,8 +111,8 @@ public class VersionDefinitionResourceProviderTest {
     final ResourceProvider provider = injector.getInstance(ResourceProviderFactory.class)
         .getRepositoryVersionResourceProvider();
 
-    final Set<Map<String, Object>> propertySet = new LinkedHashSet<Map<String, Object>>();
-    final Map<String, Object> properties = new LinkedHashMap<String, Object>();
+    final Set<Map<String, Object>> propertySet = new LinkedHashSet<>();
+    final Map<String, Object> properties = new LinkedHashMap<>();
     properties.put(VersionDefinitionResourceProvider.VERSION_DEF_DEFINITION_BASE64, base64Str);
     propertySet.add(properties);
 
@@ -178,8 +185,8 @@ public class VersionDefinitionResourceProviderTest {
     final ResourceProvider provider = injector.getInstance(ResourceProviderFactory.class)
         .getRepositoryVersionResourceProvider();
 
-    final Set<Map<String, Object>> propertySet = new LinkedHashSet<Map<String, Object>>();
-    final Map<String, Object> properties = new LinkedHashMap<String, Object>();
+    final Set<Map<String, Object>> propertySet = new LinkedHashSet<>();
+    final Map<String, Object> properties = new LinkedHashMap<>();
     properties.put(VersionDefinitionResourceProvider.VERSION_DEF_DEFINITION_URL,
         file.toURI().toURL().toString());
     propertySet.add(properties);
@@ -269,7 +276,7 @@ public class VersionDefinitionResourceProviderTest {
         VersionDefinitionResourceProvider.SHOW_AVAILABLE).equals("true").toPredicate();
 
     Set<Resource> results = versionProvider.getResources(getRequest, predicate);
-    Assert.assertEquals(2, results.size());
+    Assert.assertEquals(3, results.size());
 
     boolean found1 = false;
     boolean found2 = false;
@@ -279,6 +286,14 @@ public class VersionDefinitionResourceProviderTest {
         found1 = true;
       } else if ("HDP-2.2.0".equals(res.getPropertyValue("VersionDefinition/id"))) {
         Assert.assertEquals(Boolean.TRUE, res.getPropertyValue("VersionDefinition/stack_default"));
+
+        VersionDefinitionXml vdf = ami.getVersionDefinition("HDP-2.2.0");
+
+        Assert.assertNotNull(vdf);
+        Assert.assertEquals(1, vdf.repositoryInfo.getOses().size());
+
+        String family1 = vdf.repositoryInfo.getOses().get(0).getFamily();
+        Assert.assertEquals("redhat6", family1);
         found2 = true;
       }
     }
@@ -332,8 +347,8 @@ public class VersionDefinitionResourceProviderTest {
 
     final ResourceProvider versionProvider = new VersionDefinitionResourceProvider();
 
-    final Set<Map<String, Object>> propertySet = new LinkedHashSet<Map<String, Object>>();
-    final Map<String, Object> properties = new LinkedHashMap<String, Object>();
+    final Set<Map<String, Object>> propertySet = new LinkedHashSet<>();
+    final Map<String, Object> properties = new LinkedHashMap<>();
     properties.put(VersionDefinitionResourceProvider.VERSION_DEF_DEFINITION_URL,
         file.toURI().toURL().toString());
     propertySet.add(properties);
@@ -403,10 +418,284 @@ public class VersionDefinitionResourceProviderTest {
     Assert.assertTrue(res.getPropertiesMap().containsKey("VersionDefinition"));
     Assert.assertEquals("2.2.1.0", res.getPropertyValue("VersionDefinition/repository_version"));
     Assert.assertNotNull(res.getPropertyValue("VersionDefinition/show_available"));
+    Assert.assertNotNull(res.getPropertyValue("VersionDefinition/validation"));
+
+    Set<String> validation = (Set<String>) res.getPropertyValue("VersionDefinition/validation");
+    Assert.assertNotNull(validation);
+    Assert.assertEquals(0, validation.size());
 
     getRequest = PropertyHelper.getReadRequest("VersionDefinition");
     results = versionProvider.getResources(getRequest, null);
     Assert.assertEquals(0, results.size());
-
   }
+
+  @Test
+  public void testCreateDryWithValidation() throws Exception {
+    AmbariMetaInfo ami = injector.getInstance(AmbariMetaInfo.class);
+    // ensure that all of the latest repo retrieval tasks have completed
+    StackManager sm = ami.getStackManager();
+    int maxWait = 15000;
+    int waitTime = 0;
+    while (waitTime < maxWait && ! sm.haveAllRepoUrlsBeenResolved()) {
+      Thread.sleep(5);
+      waitTime += 5;
+    }
+
+    if (waitTime >= maxWait) {
+      fail("Latest Repo tasks did not complete");
+    }
+
+
+    // !!! make sure we have none
+    Authentication authentication = TestAuthenticationFactory.createAdministrator();
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+
+    final ResourceProvider versionProvider = new VersionDefinitionResourceProvider();
+
+    Request getRequest = PropertyHelper.getReadRequest("VersionDefinition");
+    Set<Resource> results = versionProvider.getResources(getRequest, null);
+    Assert.assertEquals(0, results.size());
+
+
+    // !!! create one
+    Map<String, Object> createMap = new HashMap<>();
+    createMap.put("VersionDefinition/available", "HDP-2.2.0-2.2.1.0");
+
+    Request createRequest = PropertyHelper.getCreateRequest(Collections.singleton(createMap), null);
+    versionProvider.createResources(createRequest);
+
+    results = versionProvider.getResources(getRequest, null);
+    Assert.assertEquals(1, results.size());
+
+
+    // !!! create one, but a dry run to make sure we get two validation errors
+    Map<String, String> infoProps = new HashMap<>();
+    infoProps.put(Request.DIRECTIVE_DRY_RUN, "true");
+
+    createRequest = PropertyHelper.getCreateRequest(Collections.singleton(createMap), infoProps);
+    RequestStatus status = versionProvider.createResources(createRequest);
+
+    Assert.assertEquals(1, status.getAssociatedResources().size());
+
+    Resource res = status.getAssociatedResources().iterator().next();
+    // because we aren't using subresources, but return subresource-like properties, the key is an empty string
+    Assert.assertTrue(res.getPropertiesMap().containsKey(""));
+    Map<String, Object> resMap = res.getPropertiesMap().get("");
+    Assert.assertTrue(resMap.containsKey("operating_systems"));
+
+    Assert.assertTrue(res.getPropertiesMap().containsKey("VersionDefinition"));
+    Assert.assertEquals("2.2.1.0", res.getPropertyValue("VersionDefinition/repository_version"));
+    Assert.assertNotNull(res.getPropertyValue("VersionDefinition/show_available"));
+    Assert.assertEquals("HDP-2.2.0.4", res.getPropertyValue("VersionDefinition/display_name"));
+    Assert.assertNotNull(res.getPropertyValue("VersionDefinition/validation"));
+
+    Set<String> validation = (Set<String>) res.getPropertyValue("VersionDefinition/validation");
+    Assert.assertEquals(3, validation.size());
+
+    validation = (Set<String>) res.getPropertyValue("VersionDefinition/validation");
+    Assert.assertEquals(3, validation.size());
+
+    boolean found = false;
+    for (String reason : validation) {
+      if (reason.contains("http://baseurl1")) {
+        found = true;
+      }
+    }
+
+    Assert.assertTrue("URL validation should be checked", found);
+
+
+    // !!! test url validation
+    infoProps.put(VersionDefinitionResourceProvider.DIRECTIVE_SKIP_URL_CHECK, "true");
+    createRequest = PropertyHelper.getCreateRequest(Collections.singleton(createMap), infoProps);
+    status = versionProvider.createResources(createRequest);
+
+    Assert.assertEquals(1, status.getAssociatedResources().size());
+
+    res = status.getAssociatedResources().iterator().next();
+    Assert.assertTrue(res.getPropertiesMap().containsKey("VersionDefinition"));
+    Assert.assertEquals("2.2.1.0", res.getPropertyValue("VersionDefinition/repository_version"));
+    Assert.assertNotNull(res.getPropertyValue("VersionDefinition/show_available"));
+    Assert.assertNotNull(res.getPropertyValue("VersionDefinition/validation"));
+
+    validation = (Set<String>) res.getPropertyValue("VersionDefinition/validation");
+    Assert.assertEquals(2, validation.size());
+    for (String reason : validation) {
+      if (reason.contains("http://baseurl1")) {
+        Assert.fail("URL validation should be skipped for http://baseurl1");
+      }
+    }
+
+    // dry-run with a changed name
+    infoProps.remove(VersionDefinitionResourceProvider.DIRECTIVE_SKIP_URL_CHECK);
+    createMap.put(VersionDefinitionResourceProvider.VERSION_DEF_DISPLAY_NAME, "HDP-2.2.0.4-a");
+    createRequest = PropertyHelper.getCreateRequest(Collections.singleton(createMap), infoProps);
+    status = versionProvider.createResources(createRequest);
+
+    Assert.assertEquals(1, status.getAssociatedResources().size());
+
+    res = status.getAssociatedResources().iterator().next();
+    Assert.assertTrue(res.getPropertiesMap().containsKey("VersionDefinition"));
+    Assert.assertEquals("2.2.0.4-a", res.getPropertyValue("VersionDefinition/repository_version"));
+    Assert.assertEquals("HDP-2.2.0.4-a", res.getPropertyValue("VersionDefinition/display_name"));
+    Assert.assertNotNull(res.getPropertyValue("VersionDefinition/show_available"));
+    Assert.assertNotNull(res.getPropertyValue("VersionDefinition/validation"));
+
+    validation = (Set<String>) res.getPropertyValue("VersionDefinition/validation");
+    Assert.assertEquals(1, validation.size());
+  }
+
+  @Test
+  public void testCreatePatchNoParentVersions() throws Exception {
+    Authentication authentication = TestAuthenticationFactory.createAdministrator();
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+
+    File file = new File("src/test/resources/version_definition_resource_provider.xml");
+
+    final ResourceProvider versionProvider = new VersionDefinitionResourceProvider();
+
+    final Set<Map<String, Object>> propertySet = new LinkedHashSet<>();
+    final Map<String, Object> properties = new LinkedHashMap<>();
+    properties.put(VersionDefinitionResourceProvider.VERSION_DEF_DEFINITION_URL,
+        file.toURI().toURL().toString());
+    propertySet.add(properties);
+
+    RepositoryVersionDAO dao = injector.getInstance(RepositoryVersionDAO.class);
+    dao.remove(dao.findByDisplayName("2.2.0.0"));
+
+    Map<String, String> info = Collections.singletonMap(Request.DIRECTIVE_DRY_RUN, "true");
+
+    final Request createRequest = PropertyHelper.getCreateRequest(propertySet, info);
+    try {
+      versionProvider.createResources(createRequest);
+      fail("Expected exception creating a resource with no parent");
+    } catch (IllegalArgumentException expected) {
+      Assert.assertTrue(expected.getMessage().contains("there are no repositories for"));
+    }
+  }
+
+  @Test
+  public void testCreatePatchManyParentVersionsNoneUsed() throws Exception {
+    Authentication authentication = TestAuthenticationFactory.createAdministrator();
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+
+    File file = new File("src/test/resources/version_definition_resource_provider.xml");
+
+    final ResourceProvider versionProvider = new VersionDefinitionResourceProvider();
+
+    final Set<Map<String, Object>> propertySet = new LinkedHashSet<>();
+    final Map<String, Object> properties = new LinkedHashMap<>();
+    properties.put(VersionDefinitionResourceProvider.VERSION_DEF_DEFINITION_URL,
+        file.toURI().toURL().toString());
+    propertySet.add(properties);
+
+    RepositoryVersionDAO dao = injector.getInstance(RepositoryVersionDAO.class);
+    RepositoryVersionEntity entity = new RepositoryVersionEntity();
+    entity.setStack(parentEntity.getStack());
+    entity.setDisplayName("2.2.1.0");
+    entity.setVersion("2.3.4.5-1234");
+    dao.create(entity);
+
+    Map<String, String> info = Collections.singletonMap(Request.DIRECTIVE_DRY_RUN, "true");
+
+    final Request createRequest = PropertyHelper.getCreateRequest(propertySet, info);
+
+    try {
+      versionProvider.createResources(createRequest);
+      fail("Expected exception creating a resource with no parent");
+    } catch (IllegalArgumentException expected) {
+      Assert.assertTrue(expected.getMessage().contains("Could not determine which version"));
+    }
+  }
+
+  @Test
+  public void testCreatePatchManyParentVersionsOneUsed() throws Exception {
+    Authentication authentication = TestAuthenticationFactory.createAdministrator();
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+
+    File file = new File("src/test/resources/version_definition_resource_provider.xml");
+
+    final ResourceProvider versionProvider = new VersionDefinitionResourceProvider();
+
+    final Set<Map<String, Object>> propertySet = new LinkedHashSet<>();
+    final Map<String, Object> properties = new LinkedHashMap<>();
+    properties.put(VersionDefinitionResourceProvider.VERSION_DEF_DEFINITION_URL,
+        file.toURI().toURL().toString());
+    propertySet.add(properties);
+
+    RepositoryVersionDAO dao = injector.getInstance(RepositoryVersionDAO.class);
+    RepositoryVersionEntity entity = new RepositoryVersionEntity();
+    entity.setStack(parentEntity.getStack());
+    entity.setDisplayName("2.2.1.0");
+    entity.setVersion("2.3.4.5-1234");
+    dao.create(entity);
+
+    makeService("c1", "HDFS", parentEntity);
+    makeService("c1", "ZOOKEEPER", parentEntity);
+
+    Map<String, String> info = Collections.singletonMap(Request.DIRECTIVE_DRY_RUN, "true");
+
+    final Request createRequest = PropertyHelper.getCreateRequest(propertySet, info);
+
+    try {
+      versionProvider.createResources(createRequest);
+    } catch (IllegalArgumentException unexpected) {
+      // !!! better not
+    }
+  }
+
+  @Test
+  public void testCreatePatchManyParentVersionsManyUsed() throws Exception {
+    Authentication authentication = TestAuthenticationFactory.createAdministrator();
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+
+    File file = new File("src/test/resources/version_definition_resource_provider.xml");
+
+    final ResourceProvider versionProvider = new VersionDefinitionResourceProvider();
+
+    final Set<Map<String, Object>> propertySet = new LinkedHashSet<>();
+    final Map<String, Object> properties = new LinkedHashMap<>();
+    properties.put(VersionDefinitionResourceProvider.VERSION_DEF_DEFINITION_URL,
+        file.toURI().toURL().toString());
+    propertySet.add(properties);
+
+    RepositoryVersionDAO dao = injector.getInstance(RepositoryVersionDAO.class);
+    RepositoryVersionEntity entity = new RepositoryVersionEntity();
+    entity.setStack(parentEntity.getStack());
+    entity.setDisplayName("2.2.1.0");
+    entity.setVersion("2.3.4.5-1234");
+    dao.create(entity);
+
+    makeService("c1", "HDFS", parentEntity);
+    makeService("c1", "ZOOKEEPER", entity);
+
+    Map<String, String> info = Collections.singletonMap(Request.DIRECTIVE_DRY_RUN, "true");
+
+    final Request createRequest = PropertyHelper.getCreateRequest(propertySet, info);
+
+    try {
+      versionProvider.createResources(createRequest);
+      fail("expected exception creating resources");
+    } catch (IllegalArgumentException expected) {
+      Assert.assertTrue(expected.getMessage().contains("Move all services to a common version and try again."));
+    }
+  }
+
+  /**
+   * Helper to create services that are tested with parent repo checks
+   */
+  private void makeService(String clusterName, String serviceName, RepositoryVersionEntity serviceRepo) throws Exception {
+    Clusters clusters = injector.getInstance(Clusters.class);
+
+    Cluster cluster;
+    try {
+      cluster = clusters.getCluster("c1");
+    } catch (AmbariException e) {
+      clusters.addCluster("c1", parentEntity.getStackId());
+      cluster = clusters.getCluster("c1");
+    }
+
+    cluster.addService(serviceName, serviceRepo);
+  }
+
 }

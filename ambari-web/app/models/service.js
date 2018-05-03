@@ -21,15 +21,16 @@ var App = require('app');
 require('utils/config');
 
 App.Service = DS.Model.extend({
-  serviceName: DS.attr('string'),
+  serviceName: DS.attr('string', {defaultValue: ''}),
   displayName: Em.computed.formatRole('serviceName', true),
-  passiveState: DS.attr('string'),
+  passiveState: DS.attr('string', {defaultValue: "OFF"}),
   workStatus: DS.attr('string'),
   rand: DS.attr('string'),
   toolTipContent: DS.attr('string'),
   quickLinks: DS.hasMany('App.QuickLinks'),  // mapped in app/mappers/service_metrics_mapper.js method - mapQuickLinks
   hostComponents: DS.hasMany('App.HostComponent'),
   serviceConfigsTemplate: App.config.get('preDefinedServiceConfigs'),
+  desiredRepositoryVersionId: DS.attr('number'),
   /**
    * used by services("OOZIE", "ZOOKEEPER", "HIVE", "MAPREDUCE2", "TEZ", "SQOOP", "PIG","FALCON")
    * that have only client components
@@ -39,6 +40,12 @@ App.Service = DS.Model.extend({
   clientComponents: DS.hasMany('App.ClientComponent'),
   slaveComponents: DS.hasMany('App.SlaveComponent'),
   masterComponents: DS.hasMany('App.MasterComponent'),
+
+  masterComponentGroups: DS.attr('array', {
+    defaultValue: []
+  }),
+
+  hasMultipleMasterComponentGroups: Em.computed.gt('masterComponentGroups.length', 1),
 
   /**
    * Check master/slave component state of service
@@ -95,7 +102,7 @@ App.Service = DS.Model.extend({
   serviceTypes: function() {
     var typeServiceMap = {
       GANGLIA: ['MONITORING'],
-      HDFS: ['HA_MODE'],
+      HDFS: ['HA_MODE', 'FEDERATION'],
       YARN: ['HA_MODE'],
       RANGER: ['HA_MODE'],
       HAWQ: ['HA_MODE']
@@ -108,18 +115,23 @@ App.Service = DS.Model.extend({
    * actual_configs, then a restart is required.
    */
   isRestartRequired: function () {
-    var rhc = this.get('hostComponents').filterProperty('staleConfigs', true);
+    var serviceComponents = this.get('clientComponents').toArray()
+      .concat(this.get('slaveComponents').toArray())
+      .concat(this.get('masterComponents').toArray());
     var hc = {};
 
-    rhc.forEach(function(_rhc) {
-      var hostName = _rhc.get('hostName');
-      if (!hc[hostName]) {
-        hc[hostName] = [];
-      }
-      hc[hostName].push(_rhc.get('displayName'));
+    serviceComponents.forEach(function(component) {
+      var displayName = component.get('displayName');
+      component.get('staleConfigHosts').forEach(function(hostName) {
+        if (!hc[hostName]) {
+          hc[hostName] = [];
+        }
+        hc[hostName].push(displayName);
+      });
     });
+
     this.set('restartRequiredHostsAndComponents', hc);
-    return (rhc.length > 0);
+    return (serviceComponents.filterProperty('staleConfigHosts.length').length > 0);
   }.property('serviceName'),
   
   /**
@@ -242,6 +254,7 @@ App.Service.Health = {
  */
 App.Service.extendedModel = {
   'HDFS': 'HDFSService',
+  'ONEFS' : 'ONEFSService',
   'HBASE': 'HBaseService',
   'YARN': 'YARNService',
   'MAPREDUCE2': 'MapReduce2Service',

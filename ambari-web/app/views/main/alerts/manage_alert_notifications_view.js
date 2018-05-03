@@ -36,22 +36,22 @@ App.ManageAlertNotificationsView = Em.View.extend({
   /**
    * @type {boolean}
    */
-  isAddButtonDisabled: Em.computed.alias('App.isOperator'),
+  isEditButtonDisabled: Em.computed.or('!someAlertNotificationIsSelected', '!controller.selectedAlertNotification.enabled'),
 
   /**
    * @type {boolean}
    */
-  isEditButtonDisabled: Em.computed.or('!someAlertNotificationIsSelected', 'App.isOperator'),
+  isRemoveButtonDisabled: Em.computed.or('!someAlertNotificationIsSelected'),
 
   /**
    * @type {boolean}
    */
-  isRemoveButtonDisabled: Em.computed.or('!someAlertNotificationIsSelected', 'App.isOperator'),
+  isDuplicateButtonDisabled: Em.computed.or('!someAlertNotificationIsSelected', '!controller.selectedAlertNotification.enabled'),
 
   /**
    * @type {boolean}
    */
-  isDuplicateButtonDisabled: Em.computed.or('!someAlertNotificationIsSelected', 'App.isOperator'),
+  isEnableOrDisableButtonDisabled: Em.computed.or('!someAlertNotificationIsSelected'),
 
   /**
    * Show EMAIL information if selected alert notification has type EMAIL
@@ -65,6 +65,12 @@ App.ManageAlertNotificationsView = Em.View.extend({
    */
   showSNMPDetails: Em.computed.equal('controller.selectedAlertNotification.type', 'SNMP'),
 
+  /**
+   * Show Custom SNMP information if selected alert notification has type Custom SNMP
+   * @type {boolean}
+   */
+  showCustomSNMPDetails: Em.computed.equal('controller.selectedAlertNotification.type', 'Custom SNMP'),
+  
   email: function () {
     return this.get('controller.selectedAlertNotification.properties')['ambari.dispatch.recipients'];
   }.property('controller.selectedAlertNotification.properties'),
@@ -75,6 +81,29 @@ App.ManageAlertNotificationsView = Em.View.extend({
   severities: function () {
     return this.get('controller.selectedAlertNotification.alertStates').join(', ');
   }.property('controller.selectedAlertNotification.alertStates'),
+
+  selectedAlertNotificationTypeText: function() {
+    return this.get('controller').getNotificationTypeText(this.get('controller.selectedAlertNotification.type'))
+  }.property('controller.selectedAlertNotification', 'controller.isLoaded'),
+
+  editAlertNotification: function () {
+    if(!this.get('isEditButtonDisabled')) {
+      this.get('controller').editAlertNotification();
+    }
+  },
+
+  duplicateAlertNotification: function () {
+    if(!this.get('isDuplicateButtonDisabled')) {
+      this.get('controller').duplicateAlertNotification();
+    }
+  },
+
+  enableOrDisableAlertNotification: function (e) {
+    if(!this.get('isEnableOrDisableButtonDisabled')) {
+      this.$("[rel='button-info-dropdown']").tooltip('destroy');
+      this.get('controller').enableOrDisableAlertNotification(e);
+    }
+  },
 
   /**
    * Prevent user select more than 1 alert notification
@@ -88,6 +117,12 @@ App.ManageAlertNotificationsView = Em.View.extend({
     if (selectedAlertNotification && selectedAlertNotification.length > 1) {
       this.set('selectedAlertNotification', selectedAlertNotification[selectedAlertNotification.length - 1]);
     }
+    if(this.$("[rel='button-info-dropdown']")) {
+      this.$("[rel='button-info-dropdown']").tooltip('destroy');
+    }
+    Em.run.later(this, function () {
+      App.tooltip(self.$("[rel='button-info-dropdown']").parent().not(".disabled").children(), {placement: 'left'});
+    }, 50);
   }.observes('selectedAlertNotification'),
 
   /**
@@ -96,6 +131,7 @@ App.ManageAlertNotificationsView = Em.View.extend({
    * @method onLoad
    */
   onLoad: function () {
+    var self = this;
     if (this.get('controller.isLoaded')) {
       var notifications = this.get('controller.alertNotifications');
       if (notifications && notifications.length) {
@@ -104,8 +140,7 @@ App.ManageAlertNotificationsView = Em.View.extend({
         this.set('selectedAlertNotification', null);
       }
       Em.run.later(this, function () {
-        App.tooltip(this.$("[rel='button-info']"));
-        App.tooltip(this.$("[rel='button-info-dropdown']"), {placement: 'left'});
+        App.tooltip(self.$("[rel='button-info']"));
       }, 50);
     }
   }.observes('controller.isLoaded'),

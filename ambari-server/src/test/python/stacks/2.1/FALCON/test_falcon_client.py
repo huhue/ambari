@@ -27,11 +27,14 @@ class TestFalconClient(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "FALCON/0.5.0.2.1/package"
   STACK_VERSION = "2.1"
 
+  CONFIG_OVERRIDES = {"serviceName":"FALCON", "role":"FALCON_CLIENT"}
+
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/falcon_client.py",
                        classname="FalconClient",
                        command="configure",
                        config_file="default.json",
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES
     )
@@ -47,11 +50,11 @@ class TestFalconClient(RMFTestCase):
                               mode = 0755,
                               cd_access = "a",
                               )
-    self.assertResourceCalled('Directory', '/var/lib/falcon/webapp',
+    self.assertResourceCalled('Directory', '/usr/hdp/current/falcon-client/webapp',
                               owner = 'falcon',
                               create_parents = True
                               )
-    self.assertResourceCalled('Directory', '/usr/lib/falcon',
+    self.assertResourceCalled('Directory', '/usr/hdp/current/falcon-client',
                               owner = 'falcon',
                               create_parents = True
                               )
@@ -68,10 +71,10 @@ class TestFalconClient(RMFTestCase):
                               owner = 'falcon',
                               group = 'hadoop'
                               )
-    self.assertResourceCalled('File', '/etc/falcon/conf/client.properties',
-                              content = Template('client.properties.j2'),
+    self.assertResourceCalled('PropertiesFile', '/etc/falcon/conf/client.properties',
                               owner = 'falcon',
-                              mode = 0644
+                              mode = 0644,
+                              properties= {u'falcon.url': u'http://{{falcon_host}}:{{falcon_port}}'}
                               )
     self.assertResourceCalled('PropertiesFile', '/etc/falcon/conf/runtime.properties',
                               mode = 0644,
@@ -83,31 +86,13 @@ class TestFalconClient(RMFTestCase):
                               properties = self.getConfig()['configurations']['falcon-startup.properties'],
                               owner = 'falcon'
                               )
+    self.assertResourceCalled('File', '/etc/falcon/conf/log4j.properties',
+                          content=InlineTemplate(self.getConfig()['configurations']['falcon-log4j']['content']),
+                          owner='falcon',
+                          group='hadoop',
+                          mode= 0644
+                          )
     self.assertNoMoreResources()
-
-  @patch("resource_management.libraries.script.Script.put_structured_out")
-  def test_security_status(self, put_structured_out_mock):
-    # Test that function works when is called with correct parameters
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/falcon_client.py",
-                       classname="FalconClient",
-                       command="security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-
-    put_structured_out_mock.assert_called_with({"securityState": "SECURED_KERBEROS"})
-
-    # Testing with security_enable = false
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/falcon_client.py",
-                       classname="FalconClient",
-                       command="security_status",
-                       config_file="default.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
 
   def test_pre_upgrade_restart(self):
     config_file = self.get_src_folder()+"/test/python/stacks/2.0.6/configs/default.json"
@@ -119,6 +104,7 @@ class TestFalconClient(RMFTestCase):
                        classname = "FalconClient",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES)
     self.assertResourceCalled('Execute',
@@ -138,20 +124,11 @@ class TestFalconClient(RMFTestCase):
                        classname = "FalconClient",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES,
-                       call_mocks = [(0, None, ''), (0, None)],
                        mocks_dict = mocks_dict)
 
     self.assertResourceCalledIgnoreEarlier('Execute',
                               ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'falcon-client', version), sudo=True,)
     self.assertNoMoreResources()
-
-    self.assertEquals(1, mocks_dict['call'].call_count)
-    self.assertEquals(1, mocks_dict['checked_call'].call_count)
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'falcon', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[0][0][0])
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'falcon', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])

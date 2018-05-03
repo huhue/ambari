@@ -202,8 +202,18 @@
       <configuration-dependencies>
         <config-type>accumulo-env</config-type>
         <config-type>accumulo-site</config-type>
-        <config-type>ams-ssl-client</config-type>
       </configuration-dependencies>
+
+      <themes>
+        <theme>
+          <fileName>credentials.json</fileName>
+          <default>true</default>
+        </theme>
+        <theme>
+          <fileName>directories.json</fileName>
+          <default>true</default>
+        </theme>
+      </themes>
 
     </service>
   </services>

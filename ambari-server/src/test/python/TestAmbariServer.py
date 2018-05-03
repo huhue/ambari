@@ -30,14 +30,19 @@ import datetime
 import errno
 import json
 import operator
+from ambari_commons import subprocess32
 from optparse import OptionParser
 import platform
+import socket
 import re
 import shutil
 import signal
 import stat
 import StringIO
 import tempfile
+import logging
+import logging.handlers
+import logging.config
 from unittest import TestCase
 os.environ["ROOT"] = ""
 
@@ -53,7 +58,18 @@ shutil.copyfile(project_dir+"/ambari-server/conf/unix/ambari.properties", "/tmp/
 
 # We have to use this import HACK because the filename contains a dash
 _search_file = os_utils.search_file
-os_utils.search_file = MagicMock(return_value="/tmp/ambari.properties")
+
+
+def search_file_proxy(filename, searchpatch, pathsep=os.pathsep):
+  global _search_file
+
+  if "ambari.properties" in filename:
+    return "/tmp/ambari.properties"
+
+  return _search_file(filename, searchpatch, pathsep)
+
+
+os_utils.search_file = search_file_proxy
 with patch.object(platform, "linux_distribution", return_value = MagicMock(return_value=('Redhat', '6.4', 'Final'))):
   with patch("os.path.isdir", return_value = MagicMock(return_value=True)):
     with patch("os.access", return_value = MagicMock(return_value=True)):
@@ -62,7 +78,6 @@ with patch.object(platform, "linux_distribution", return_value = MagicMock(retur
           with patch("os.symlink"):
             with patch("glob.glob", return_value = ['/etc/init.d/postgresql-9.3']):
               _ambari_server_ = __import__('ambari-server')
-              os_utils.search_file = _search_file
               with patch("__builtin__.open"):
                 from ambari_commons.firewall import Firewall
                 from ambari_commons.os_check import OSCheck, OSConst
@@ -72,7 +87,7 @@ with patch.object(platform, "linux_distribution", return_value = MagicMock(retur
                   print_info_msg, print_warning_msg, print_error_msg
                 from ambari_commons.os_utils import run_os_command, search_file, set_file_permissions, remove_file, copy_file, \
                   is_valid_filepath
-                from ambari_server.dbConfiguration import DBMSConfigFactory, check_jdbc_drivers
+                from ambari_server.dbConfiguration import DBMSConfigFactory, check_jdbc_drivers, DBMSConfig
                 from ambari_server.dbConfiguration_linux import PGConfig, LinuxDBMSConfig, OracleConfig
                 from ambari_server.properties import Properties
                 from ambari_server.resourceFilesKeeper import ResourceFilesKeeper, KeeperException
@@ -84,39 +99,38 @@ with patch.object(platform, "linux_distribution", return_value = MagicMock(retur
                   AMBARI_CONF_VAR, AMBARI_SERVER_LIB, JDBC_DATABASE_PROPERTY, JDBC_RCA_PASSWORD_FILE_PROPERTY, \
                   PERSISTENCE_TYPE_PROPERTY, JDBC_URL_PROPERTY, get_conf_dir, JDBC_USER_NAME_PROPERTY, JDBC_PASSWORD_PROPERTY, \
                   JDBC_DATABASE_NAME_PROPERTY, OS_TYPE_PROPERTY, validate_jdk, JDBC_POSTGRES_SCHEMA_PROPERTY, \
-                  RESOURCES_DIR_PROPERTY, JDBC_RCA_PASSWORD_ALIAS, JDBC_RCA_SCHEMA_PROPERTY, IS_LDAP_CONFIGURED, \
+                  RESOURCES_DIR_PROPERTY, JDBC_RCA_PASSWORD_ALIAS, JDBC_RCA_SCHEMA_PROPERTY, \
                   SSL_API, SSL_API_PORT, CLIENT_API_PORT_PROPERTY,\
                   JDBC_CONNECTION_POOL_TYPE, JDBC_CONNECTION_POOL_ACQUISITION_SIZE, \
                   JDBC_CONNECTION_POOL_IDLE_TEST_INTERVAL, JDBC_CONNECTION_POOL_MAX_AGE, JDBC_CONNECTION_POOL_MAX_IDLE_TIME, \
                   JDBC_CONNECTION_POOL_MAX_IDLE_TIME_EXCESS,\
                   LDAP_MGR_PASSWORD_PROPERTY, LDAP_MGR_PASSWORD_ALIAS, JDBC_PASSWORD_FILENAME, NR_USER_PROPERTY, SECURITY_KEY_IS_PERSISTED, \
                   SSL_TRUSTSTORE_PASSWORD_PROPERTY, SECURITY_IS_ENCRYPTION_ENABLED, PID_DIR_PROPERTY, SSL_TRUSTSTORE_PASSWORD_ALIAS, \
-                  SECURITY_MASTER_KEY_LOCATION, SECURITY_KEYS_DIR, LDAP_PRIMARY_URL_PROPERTY, store_password_file, \
+                  SECURITY_MASTER_KEY_LOCATION, SECURITY_KEYS_DIR, store_password_file, \
                   get_pass_file_path, GET_FQDN_SERVICE_URL, JDBC_USE_INTEGRATED_AUTH_PROPERTY, SECURITY_KEY_ENV_VAR_NAME, \
                   JAVA_HOME_PROPERTY, JDK_NAME_PROPERTY, JCE_NAME_PROPERTY, STACK_LOCATION_KEY, SERVER_VERSION_FILE_PATH, \
                   COMMON_SERVICES_PATH_PROPERTY, WEBAPP_DIR_PROPERTY, SHARED_RESOURCES_DIR, BOOTSTRAP_SCRIPT, \
-                  CUSTOM_ACTION_DEFINITIONS, BOOTSTRAP_SETUP_AGENT_SCRIPT, STACKADVISOR_SCRIPT, BOOTSTRAP_DIR_PROPERTY, MPACKS_STAGING_PATH_PROPERTY
+                  CUSTOM_ACTION_DEFINITIONS, BOOTSTRAP_SETUP_AGENT_SCRIPT, STACKADVISOR_SCRIPT, BOOTSTRAP_DIR_PROPERTY, MPACKS_STAGING_PATH_PROPERTY, STACK_JAVA_VERSION
                 from ambari_server.serverUtils import is_server_runing, refresh_stack_hash
                 from ambari_server.serverSetup import check_selinux, check_ambari_user, proceedJDBCProperties, SE_STATUS_DISABLED, SE_MODE_ENFORCING, configure_os_settings, \
                   download_and_install_jdk, prompt_db_properties, setup, \
-                  AmbariUserChecks, AmbariUserChecksLinux, AmbariUserChecksWindows, JDKSetup, reset, setup_jce_policy, expand_jce_zip_file
-                from ambari_server.serverUpgrade import upgrade, upgrade_local_repo, change_objects_owner, upgrade_stack, \
-                  run_stack_upgrade, run_metainfo_upgrade, run_schema_upgrade, move_user_custom_actions
+                  AmbariUserChecks, AmbariUserChecksLinux, AmbariUserChecksWindows, JDKSetup, reset, setup_jce_policy, expand_jce_zip_file, check_ambari_java_version_is_valid
+                from ambari_server.serverUpgrade import upgrade, change_objects_owner, \
+                  run_schema_upgrade, move_user_custom_actions, find_and_copy_custom_services
                 from ambari_server.setupHttps import is_valid_https_port, setup_https, import_cert_and_key_action, get_fqdn, \
                   generate_random_string, get_cert_info, COMMON_NAME_ATTR, is_valid_cert_exp, NOT_AFTER_ATTR, NOT_BEFORE_ATTR, \
                   SSL_DATE_FORMAT, import_cert_and_key, is_valid_cert_host, setup_truststore, \
                   SRVR_ONE_WAY_SSL_PORT_PROPERTY, SRVR_TWO_WAY_SSL_PORT_PROPERTY, GANGLIA_HTTPS
                 from ambari_server.setupSecurity import adjust_directory_permissions, get_alias_string, get_ldap_event_spec_names, sync_ldap, LdapSyncOptions, \
                   configure_ldap_password, setup_ldap, REGEX_HOSTNAME_PORT, REGEX_TRUE_FALSE, REGEX_ANYTHING, setup_master_key, \
-                  setup_ambari_krb5_jaas, ensure_can_start_under_current_user, generate_env
+                  setup_ambari_krb5_jaas, ensure_can_start_under_current_user, generate_env, IS_LDAP_CONFIGURED
                 from ambari_server.userInput import get_YN_input, get_choice_string_input, get_validated_string_input, \
                   read_password
                 from ambari_server_main import get_ulimit_open_files, ULIMIT_OPEN_FILES_KEY, ULIMIT_OPEN_FILES_DEFAULT
-                from ambari_server.serverClassPath import ServerClassPath
+                from ambari_server.serverClassPath import JDBC_DRIVER_PATH_PROPERTY, ServerClassPath
                 from ambari_server.hostUpdate import update_host_names
                 from ambari_server.checkDatabase import check_database
                 from ambari_server import serverConfiguration
-                serverConfiguration.search_file = _search_file
 
 CURR_AMBARI_VERSION = "2.0.0"
 
@@ -290,25 +304,27 @@ class TestAmbariServer(TestCase):
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch.object(_ambari_server_, "setup_security")
-  @patch("optparse.OptionParser")
-  def test_main_test_setup_security(self, OptionParserMock,
-                                    setup_security_method):
-    opm = OptionParserMock.return_value
-    options = MagicMock()
-    args = ["setup-security"]
-    opm.parse_args.return_value = (options, args)
-    options.dbms = None
-    options.security_option = "setup-security"
-    options.sid_or_sname = "sid"
-    setup_security_method.return_value = None
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_main_test_setup_security(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock,
+                                    logger_mock, setup_security_method):
+    import sys
+    tmp_argv = sys.argv
+    try:
+      sys.argv = ['ambari-server', 'setup-security', '--security-option=setup-security']
+      setup_security_method.return_value = None
 
-    _ambari_server_.mainBody()
+      _ambari_server_.mainBody()
 
-    _ambari_server_.mainBody()
-    self.assertTrue(setup_security_method.called)
-    self.assertFalse(False, get_verbose())
-    self.assertFalse(False, get_silent())
-    pass
+      _ambari_server_.mainBody()
+      self.assertTrue(setup_security_method.called)
+      self.assertFalse(False, get_verbose())
+      self.assertFalse(False, get_silent())
+    finally:
+      sys.argv = tmp_argv
+  pass
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch.object(_ambari_server_, "setup_ambari_krb5_jaas")
@@ -316,7 +332,8 @@ class TestAmbariServer(TestCase):
   @patch.object(_ambari_server_, "setup_truststore")
   @patch.object(_ambari_server_, "setup_https")
   @patch.object(_ambari_server_, "get_validated_string_input")
-  def test_setup_security(self, get_validated_string_input_mock, setup_https_mock,
+  @patch.object(_ambari_server_, "logger")
+  def test_setup_security(self, logger_mock, get_validated_string_input_mock, setup_https_mock,
                           setup_truststore_mock, setup_master_key_mock,
                           setup_ambari_krb5_jaas_mock):
 
@@ -386,128 +403,149 @@ class TestAmbariServer(TestCase):
   @patch.object(_ambari_server_, "start")
   @patch.object(_ambari_server_, "stop")
   @patch.object(_ambari_server_, "reset")
-  @patch("optparse.OptionParser")
-  def test_main_test_setup(self, OptionParserMock, reset_method, stop_method,
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_main_test_setup(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock,
+                           logger_mock, reset_method, stop_method,
                            start_method, setup_method, exit_mock):
-    opm = OptionParserMock.return_value
-    options = self._create_empty_options_mock()
-    args = ["setup"]
-    opm.parse_args.return_value = (options, args)
-
-    options.dbms = None
-    options.sid_or_sname = "sid"
-    _ambari_server_.mainBody()
-
-    self.assertTrue(setup_method.called)
-    self.assertFalse(start_method.called)
-    self.assertFalse(stop_method.called)
-    self.assertFalse(reset_method.called)
-
-    self.assertFalse(False, get_verbose())
-    self.assertFalse(False, get_silent())
-
-    setup_method.reset_mock()
-    start_method.reset_mock()
-    stop_method.reset_mock()
-    reset_method.reset_mock()
-    exit_mock.reset_mock()
-    args = ["setup", "-v"]
-    options = self._create_empty_options_mock()
-    opm.parse_args.return_value = (options, args)
-    options.dbms = None
-    options.sid_or_sname = "sid"
-    setup_method.side_effect = Exception("Unexpected error")
+    import sys
+    tmp_argv = sys.argv
     try:
+      sys.argv = ["ambari-server", "setup"]
+
       _ambari_server_.mainBody()
-    except Exception:
-      self.assertTrue(True)
-    self.assertTrue(setup_method.called)
-    self.assertFalse(start_method.called)
-    self.assertFalse(stop_method.called)
-    self.assertFalse(reset_method.called)
-    self.assertTrue(get_verbose())
 
-    setup_method.reset_mock()
-    start_method.reset_mock()
-    stop_method.reset_mock()
-    reset_method.reset_mock()
-    exit_mock.reset_mock()
-    args = ["setup"]
-    options = self._create_empty_options_mock()
-    opm.parse_args.return_value = (options, args)
-    options.dbms = None
-    options.sid_or_sname = "sid"
-    options.verbose = False
-    setup_method.side_effect = Exception("Unexpected error")
-    _ambari_server_.mainBody()
-    self.assertTrue(exit_mock.called)
-    self.assertTrue(setup_method.called)
-    self.assertFalse(start_method.called)
-    self.assertFalse(stop_method.called)
-    self.assertFalse(reset_method.called)
-    self.assertFalse(get_verbose())
+      self.assertTrue(setup_method.called)
+      self.assertFalse(start_method.called)
+      self.assertFalse(stop_method.called)
+      self.assertFalse(reset_method.called)
 
-    pass
+      self.assertFalse(False, get_verbose())
+      self.assertFalse(False, get_silent())
+
+      setup_method.reset_mock()
+      start_method.reset_mock()
+      stop_method.reset_mock()
+      reset_method.reset_mock()
+      exit_mock.reset_mock()
+      sys.argv = ["ambari-server", "setup", "-v"]
+      setup_method.side_effect = Exception("Unexpected error")
+      try:
+        _ambari_server_.mainBody()
+      except Exception:
+        self.assertTrue(True)
+      self.assertTrue(setup_method.called)
+      self.assertFalse(start_method.called)
+      self.assertFalse(stop_method.called)
+      self.assertFalse(reset_method.called)
+      self.assertTrue(get_verbose())
+
+      setup_method.reset_mock()
+      start_method.reset_mock()
+      stop_method.reset_mock()
+      reset_method.reset_mock()
+      exit_mock.reset_mock()
+      sys.argv = ["ambari-server", "setup"]
+      setup_method.side_effect = Exception("Unexpected error")
+      _ambari_server_.mainBody()
+      self.assertTrue(exit_mock.called)
+      self.assertTrue(setup_method.called)
+      self.assertFalse(start_method.called)
+      self.assertFalse(stop_method.called)
+      self.assertFalse(reset_method.called)
+      self.assertFalse(get_verbose())
+
+      pass
+    finally:
+      sys.argv = tmp_argv
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-  @patch.object(_ambari_server_, "setup")
-  @patch("optparse.OptionParser")
-  def test_main_with_preset_dbms(self, optionParserMock, setup_method):
-    opm = optionParserMock.return_value
-    options = self._create_empty_options_mock()
-    args = ["setup"]
-    opm.parse_args.return_value = (options, args)
+  @patch.object(PGConfig, "_setup_local_server")
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  @patch("ambari_server.serverSetup.check_ambari_user")
+  @patch('ambari_server.serverSetup.download_and_install_jdk')
+  @patch("ambari_server.serverSetup.configure_os_settings")
+  @patch.object(DBMSConfig, "setup_database")
+  @patch("ambari_server.serverSetup.check_jdbc_drivers")
+  @patch("ambari_server.serverSetup.extract_views")
+  @patch("ambari_server.serverSetup.adjust_directory_permissions")
+  @patch("ambari_server.serverSetup.service_setup")
+  @patch("ambari_server.serverConfiguration.search_file")
+  def test_main_with_preset_dbms(self, search_file_mock, service_setup_mock, adjust_directory_permissions_mock, extract_views_mock, check_jdbc_drivers_mock, setup_database_mock, configure_os_settings_mock, download_and_install_jdk_mock, check_ambari_user_mock, init_logging_mock, setup_logging_mock, get_ambari_properties_mock,
+                                 logger_mock, setup_local_db_method):
+    extract_views_mock.return_value = 0
+    check_ambari_user_mock.return_value = (0, False, 'user', None)
+    configure_os_settings_mock.return_value = 0
+    search_file_mock.return_value = '/tmp/ambari.properties'
+    import sys
+    tmp_argv = sys.argv
+    try:
+      sys.argv = ["ambari-server", "setup", "-s"]
 
-    options.dbms = "sqlanywhere"
-    options.sid_or_sname = "sname"
-    _ambari_server_.mainBody()
+      _ambari_server_.mainBody()
 
-    self.assertTrue(setup_method.called)
-    self.assertEquals(options.database_index, 5)
-    pass
+      self.assertTrue(setup_local_db_method.called)
+      pass
+    finally:
+      sys.argv = tmp_argv
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch.object(_ambari_server_, "setup")
   @patch.object(_ambari_server_, "fix_database_options")
-  @patch("optparse.OptionParser")
-  def test_fix_database_options_called(self, optionParserMock, fixDBOptionsMock, setup_method):
-    opm = optionParserMock.return_value
-    options = self._create_empty_options_mock()
-    args = ["setup"]
-    opm.parse_args.return_value = (options, args)
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_fix_database_options_called(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock, logger_mock,
+                                       fixDBOptionsMock, setup_method):
+    import sys
+    tmp_argv = sys.argv
+    try:
+      sys.argv = ['ambari-server', 'setup']
 
-    _ambari_server_.mainBody()
+      _ambari_server_.mainBody()
 
-    self.assertTrue(setup_method.called)
-    self.assertTrue(fixDBOptionsMock.called)
-    set_silent(False)
-    pass
+      self.assertTrue(setup_method.called)
+      self.assertTrue(fixDBOptionsMock.called)
+      set_silent(False)
+      pass
+    finally:
+      sys.argv = tmp_argv
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch.object(_ambari_server_, "setup")
   @patch.object(_ambari_server_, "start")
   @patch.object(_ambari_server_, "stop")
   @patch.object(_ambari_server_, "reset")
-  @patch("optparse.OptionParser")
-  def test_main_test_start(self, optionParserMock, reset_method, stop_method,
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_main_test_start(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock, logger_mock,
+                           reset_method, stop_method,
                            start_method, setup_method):
-    opm = optionParserMock.return_value
-    options = self._create_empty_options_mock()
-    args = ["setup"]
-    opm.parse_args.return_value = (options, args)
+    import sys
+    tmp_argv = sys.argv
+    try:
+      sys.argv = ['ambari-server', "setup"]
 
-    options.dbms = None
-    options.sid_or_sname = "sname"
-    _ambari_server_.mainBody()
+      _ambari_server_.mainBody()
 
-    self.assertTrue(setup_method.called)
-    self.assertFalse(start_method.called)
-    self.assertFalse(stop_method.called)
-    self.assertFalse(reset_method.called)
+      self.assertTrue(setup_method.called)
+      self.assertFalse(start_method.called)
+      self.assertFalse(stop_method.called)
+      self.assertFalse(reset_method.called)
 
-    self.assertFalse(False, get_verbose())
-    self.assertFalse(False, get_silent())
-    pass
+      self.assertFalse(False, get_verbose())
+      self.assertFalse(False, get_silent())
+      pass
+    finally:
+      sys.argv = tmp_argv
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
@@ -618,28 +656,32 @@ class TestAmbariServer(TestCase):
   @patch.object(_ambari_server_, "reset")
   @patch.object(_ambari_server_, "backup")
   @patch.object(_ambari_server_, "restore")
-  @patch("optparse.OptionParser")
-  def test_main_test_backup(self, optionParserMock, restore_mock, backup_mock, reset_method, stop_method,
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_main_test_backup(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock, logger_mock,
+                            restore_mock, backup_mock, reset_method, stop_method,
                            start_method, setup_method):
-    opm = optionParserMock.return_value
-    options = self._create_empty_options_mock()
-    args = ["backup"]
-    opm.parse_args.return_value = (options, args)
+    import sys
+    tmp_argv = sys.argv
+    try:
+      sys.argv = ['ambari-server', "backup"]
 
-    options.dbms = None
-    options.sid_or_sname = "sname"
-    _ambari_server_.mainBody()
+      _ambari_server_.mainBody()
 
-    self.assertTrue(backup_mock.called)
-    self.assertFalse(restore_mock.called)
-    self.assertFalse(setup_method.called)
-    self.assertFalse(start_method.called)
-    self.assertFalse(stop_method.called)
-    self.assertFalse(reset_method.called)
+      self.assertTrue(backup_mock.called)
+      self.assertFalse(restore_mock.called)
+      self.assertFalse(setup_method.called)
+      self.assertFalse(start_method.called)
+      self.assertFalse(stop_method.called)
+      self.assertFalse(reset_method.called)
 
-    self.assertFalse(False, get_verbose())
-    self.assertFalse(False, get_silent())
-    pass
+      self.assertFalse(False, get_verbose())
+      self.assertFalse(False, get_silent())
+      pass
+    finally:
+      sys.argv = tmp_argv
 
   #Restore is not yet supported on Windows
   @not_for_platform(PLATFORM_WINDOWS)
@@ -650,28 +692,31 @@ class TestAmbariServer(TestCase):
   @patch.object(_ambari_server_, "reset")
   @patch.object(_ambari_server_, "backup")
   @patch.object(_ambari_server_, "restore")
-  @patch("optparse.OptionParser")
-  def test_main_test_restore(self, optionParserMock, restore_mock, backup_mock, reset_method, stop_method,
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_main_test_restore(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock, logger_mock,
+                             restore_mock, backup_mock, reset_method, stop_method,
                             start_method, setup_method):
-    opm = optionParserMock.return_value
-    options = self._create_empty_options_mock()
-    args = ["restore"]
-    opm.parse_args.return_value = (options, args)
+    import sys
+    tmp_argv = sys.argv
+    try:
+      sys.argv = ['ambari-server', "restore"]
+      _ambari_server_.mainBody()
 
-    options.dbms = None
-    options.sid_or_sname = "sname"
-    _ambari_server_.mainBody()
+      self.assertTrue(restore_mock.called)
+      self.assertFalse(backup_mock.called)
+      self.assertFalse(setup_method.called)
+      self.assertFalse(start_method.called)
+      self.assertFalse(stop_method.called)
+      self.assertFalse(reset_method.called)
 
-    self.assertTrue(restore_mock.called)
-    self.assertFalse(backup_mock.called)
-    self.assertFalse(setup_method.called)
-    self.assertFalse(start_method.called)
-    self.assertFalse(stop_method.called)
-    self.assertFalse(reset_method.called)
-
-    self.assertFalse(False, get_verbose())
-    self.assertFalse(False, get_silent())
-    pass
+      self.assertFalse(False, get_verbose())
+      self.assertFalse(False, get_silent())
+      pass
+    finally:
+      sys.argv = tmp_argv
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
@@ -743,27 +788,30 @@ class TestAmbariServer(TestCase):
   @patch.object(_ambari_server_, "start")
   @patch.object(_ambari_server_, "stop")
   @patch.object(_ambari_server_, "reset")
-  @patch("optparse.OptionParser")
-  def test_main_test_reset(self, optionParserMock, reset_method, stop_method,
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_main_test_reset(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock,
+                           logger_mock, reset_method, stop_method,
                            start_method, setup_method):
-    opm = optionParserMock.return_value
+    import sys
+    tmp_argv = sys.argv
+    try:
+      sys.argv = ['ambari-server', "reset"]
 
-    options = self._create_empty_options_mock()
-    args = ["reset"]
-    opm.parse_args.return_value = (options, args)
-    options.dbms = None
-    options.sid_or_sname = "sid"
+      _ambari_server_.mainBody()
 
-    _ambari_server_.mainBody()
+      self.assertFalse(setup_method.called)
+      self.assertFalse(start_method.called)
+      self.assertFalse(stop_method.called)
+      self.assertTrue(reset_method.called)
 
-    self.assertFalse(setup_method.called)
-    self.assertFalse(start_method.called)
-    self.assertFalse(stop_method.called)
-    self.assertTrue(reset_method.called)
-
-    self.assertFalse(False, get_verbose())
-    self.assertFalse(False, get_silent())
-    pass
+      self.assertFalse(False, get_verbose())
+      self.assertFalse(False, get_silent())
+      pass
+    finally:
+      sys.argv = tmp_argv
 
 
   @not_for_platform(PLATFORM_WINDOWS)
@@ -859,7 +907,7 @@ class TestAmbariServer(TestCase):
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch("time.sleep")
-  @patch("subprocess.Popen")
+  @patch.object(subprocess32, "Popen")
   @patch("ambari_server.dbConfiguration_linux.run_os_command")
   @patch.object(PGConfig, "_get_postgre_status")
   @patch("ambari_server.dbConfiguration_linux.print_info_msg")
@@ -880,7 +928,7 @@ class TestAmbariServer(TestCase):
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch("shlex.split")
-  @patch("subprocess.Popen")
+  @patch("subprocess32.Popen")
   @patch("ambari_commons.os_linux.print_info_msg")
   def test_run_os_command(self, printInfoMsg_mock, popenMock, splitMock):
 
@@ -902,7 +950,7 @@ class TestAmbariServer(TestCase):
 
   @only_for_platform(PLATFORM_WINDOWS)
   @patch("shlex.split")
-  @patch("subprocess.Popen")
+  @patch("subprocess32.Popen")
   @patch("ambari_commons.os_windows.print_info_msg")
   def test_run_os_command(self, printInfoMsg_mock, popenMock, splitMock):
 
@@ -983,6 +1031,7 @@ class TestAmbariServer(TestCase):
     run_os_command_mock.return_value = (0, None, None)
     result = dbms._setup_db()
     self.assertTrue(run_os_command_mock.called)
+    self.assertEqual(run_os_command_mock.call_count, 2)
     self.assertEqual((0, None, None), result)
     pass
 
@@ -1866,25 +1915,21 @@ class TestAmbariServer(TestCase):
     self.assertTrue(set_file_permissions_mock.called)
     pass
 
-  @patch("subprocess.Popen")
+  @patch("resource_management.core.shell.call")
   @patch.object(OSCheck, "get_os_family")
   @patch.object(OSCheck, "get_os_type")
   @patch.object(OSCheck, "get_os_major_version")
-  def test_check_firewall_is_running(self, get_os_major_version_mock, get_os_type_mock, get_os_family_mock, popen_mock):
+  def test_check_firewall_is_running(self, get_os_major_version_mock, get_os_type_mock, get_os_family_mock, shell_call_mock):
 
     get_os_major_version_mock.return_value = 18
     get_os_type_mock.return_value = OSConst.OS_FEDORA
     get_os_family_mock.return_value = OSConst.REDHAT_FAMILY
 
     firewall_obj = Firewall().getFirewallObject()
-    p = MagicMock()
-    p.communicate.return_value = ("active", "err")
-    p.returncode = 0
-    popen_mock.return_value = p
+    shell_call_mock.return_value = (0, "active", "err")
     self.assertEqual("Fedora18FirewallChecks", firewall_obj.__class__.__name__)
     self.assertTrue(firewall_obj.check_firewall())
-    p.communicate.return_value = ("", "err")
-    p.returncode = 3
+    shell_call_mock.return_value = (3, "", "err")
     self.assertFalse(firewall_obj.check_firewall())
     self.assertEqual("err", firewall_obj.stderrdata)
 
@@ -1893,12 +1938,10 @@ class TestAmbariServer(TestCase):
     get_os_family_mock.return_value = OSConst.UBUNTU_FAMILY
 
     firewall_obj = Firewall().getFirewallObject()
-    p.communicate.return_value = ("Status: active", "err")
-    p.returncode = 0
+    shell_call_mock.return_value = (0, "Status: active", "err")
     self.assertEqual("UbuntuFirewallChecks", firewall_obj.__class__.__name__)
     self.assertTrue(firewall_obj.check_firewall())
-    p.communicate.return_value = ("Status: inactive", "err")
-    p.returncode = 0
+    shell_call_mock.return_value = (0, "Status: inactive", "err")
     self.assertFalse(firewall_obj.check_firewall())
     self.assertEqual("err", firewall_obj.stderrdata)
 
@@ -1906,26 +1949,10 @@ class TestAmbariServer(TestCase):
     get_os_family_mock.return_value = OSConst.SUSE_FAMILY
 
     firewall_obj = Firewall().getFirewallObject()
-    p.communicate.return_value = ("running", "err")
-    p.returncode = 0
+    shell_call_mock.return_value = (0, "running", "err")
     self.assertEqual("SuseFirewallChecks", firewall_obj.__class__.__name__)
     self.assertTrue(firewall_obj.check_firewall())
-    p.communicate.return_value = ("unused", "err")
-    p.returncode = 0
-    self.assertFalse(firewall_obj.check_firewall())
-    self.assertEqual("err", firewall_obj.stderrdata)
-
-    get_os_type_mock.return_value = ""
-    get_os_family_mock.return_value = OSConst.REDHAT_FAMILY
-    get_os_major_version_mock.return_value = 6
-
-    firewall_obj = Firewall().getFirewallObject()
-    p.communicate.return_value = ("Table: filter", "err")
-    p.returncode = 0
-    self.assertEqual("FirewallChecks", firewall_obj.__class__.__name__)
-    self.assertTrue(firewall_obj.check_firewall())
-    p.communicate.return_value = ("", "err")
-    p.returncode = 3
+    shell_call_mock.return_value = (0, "unused", "err")
     self.assertFalse(firewall_obj.check_firewall())
     self.assertEqual("err", firewall_obj.stderrdata)
 
@@ -1934,10 +1961,14 @@ class TestAmbariServer(TestCase):
     get_os_family_mock.return_value = OSConst.REDHAT_FAMILY
 
     firewall_obj = Firewall().getFirewallObject()
-    p.returncode = 0
+    shell_call_mock.return_value = (0, "active\nactive", "err")
     self.assertEqual("RedHat7FirewallChecks", firewall_obj.__class__.__name__)
     self.assertTrue(firewall_obj.check_firewall())
-    p.returncode = 3
+    shell_call_mock.return_value = (3, "inactive\nactive", "err")
+    self.assertTrue(firewall_obj.check_firewall())
+    shell_call_mock.return_value = (3, "active\ninactive", "err")
+    self.assertTrue(firewall_obj.check_firewall())
+    shell_call_mock.return_value = (3, "inactive\ninactive", "err")
     self.assertFalse(firewall_obj.check_firewall())
     self.assertEqual("err", firewall_obj.stderrdata)
 
@@ -2772,9 +2803,10 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.serverSetup.get_JAVA_HOME")
   @patch("ambari_server.serverSetup.get_resources_location")
   @patch("ambari_server.serverSetup.get_ambari_properties")
+  @patch("ambari_server.serverSetup.check_ambari_java_version_is_valid")
   @patch("shutil.copyfile")
   @patch("sys.exit")
-  def test_download_jdk(self, exit_mock, copyfile_mock, get_ambari_properties_mock, get_resources_location_mock, get_JAVA_HOME_mock, \
+  def test_download_jdk(self, exit_mock, copyfile_mock, check_ambari_java_version_is_valid_mock, get_ambari_properties_mock, get_resources_location_mock, get_JAVA_HOME_mock, \
                         validate_jdk_mock, print_info_msg_mock, get_validated_string_input_mock, update_properties_mock, \
                         run_os_command_mock, get_YN_input_mock, force_download_file_mock, expand_jce_zip_file_mock,
                         adjust_jce_permissions_mock, os_makedirs_mock,
@@ -2835,6 +2867,7 @@ class TestAmbariServer(TestCase):
     get_JAVA_HOME_mock.return_value = False
     read_ambari_user_mock.return_value = "ambari"
     get_ambari_properties_mock.return_value = p
+    check_ambari_java_version_is_valid_mock.return_value = True
     # Test case: ambari.properties not found
     try:
       download_and_install_jdk(args)
@@ -3027,7 +3060,7 @@ class TestAmbariServer(TestCase):
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch("time.sleep")
-  @patch("subprocess.Popen")
+  @patch("subprocess32.Popen")
   @patch("ambari_server.dbConfiguration_linux.run_os_command")
   @patch.object(PGConfig, "_get_postgre_status")
   def test_check_postgre_up(self, get_postgre_status_mock, run_os_command_mock,
@@ -3125,6 +3158,47 @@ class TestAmbariServer(TestCase):
 
     self.assertEqual(args.database_index, 0)
     pass
+
+  @not_for_platform(PLATFORM_WINDOWS)
+  @patch.object(subprocess32, "Popen")
+  def test_check_ambari_java_version_is_valid(self, popenMock):
+    # case 1:  jdk7 is picked for stacks
+    properties = Properties()
+    p = MagicMock()
+    p.communicate.return_value = ('7', None)
+    p.returncode = 0
+    popenMock.return_value = p
+    result = check_ambari_java_version_is_valid('/usr/jdk64/jdk_1.7.0/', 'java', 8, properties)
+    self.assertEqual(properties.get_property(STACK_JAVA_VERSION), "7")
+    self.assertFalse(result)
+
+    # case 2: jdk8 is picked for stacks
+    properties = Properties()
+    p.communicate.return_value = ('8', None)
+    p.returncode = 0
+    result = check_ambari_java_version_is_valid('/usr/jdk64/jdk_1.8.0/', 'java', 8, properties)
+    self.assertFalse(properties.get_property(STACK_JAVA_VERSION))
+    self.assertTrue(result)
+
+    # case 3: return code is not 0
+    p.returncode = 1
+    try:
+      check_ambari_java_version_is_valid('/usr/jdk64/jdk_1.8.0/', 'java', 8, properties)
+      self.fail("Should throw exception")
+    except FatalException:
+      # expected
+      pass
+
+    # case 4: unparseable response - type error
+    p.communicate.return_value = ('something else', None)
+    p.returncode = 0
+    try:
+      check_ambari_java_version_is_valid('/usr/jdk64/jdk_1.8.0/', 'java', 8, properties)
+      self.fail("Should throw exception")
+    except FatalException as e:
+      # expected
+      self.assertEqual(e.code, 1)
+      pass
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
@@ -3272,7 +3346,7 @@ class TestAmbariServer(TestCase):
   def test_prompt_db_properties_postgre_adv(self, gyni_mock, gvsi_mock, gvsi_2_mock, rp_mock, print_info_msg_mock, sls_mock,
                                             get_os_family_mock, get_pw_nam_mock, chown_mock, mkdir_mock, isdir_mock):
     gyni_mock.return_value = True
-    list_of_return_values = ["ambari-server", "ambari", "ambari", "1"]
+    list_of_return_values = ["ambari-server", "postgres", "ambari", "ambari", "1"]
     get_os_family_mock.return_value = OSConst.SUSE_FAMILY
     pw = MagicMock()
     pw.setattr('pw_uid', 0)
@@ -3345,12 +3419,13 @@ class TestAmbariServer(TestCase):
     db_name = "db_ambari"
     postgres_schema = "sc_ambari"
     port = "1234"
+    local_admin_user = "postgres"
     oracle_service = "1"
     oracle_service_name = "ambari"
     user_name = "ambari"
 
     # Input values
-    postgres_embedded_values = [db_name, postgres_schema, hostname]
+    postgres_embedded_values = [local_admin_user, db_name, postgres_schema, hostname]
     oracle_values = [hostname, port, oracle_service, oracle_service_name, user_name]
     mysql_values = [hostname, port, db_name, user_name]
     postgres_external_values = [hostname, port, db_name, postgres_schema, user_name]
@@ -3389,6 +3464,7 @@ class TestAmbariServer(TestCase):
 
       del args.dbms
       del args.database_host
+      del args.local_admin_user
       del args.database_port
       del args.database_name
       del args.database_username
@@ -3537,7 +3613,8 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.serverSetup.get_ambari_properties")
   @patch("ambari_commons.os_utils.search_file")
   @patch("__builtin__.open")
-  def test_setup_jce_policy(self, open_mock, search_file_mock, get_ambari_properties_mock, unpack_jce_policy_mock,
+  @patch("ambari_server.serverSetup.logger")
+  def test_setup_jce_policy(self, logger_mock, open_mock, search_file_mock, get_ambari_properties_mock, unpack_jce_policy_mock,
                             update_properties_mock, path_split_mock, shutil_copy_mock, exists_mock):
     exists_mock.return_value = True
     properties = Properties()
@@ -3601,13 +3678,14 @@ class TestAmbariServer(TestCase):
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch("pwd.getpwnam")
-  @patch("ambari_commons.firewall.run_os_command")
+  @patch("resource_management.core.shell.call")
   @patch("os.path.exists")
   @patch("os.path.isfile")
   @patch("ambari_commons.os_utils.remove_file")
   @patch("ambari_server.dbConfiguration_linux.LinuxDBMSConfig.ensure_jdbc_driver_installed")
   @patch("ambari_server.dbConfiguration_linux.get_YN_input")
   @patch("ambari_server.serverSetup.update_properties")
+  @patch("ambari_server.dbConfiguration.get_ambari_properties")
   @patch("ambari_server.dbConfiguration_linux.get_ambari_properties")
   @patch("ambari_server.dbConfiguration_linux.store_password_file")
   @patch("ambari_server.dbConfiguration_linux.run_os_command")
@@ -3632,20 +3710,23 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.serverSetup.service_setup")
   @patch("ambari_server.serverSetup.read_ambari_user")
   @patch("ambari_server.serverSetup.expand_jce_zip_file")
-  def test_setup(self, expand_jce_zip_file_mock, read_ambari_user_mock,
+  @patch("ambari_server.serverSetup.write_gpl_license_accepted")
+  def test_setup_linux(self, write_gpl_license_accepted_mock, expand_jce_zip_file_mock, read_ambari_user_mock,
                  service_setup_mock, adjust_dirs_mock, extract_views_mock, proceedJDBCProperties_mock, is_root_mock,
                  disable_security_enhancements_mock, check_jdbc_drivers_mock, check_ambari_user_mock,
                  download_jdk_mock, configure_os_settings_mock, get_ambari_properties_mock,
                  get_YN_input_mock, gvsi_mock, gvsi_1_mock,
                  read_password_mock, verify_setup_allowed_method, is_jdbc_user_changed_mock, check_postgre_up_mock,
                  configure_postgres_mock, run_os_command_1_mock,
-                 store_password_file_mock, get_ambari_properties_1_mock, update_properties_mock,
+                 store_password_file_mock, get_ambari_properties_1_mock, get_ambari_properties_2_mock, update_properties_mock,
                  get_YN_input_1_mock, ensure_jdbc_driver_installed_mock,
                  remove_file_mock, isfile_mock, exists_mock,
                  run_os_command_mock, get_pw_nam_mock):
     hostname = "localhost"
+    db_admin_user = 'postgres'
     db_name = "db_ambari"
     postgres_schema = "sc_ambari"
+    db_username = 'u_ambari'
     port = "1234"
     oracle_service = "1"
     oracle_service_name = "ambari"
@@ -3681,6 +3762,7 @@ class TestAmbariServer(TestCase):
     read_password_mock.return_value = "bigdata2"
     get_ambari_properties_mock.return_value = properties
     get_ambari_properties_1_mock.return_value = properties
+    get_ambari_properties_2_mock.return_value = properties
     store_password_file_mock.return_value = "encrypted_bigdata2"
     ensure_jdbc_driver_installed_mock.return_value = True
     check_postgre_up_mock.return_value = (PGConfig.PG_STATUS_RUNNING, 0, "", "")
@@ -3699,6 +3781,7 @@ class TestAmbariServer(TestCase):
       run_os_command_1_mock.reset_mock()
       get_YN_input_1_mock.reset_mock()
       update_properties_mock.reset_mock()
+      extract_views_mock.reset_mock()
 
       args = MagicMock()
 
@@ -3719,6 +3802,7 @@ class TestAmbariServer(TestCase):
       args.jdbc_db = None
 
       args.silent = False
+      args.skip_view_extraction = False
 
       return args
 
@@ -3727,11 +3811,8 @@ class TestAmbariServer(TestCase):
     is_root_mock.return_value = False
     try:
       setup(args)
-      self.fail("Should throw exception")
     except FatalException as fe:
-      # Expected
-      self.assertTrue("root-level" in fe.reason)
-      pass
+      self.fail("Should not throw exception, only print warning") # see AMBARI-15245
 
     args = reset_mocks()
 
@@ -3743,20 +3824,27 @@ class TestAmbariServer(TestCase):
     check_jdbc_drivers_mock.return_value = 0
     download_jdk_mock.return_value = 0
     configure_os_settings_mock.return_value = 0
+    write_gpl_license_accepted_mock.return_value = 0
 
     result = setup(args)
 
     self.assertEqual(None, result)
     self.assertTrue(check_ambari_user_mock.called)
     self.assertEqual(1, run_os_command_mock.call_count)
+    self.assertTrue(extract_views_mock.called)
+
+    # test view extraction is skipped on-demand
+    args = reset_mocks()
+    args.skip_view_extraction = True
+    setup(args)
+    self.assertFalse(extract_views_mock.called)
 
     #Local case
     args = reset_mocks()
 
     # Input values
     db_selection_values = ["1"]
-    postgres_values = [db_name, postgres_schema, hostname]
-
+    postgres_values = [db_admin_user, db_name, postgres_schema, db_username]
     postgres_values = postgres_values[::-1]       # Reverse the list since the input will be popped
 
     def side_effect(*args, **kwargs):
@@ -3781,7 +3869,8 @@ class TestAmbariServer(TestCase):
     self.assertTrue(run_os_command_1_mock.called)
     self.assertFalse(remove_file_mock.called)
 
-    self.assertTrue("Ambari-DDL-Postgres-EMBEDDED-CREATE.sql" in run_os_command_1_mock.call_args[0][0][3])
+    self.assertTrue("Ambari-DDL-Postgres-CREATE.sql" in run_os_command_1_mock.call_args[0][0][3])
+    self.assertTrue("-U {0}".format(db_username) in run_os_command_1_mock.call_args[0][0][3])
 
     #if DB user name was changed
     args = reset_mocks()
@@ -3790,8 +3879,7 @@ class TestAmbariServer(TestCase):
     is_jdbc_user_changed_mock.return_value = True
 
     db_selection_values = ["1"]
-    postgres_values = [db_name, postgres_schema, hostname]
-
+    postgres_values = [db_admin_user, db_name, postgres_schema, db_username]
     postgres_values = postgres_values[::-1]       # Reverse the list since the input will be popped
 
     try:
@@ -3811,7 +3899,6 @@ class TestAmbariServer(TestCase):
     get_YN_input_1_mock.return_value = False
     db_selection_values = ["4"]
     postgres_values = [hostname, port, db_name, postgres_schema, user_name]
-
     postgres_values = postgres_values[::-1]       # Reverse the list since the input will be popped
 
     try:
@@ -3832,11 +3919,13 @@ class TestAmbariServer(TestCase):
     self.assertTrue(proceedJDBCProperties_mock.called)
     self.assertFalse(disable_security_enhancements_mock.called)
     self.assertFalse(check_ambari_user_mock.called)
+
     pass
+
 
   @only_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-  @patch("ambari_commons.firewall.run_os_command")
+  @patch("resource_management.core.shell.call")
   @patch("os.path.exists")
   @patch("os.path.isfile")
   @patch("ambari_commons.os_utils.remove_file")
@@ -3862,7 +3951,7 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.serverSetup.service_setup")
   @patch("ambari_server.serverSetup.read_ambari_user")
   @patch("ambari_server.serverSetup.expand_jce_zip_file")
-  def test_setup(self, expand_jce_zip_file_mock, read_ambari_user_mock,
+  def test_setup_windows(self, expand_jce_zip_file_mock, read_ambari_user_mock,
                  service_setup_mock, adjust_dirs_mock, extract_views_mock, proceedJDBCProperties_mock, is_root_mock,
                  disable_security_enhancements_mock, check_jdbc_drivers_mock, check_ambari_user_mock, check_firewall_mock,
                  download_jdk_mock, configure_os_settings_mock, get_ambari_properties_mock,
@@ -4217,7 +4306,8 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.serverSetup.get_YN_input")
   @patch("__builtin__.raw_input")
   @patch("ambari_server.serverSetup.is_root")
-  def test_reset_default(self, is_root_mock, raw_input_mock, get_YN_inputMock):
+  @patch("ambari_server.serverSetup.logger")
+  def test_reset_default(self, logger_mock, is_root_mock, raw_input_mock, get_YN_inputMock):
     is_root_mock.return_value=True
     get_YN_inputMock.return_value = False
     raw_input_mock.return_value=""
@@ -4332,7 +4422,7 @@ class TestAmbariServer(TestCase):
   @patch("sys.stdout.flush")
   @patch("sys.stdout.write")
   @patch("ambari_server_main.looking_for_pid")
-  @patch("ambari_server_main.wait_for_pid")
+  @patch("ambari_server_main.wait_for_ui_start")
   @patch("ambari_server_main.save_main_pid_ex")
   @patch("ambari_server_main.check_exitcode")
   @patch("os.makedirs")
@@ -4341,8 +4431,8 @@ class TestAmbariServer(TestCase):
   @patch("os.chown")
   @patch("ambari_server.setupSecurity.get_master_key_location")
   @patch("ambari_server.setupSecurity.save_master_key")
-  @patch("ambari_server_main.get_is_persisted")
-  @patch("ambari_server_main.get_is_secure")
+  @patch("ambari_server.setupSecurity.get_is_persisted")
+  @patch("ambari_server.setupSecurity.get_is_secure")
   @patch('os.chmod', autospec=True)
   @patch("ambari_server.serverConfiguration.write_property")
   @patch("ambari_server.serverConfiguration.get_validated_string_input")
@@ -4354,7 +4444,7 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server_main.get_ambari_properties")
   @patch("os.path.exists")
   @patch("__builtin__.open")
-  @patch("subprocess.Popen")
+  @patch.object(subprocess32, "Popen")
   @patch("ambari_server.serverConfiguration.search_file")
   @patch("ambari_server_main.check_database_name_property")
   @patch("ambari_server_main.find_jdk")
@@ -4369,7 +4459,8 @@ class TestAmbariServer(TestCase):
   @patch("getpass.getuser")
   @patch("os.chdir")
   @patch.object(ResourceFilesKeeper, "perform_housekeeping")
-  def test_start(self, perform_housekeeping_mock, chdir_mock, getuser_mock, find_jdbc_driver_mock,
+  @patch.object(_ambari_server_, "logger")
+  def test_start(self, logger_mock, perform_housekeeping_mock, chdir_mock, getuser_mock, find_jdbc_driver_mock,
                  is_root_mock, is_root_2_mock, is_root_3_mock, read_ambari_user_mock,
                  check_postgre_up_mock, print_info_msg_mock, print_warning_msg_mock,
                  find_jdk_mock, check_database_name_property_mock, search_file_mock,
@@ -4381,7 +4472,7 @@ class TestAmbariServer(TestCase):
                  save_master_key_method, get_master_key_location_method,
                  os_chown_mock, is_server_running_mock, locate_file_mock,
                  os_makedirs_mock, check_exitcode_mock, save_main_pid_ex_mock,
-                 wait_for_pid_mock, looking_for_pid_mock, stdout_write_mock, stdout_flush_mock,
+                 wait_for_ui_start_mock, looking_for_pid_mock, stdout_write_mock, stdout_flush_mock,
                  get_is_active_instance_mock):
 
     def reset_mocks():
@@ -4418,7 +4509,7 @@ class TestAmbariServer(TestCase):
         "exe": "/test",
         "cmd": "test arg"
     }]
-    wait_for_pid_mock.return_value = 1
+    wait_for_ui_start_mock.return_value = True
     check_exitcode_mock.return_value = 0
 
     p = Properties()
@@ -4818,14 +4909,16 @@ class TestAmbariServer(TestCase):
     pass
 
   @patch.object(_ambari_server_, "BackupRestore_main")
-  def test_restore(self, bkrestore_mock):
+  @patch.object(_ambari_server_, "logger")
+  def test_restore(self, logger_mock, bkrestore_mock):
     args = ["", "/some/path/file.zip"]
     _ambari_server_.restore(args)
     self.assertTrue(bkrestore_mock.called)
     pass
 
   @patch.object(_ambari_server_, "BackupRestore_main")
-  def test_restore_no_path(self, bkrestore_mock):
+  @patch.object(_ambari_server_, "logger")
+  def test_restore_no_path(self, logger_mock, bkrestore_mock):
     args = [""]
     _ambari_server_.restore(args)
     self.assertTrue(bkrestore_mock.called)
@@ -4850,58 +4943,6 @@ class TestAmbariServer(TestCase):
     self.assertEqual(shutil_move_mock.call_count, 2)
     pass
 
-
-  @patch("os.path.isdir", new = MagicMock(return_value=True))
-  @patch("os.access", new = MagicMock(return_value=True))
-  @patch("ambari_server.serverConfiguration.get_conf_dir")
-  @patch("ambari_server.serverUpgrade.run_os_command")
-  @patch("ambari_server.serverUpgrade.get_java_exe_path")
-  def test_run_stack_upgrade(self, java_exe_path_mock, run_os_command_mock,
-                             get_conf_dir_mock):
-    java_exe_path_mock.return_value = "/usr/lib/java/bin/java"
-    run_os_command_mock.return_value = (0, None, None)
-    get_conf_dir_mock.return_value = '/etc/conf'
-    stackIdMap = {'HDP' : '2.0', 'repo_url' : 'http://test.com'}
-
-    run_stack_upgrade(None, 'HDP', '2.0', 'http://test.com', None)
-
-    self.assertTrue(java_exe_path_mock.called)
-    self.assertTrue(get_conf_dir_mock.called)
-    self.assertTrue(run_os_command_mock.called)
-    run_os_command_mock.assert_called_with('/usr/lib/java/bin/java -cp \'/etc/conf:/usr/lib/ambari-server/*\' '
-                                          'org.apache.ambari.server.upgrade.StackUpgradeHelper '
-                                          'updateStackId ' + "'" + json.dumps(stackIdMap) + "'" +
-                                          ' > ' + os.sep + 'var' + os.sep + 'log' + os.sep + 'ambari-server' + os.sep +
-                                          'ambari-server.out 2>&1')
-    pass
-
-  @patch("os.path.isdir", new = MagicMock(return_value=True))
-  @patch("os.access", new = MagicMock(return_value=True))
-  @patch.object(ServerClassPath, "get_full_ambari_classpath_escaped_for_shell",
-                  new = MagicMock(return_value = '/etc/conf' + os.pathsep + 'test' + os.pathsep + 'path12'))
-  @patch("ambari_server.serverConfiguration.get_conf_dir")
-  @patch("ambari_server.serverUpgrade.run_os_command")
-  @patch("ambari_server.serverUpgrade.get_java_exe_path")
-  def test_run_stack_upgrade_with_url_os(self, java_exe_path_mock, run_os_command_mock,
-                             get_conf_dir_mock):
-    java_exe_path_mock.return_value = "/usr/lib/java/bin/java"
-    run_os_command_mock.return_value = (0, None, None)
-    get_conf_dir_mock.return_value = '/etc/conf'
-    stackIdMap = {'HDP' : '2.0', 'repo_url': 'http://test.com', 'repo_url_os': 'centos5,centos6'}
-
-    run_stack_upgrade(None, 'HDP', '2.0', 'http://test.com', 'centos5,centos6')
-
-    self.assertTrue(java_exe_path_mock.called)
-    self.assertTrue(get_conf_dir_mock.called)
-    self.assertTrue(run_os_command_mock.called)
-    run_os_command_mock.assert_called_with('/usr/lib/java/bin/java -cp /etc/conf' + os.pathsep + 'test:path12 '
-                                           'org.apache.ambari.server.upgrade.StackUpgradeHelper '
-                                           'updateStackId ' + "'" + json.dumps(stackIdMap) + "'" +
-                                           ' > ' + os.sep + 'var' + os.sep + 'log' + os.sep + 'ambari-server' + os.sep +
-                                           'ambari-server.out 2>&1')
-    pass
-
-
   @patch("os.path.isdir", new = MagicMock(return_value=True))
   @patch("os.access", new = MagicMock(return_value=True))
   @patch.object(ServerClassPath, "get_full_ambari_classpath_escaped_for_shell",
@@ -4923,7 +4964,7 @@ class TestAmbariServer(TestCase):
                               ensure_can_start_under_current_user_mock, get_jdbc_mock,
                               ensure_jdbc_driver_is_installed_mock):
     java_exe_path_mock.return_value = "/usr/lib/java/bin/java"
-    run_os_command_mock.return_value = (0, None, None)
+    run_os_command_mock.return_value = (0, '{"lzo_enabled":"false"}', None)
     get_conf_dir_mock.return_value = '/etc/conf'
     command = '/usr/lib/java/bin/java -cp /etc/conf' + os.pathsep + 'test' + os.pathsep + 'path12' + \
               os.pathsep +'/path/to/jdbc.jar ' \
@@ -4947,31 +4988,6 @@ class TestAmbariServer(TestCase):
     self.assertTrue(read_ambari_user_mock.called)
     self.assertTrue(run_os_command_mock.called)
     run_os_command_mock.assert_called_with(command, env=environ)
-
-  @patch("os.path.isdir", new = MagicMock(return_value=True))
-  @patch("os.access", new = MagicMock(return_value=True))
-  @patch("ambari_server.serverConfiguration.get_conf_dir")
-  @patch.object(ServerClassPath, "get_full_ambari_classpath_escaped_for_shell", new = MagicMock(return_value = 'test' + os.pathsep + 'path12'))
-  @patch("ambari_server.serverUpgrade.run_os_command")
-  @patch("ambari_server.serverUpgrade.get_java_exe_path")
-  def test_run_metainfo_upgrade(self, java_exe_path_mock, run_os_command_mock,
-                                get_conf_dir_mock):
-    java_exe_path_mock.return_value = "/usr/lib/java/bin/java"
-    run_os_command_mock.return_value = (0, None, None)
-    get_conf_dir_mock.return_value = '/etc/conf'
-
-    json_map = {'a': 'http://newurl'}
-    run_metainfo_upgrade(None, json_map)
-
-    self.assertTrue(java_exe_path_mock.called)
-    self.assertTrue(run_os_command_mock.called)
-    run_os_command_mock.assert_called_with('/usr/lib/java/bin/java '
-                                           '-cp test' + os.pathsep + 'path12 '
-                                           'org.apache.ambari.server.upgrade.StackUpgradeHelper updateMetaInfo ' +
-                                           "'" + json.dumps(json_map) + "'" +
-                                           ' > ' + os.sep + 'var' + os.sep + 'log' + os.sep + 'ambari-server' +
-                                           os.sep + 'ambari-server.out 2>&1')
-    pass
 
 
   @not_for_platform(PLATFORM_WINDOWS)
@@ -5161,12 +5177,13 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.dbConfiguration.get_ambari_properties")
   @patch("ambari_server.serverConfiguration.get_ambari_properties")
   @patch("ambari_server.serverUpgrade.get_ambari_properties")
-  @patch("ambari_server.serverUpgrade.upgrade_local_repo")
   @patch("ambari_server.serverUpgrade.move_user_custom_actions")
   @patch("ambari_server.serverUpgrade.update_krb_jaas_login_properties")
   @patch("ambari_server.serverUpgrade.update_ambari_env")
   @patch("ambari_server.setupMpacks.get_replay_log_file")
-  def test_upgrade_from_161(self, get_replay_log_file_mock, update_ambari_env_mock, update_krb_jaas_login_properties_mock, move_user_custom_actions_mock, upgrade_local_repo_mock, get_ambari_properties_mock,
+  @patch("ambari_server.serverUpgrade.logger")
+  @patch.object(PGConfig, "_change_db_files_owner", return_value=0)
+  def test_upgrade_from_161(self, change_db_files_owner_mock, logger_mock, get_replay_log_file_mock, update_ambari_env_mock, update_krb_jaas_login_properties_mock, move_user_custom_actions_mock, get_ambari_properties_mock,
                             get_ambari_properties_2_mock, get_ambari_properties_3_mock, get_ambari_version_mock, write_property_mock,
                             is_root_mock, update_ambari_properties_mock, find_properties_file_mock, run_os_command_mock,
                             run_schema_upgrade_mock, read_ambari_user_mock, print_warning_msg_mock,
@@ -5248,7 +5265,6 @@ class TestAmbariServer(TestCase):
       self.assertEquals(write_property_mock.call_args_list[0][0][1], "ambari")
       self.assertEquals(write_property_mock.call_args_list[1][0][0], JDBC_DATABASE_PROPERTY)
       self.assertEquals(write_property_mock.call_args_list[1][0][1], "postgres")
-      self.assertTrue(run_os_command_mock.called)
       self.assertFalse(move_user_custom_actions_mock.called)
 
     args = reset_mocks()
@@ -5323,7 +5339,7 @@ class TestAmbariServer(TestCase):
     get_ambari_properties_mock.return_value = properties
     get_ambari_properties_3_mock.side_effect = get_ambari_properties_2_mock.side_effect = [properties, properties2, properties2]
 
-    isfile_mock.side_effect = [False, True, False, False]
+    isfile_mock.side_effect = [False, True, False, False, False]
 
     try:
       upgrade(args)
@@ -5359,6 +5375,39 @@ class TestAmbariServer(TestCase):
     pass
 
 
+  @patch("shutil.copytree")
+  @patch("os.makedirs")
+  @patch("os.path.islink")
+  @patch("os.path.exists")
+  @patch("os.path.getctime")
+  @patch("re.compile")
+  @patch("os.path.join")
+  @patch("os.path.basename")
+  @patch("os.path.isdir")
+  @patch("glob.glob")
+  def test_find_and_copy_custom_services(self, glob_mock, isdir_mock, basename_mock, join_mock, re_compile_mock,
+                                         getctime_mock, exists_mock, islink_mock, makedirs_mock, copytree_mock):
+    # service/version dir is not link
+    glob_mock.return_value = [""]
+    isdir_mock.side_effect = [False, True, True]
+    islink_mock.return_value = False
+    exists_mock.side_effect = [True, False]
+    find_and_copy_custom_services("", "", "", "", "", "/common-services/")
+
+    self.assertTrue(makedirs_mock.called)
+    self.assertTrue(copytree_mock.called)
+
+
+    # service/version dir is link
+    makedirs_mock.reset_mock()
+    copytree_mock.reset_mock()
+    islink_mock.side_effect = [False, True]
+
+    self.assertFalse(makedirs_mock.called)
+    self.assertFalse(copytree_mock.called)
+    pass
+
+
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch("__builtin__.open")
@@ -5382,11 +5431,10 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.dbConfiguration.get_ambari_properties")
   @patch("ambari_server.serverConfiguration.get_ambari_properties")
   @patch("ambari_server.serverUpgrade.get_ambari_properties")
-  @patch("ambari_server.serverUpgrade.upgrade_local_repo")
   @patch("ambari_server.serverUpgrade.move_user_custom_actions")
   @patch("ambari_server.serverUpgrade.update_krb_jaas_login_properties")
   @patch("ambari_server.serverUpgrade.update_ambari_env")
-  def test_upgrade(self, update_ambari_env_mock, update_krb_jaas_login_properties_mock, move_user_custom_actions, upgrade_local_repo_mock,
+  def test_upgrade(self, update_ambari_env_mock, update_krb_jaas_login_properties_mock, move_user_custom_actions,
                    get_ambari_properties_mock, get_ambari_properties_2_mock, get_ambari_properties_3_mock,
                    is_root_mock, get_ambari_version_mock, get_ambari_version_2_mock,
                    parse_properties_file_mock,
@@ -5452,7 +5500,6 @@ class TestAmbariServer(TestCase):
     self.assertTrue(print_warning_msg_mock.called)
     warning_args = print_warning_msg_mock.call_args[0][0]
     self.assertTrue("custom ambari user" in warning_args)
-    self.assertTrue(upgrade_local_repo_mock.called)
     self.assertTrue(move_user_custom_actions.called)
 
     args = reset_mocks()
@@ -5567,10 +5614,9 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.dbConfiguration.get_ambari_properties")
   @patch("ambari_server.serverConfiguration.get_ambari_properties")
   @patch("ambari_server.serverUpgrade.get_ambari_properties")
-  @patch("ambari_server.serverUpgrade.upgrade_local_repo")
   @patch("ambari_server.serverUpgrade.move_user_custom_actions")
   @patch("ambari_server.serverUpgrade.update_krb_jaas_login_properties")
-  def test_upgrade(self, update_krb_jaas_login_properties_mock, move_user_custom_actions, upgrade_local_repo_mock,
+  def test_upgrade(self, update_krb_jaas_login_properties_mock, move_user_custom_actions,
                    get_ambari_properties_mock, get_ambari_properties_2_mock, get_ambari_properties_3_mock,
                    is_root_mock, get_ambari_version_mock, get_ambari_version_2_mock,
                    parse_properties_file_mock,
@@ -5637,7 +5683,6 @@ class TestAmbariServer(TestCase):
     self.assertTrue(print_warning_msg_mock.called)
     warning_args = print_warning_msg_mock.call_args[0][0]
     self.assertTrue("custom ambari user" in warning_args)
-    self.assertTrue(upgrade_local_repo_mock.called)
     self.assertTrue(move_user_custom_actions.called)
 
     args = reset_mocks()
@@ -6154,7 +6199,7 @@ class TestAmbariServer(TestCase):
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-  @patch("ambari_commons.firewall.run_os_command")
+  @patch("resource_management.core.shell.call")
   @patch("ambari_server.serverSetup.verify_setup_allowed")
   @patch("sys.exit")
   @patch("ambari_server.serverSetup.get_YN_input")
@@ -6172,7 +6217,8 @@ class TestAmbariServer(TestCase):
   @patch('__builtin__.raw_input')
   @patch("ambari_server.serverSetup.disable_security_enhancements")
   @patch("ambari_server.serverSetup.expand_jce_zip_file")
-  def test_setup_remote_db_wo_client(self, expand_jce_zip_file_mock, check_selinux_mock, raw_input, configure_os_settings_mock,
+  @patch("ambari_server.serverSetup.logger")
+  def test_setup_remote_db_wo_client(self, logger_mock, expand_jce_zip_file_mock, check_selinux_mock, raw_input, configure_os_settings_mock,
                                      download_jdk_mock, check_ambari_user_mock, is_root_mock, check_jdbc_drivers_mock,
                                      read_password_mock, ensure_jdbc_driver_installed_mock, store_remote_properties_mock,
                                      get_validated_string_input_0_mock, get_YN_input_0_mock,
@@ -6222,7 +6268,7 @@ class TestAmbariServer(TestCase):
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-  @patch("ambari_commons.firewall.run_os_command")
+  @patch("resource_management.core.shell.call")
   @patch("sys.exit")
   @patch("ambari_server.userInput.get_YN_input")
   @patch("ambari_commons.os_utils.is_root")
@@ -6388,7 +6434,12 @@ class TestAmbariServer(TestCase):
   @patch("os.remove")
   @patch("os.symlink")
   @patch("shutil.copy")
-  def test_ensure_jdbc_drivers_installed(self, shutil_copy_mock, os_symlink_mock, os_remove_mock, lexists_mock, isdir_mock, glob_mock,
+  @patch("os.path.isfile")
+  @patch("ambari_server.dbConfiguration.get_YN_input")
+  @patch("ambari_server.dbConfiguration.update_properties")
+  @patch("ambari_server.dbConfiguration.get_validated_string_input")
+  def test_ensure_jdbc_drivers_installed(self, get_valid_str_in_mock, update_properties_mock, getYN_mock, isfile_mock, shutil_copy_mock,
+                              os_symlink_mock, os_remove_mock, lexists_mock, isdir_mock, glob_mock,
                               raw_input_mock, print_warning_msg, print_error_msg_mock, print_error_msg_2_mock,
                               get_ambari_properties_mock, get_ambari_properties_2_mock):
     out = StringIO.StringIO()
@@ -6401,7 +6452,11 @@ class TestAmbariServer(TestCase):
       print_error_msg_mock.reset_mock()
       print_warning_msg.reset_mock()
       raw_input_mock.reset_mock()
-
+      isfile_mock.reset_mock()
+      os_remove_mock.reset_mock
+      getYN_mock.reset_mock()
+      get_valid_str_in_mock.reset_mock()
+      update_properties_mock.reset_mock()
       args = MagicMock()
 
       del args.database_index
@@ -6414,12 +6469,13 @@ class TestAmbariServer(TestCase):
 
       return args
 
-    # Check positive scenario
+    # Check scenario when default jdbc was found and used
     drivers_list = [os.path.join(os.sep,'usr','share','java','ojdbc6.jar')]
     resources_dir = os.sep + 'tmp'
 
     props = Properties()
     props.process_pair(RESOURCES_DIR_PROPERTY, resources_dir)
+    props.process_pair(JDBC_DRIVER_PATH_PROPERTY, "/some/test/path/to/oracle.-jdbc.jar")
     get_ambari_properties_2_mock.return_value = get_ambari_properties_mock.return_value = props
 
     factory = DBMSConfigFactory()
@@ -6429,94 +6485,49 @@ class TestAmbariServer(TestCase):
     isdir_mock.return_value = True
 
     lexists_mock.return_value = True
+    isfile_mock.return_value = True
+    getYN_mock.return_value = True
 
     dbms = factory.create(args, props)
     rcode = dbms.ensure_jdbc_driver_installed(props)
 
-    self.assertEquals(os_symlink_mock.call_count, 1)
-    self.assertEquals(os_symlink_mock.call_args_list[0][0][0], os.path.join(os.sep,'tmp','ojdbc6.jar'))
-    self.assertEquals(os_symlink_mock.call_args_list[0][0][1], os.path.join(os.sep,'tmp','oracle-jdbc-driver.jar'))
+    self.assertEquals(update_properties_mock.call_count, 0)
     self.assertTrue(rcode)
-    self.assertEquals(shutil_copy_mock.call_count, 1)
-    self.assertEquals(shutil_copy_mock.call_args_list[0][0][0], drivers_list[0])
-    self.assertEquals(shutil_copy_mock.call_args_list[0][0][1], resources_dir)
-
-    # Check negative scenarios
-    # Silent option, no drivers
-    set_silent(True)
 
     args = reset_mocks()
-    glob_mock.return_value = []
-
-    failed = False
-
-    try:
-      dbms = factory.create(args, props)
-      rcode = dbms.ensure_jdbc_driver_installed(props)
-    except FatalException:
-      failed = True
-
-    self.assertTrue(print_error_msg_mock.called)
-    self.assertTrue(failed)
-
-    # Non-Silent option, no drivers
-    set_silent(False)
-
-    args = reset_mocks()
-    glob_mock.return_value = []
-
-    failed = False
-
-    try:
-      dbms = factory.create(args, props)
-      rcode = dbms.ensure_jdbc_driver_installed(props)
-    except FatalException:
-      failed = True
-
-    self.assertTrue(failed)
-    self.assertTrue(print_error_msg_mock.called)
-
-    # Non-Silent option, no drivers at first ask, present drivers after that
-    args = reset_mocks()
-
-    glob_mock.side_effect = [[], drivers_list, drivers_list]
+    isfile_mock.side_effect = [False, True]
+    getYN_mock.return_value = True
 
     dbms = factory.create(args, props)
     rcode = dbms.ensure_jdbc_driver_installed(props)
 
+    self.assertEquals(update_properties_mock.call_count, 1)
+    self.assertEquals(getYN_mock.call_count, 1)
     self.assertTrue(rcode)
+
+    # check scenario when user entered valid jdbc full path
+    args = reset_mocks()
+    isfile_mock.side_effect = [False, False, True, True]
+    get_valid_str_in_mock.return_value = '/test/full/path/to/oracle_jdbc.jar'
+
+    rcode = dbms.ensure_jdbc_driver_installed(props)
+
+    self.assertEquals(update_properties_mock.call_count, 1)
+    self.assertTrue(rcode)
+    self.assertEquals(props['server.jdbc.driver.path'], '/test/full/path/to/oracle_jdbc.jar')
     self.assertEquals(shutil_copy_mock.call_count, 1)
-    self.assertEquals(shutil_copy_mock.call_args_list[0][0][0], drivers_list[0])
-    self.assertEquals(shutil_copy_mock.call_args_list[0][0][1], resources_dir)
+    self.assertEquals(shutil_copy_mock.call_count, 1)
+    self.assertEquals(os_remove_mock.call_count, 1)
 
-    # Non-Silent option, no drivers at first ask, no drivers after that
+    # check scenario when no default jdbc and user entered incorrect full jdbc path
     args = reset_mocks()
-    glob_mock.side_effect = [[], []]
+    isfile_mock.side_effect = [False, False, False, False]
 
-    failed = False
+    rcode = dbms.ensure_jdbc_driver_installed(props)
 
-    try:
-      dbms = factory.create(args, props)
-      rcode = dbms.ensure_jdbc_driver_installed(props)
-    except FatalException:
-      failed = True
+    self.assertFalse(rcode)
+    print_error_msg_mock.assert_called_once_with("Custom jdbc connector path is unavailable. Please put correct path to jdbc connector.")
 
-    self.assertTrue(failed)
-    self.assertTrue(print_error_msg_mock.called)
-
-    # Failed to copy_files
-    args = reset_mocks()
-    glob_mock.side_effect = [[], drivers_list, drivers_list]
-
-    try:
-      dbms = factory.create(args, props)
-      rcode = dbms.ensure_jdbc_driver_installed(props)
-    except FatalException:
-      failed = True
-
-    self.assertTrue(failed)
-
-    sys.stdout = sys.__stdout__
     pass
 
 
@@ -6542,7 +6553,7 @@ class TestAmbariServer(TestCase):
 
     isdir_mock.return_value = True
 
-    isfile_mock.side_effect = [True, False, False, False]
+    isfile_mock.side_effect = [True, False, False, False, False]
 
     del args.database_index
     del args.persistence_type
@@ -6564,7 +6575,7 @@ class TestAmbariServer(TestCase):
     get_ambari_properties_mock.reset_mock()
     os_symlink_mock.reset_mock()
 
-    isfile_mock.side_effect = [False, False, False, False]
+    isfile_mock.side_effect = [False, False, False, False, False]
 
     check_jdbc_drivers(args)
 
@@ -6817,7 +6828,6 @@ class TestAmbariServer(TestCase):
                                     read_ambari_user_method, read_master_key_method,
                                     get_is_persisted_method, get_is_secure_method, exists_mock,
                                     save_passwd_for_alias_method):
-
     is_root_method.return_value = True
 
     p = Properties()
@@ -7043,15 +7053,16 @@ class TestAmbariServer(TestCase):
   def _init_test_ldap_properties_map_invalid_input_1():
     ldap_properties_map = \
       {
-        LDAP_PRIMARY_URL_PROPERTY: "a:3",
-        "authentication.ldap.secondaryUrl": "b:2",
-        "authentication.ldap.useSSL": "false",
-        "authentication.ldap.usernameAttribute": "user",
-        "authentication.ldap.baseDn": "uid",
-        "authentication.ldap.bindAnonymously": "true",
-        "authentication.ldap.referral": "follow",
-        "client.security": "ldap",
-        "ambari.ldap.isConfigured": "true"
+        "ambari.ldap.connectivity.server.host": "a",
+        "ambari.ldap.connectivity.server.port" : "3",
+        "ambari.ldap.connectivity.secondary.server.host": "b",
+        "ambari.ldap.connectivity.secondary.server.port" : "2",
+        "ambari.ldap.connectivity.use_ssl": "false",
+        "ambari.ldap.attributes.user.name_attr": "user",
+        "ambari.ldap.attributes.user.search_base": "uid",
+        "ambari.ldap.connectivity.anonymous_bind": "true",
+        "ambari.ldap.advanced.referrals": "follow",
+        "ambari.ldap.authentication.enabled": "true"
       }
     return ldap_properties_map
 
@@ -7060,20 +7071,24 @@ class TestAmbariServer(TestCase):
   def _init_test_ldap_properties_map_invalid_input_1():
     ldap_properties_map = \
       {
-        LDAP_PRIMARY_URL_PROPERTY: "a:3",
-        "authentication.ldap.secondaryUrl": "b:2",
-        "authentication.ldap.useSSL": "false",
-        "authentication.ldap.userObjectClass": "user",
-        "authentication.ldap.usernameAttribute": "uid",
-        "authentication.ldap.groupObjectClass": "group",
-        "authentication.ldap.groupNamingAttr": "cn",
-        "authentication.ldap.groupMembershipAttr": "member",
-        "authentication.ldap.dnAttribute": "dn",
-        "authentication.ldap.baseDn": "base",
-        "authentication.ldap.referral": "follow",
-        "authentication.ldap.bindAnonymously": "true",
-        "client.security": "ldap",
-        "ambari.ldap.isConfigured": "true"
+        "ambari.ldap.connectivity.server.host": "a",
+        "ambari.ldap.connectivity.server.port" : "3",
+        "ambari.ldap.connectivity.secondary.server.host": "b",
+        "ambari.ldap.connectivity.secondary.server.port" : "2",
+        "ambari.ldap.connectivity.use_ssl": "false",
+        "ambari.ldap.attributes.user.object_class": "user",
+        "ambari.ldap.attributes.user.name_attr": "uid",
+        "ambari.ldap.attributes.group.object_class": "group",
+        "ambari.ldap.attributes.group.name_attr": "cn",
+        "ambari.ldap.attributes.group.member_attr": "member",
+        "ambari.ldap.attributes.dn_attr": "dn",
+        "ambari.ldap.attributes.user.search_base": "base",
+        "ambari.ldap.advanced.referrals": "follow",
+        "ambari.ldap.connectivity.anonymous_bind": "true",
+        "ambari.ldap.advance.collision_behavior": "skip",
+        "ambari.ldap.advanced.force_lowercase_usernames": "false",
+        "ambari.ldap.advanced.pagination_enabled": "false",
+        "ambari.ldap.authentication.enabled": "true"
       }
     return ldap_properties_map
 
@@ -7082,14 +7097,17 @@ class TestAmbariServer(TestCase):
   def _init_test_ldap_properties_map_invalid_input_2():
     ldap_properties_map = \
       {
-        LDAP_PRIMARY_URL_PROPERTY: "a:3",
-        "authentication.ldap.useSSL": "false",
-        "authentication.ldap.usernameAttribute": "user",
-        "authentication.ldap.baseDn": "uid",
-        "authentication.ldap.bindAnonymously": "true",
-        "authentication.ldap.referral": "follow",
-        "client.security": "ldap",
-        "ambari.ldap.isConfigured": "true"
+        "ambari.ldap.connectivity.server.host": "a",
+        "ambari.ldap.connectivity.server.port" : "3",
+        "ambari.ldap.connectivity.use_ssl": "false",
+        "ambari.ldap.attributes.user.name_attr": "user",
+        "ambari.ldap.attributes.user.search_base": "uid",
+        "ambari.ldap.connectivity.anonymous_bind": "true",
+        "ambari.ldap.advance.collision_behavior": "skip",
+        "ambari.ldap.advanced.force_lowercase_usernames": "false",
+        "ambari.ldap.advanced.pagination_enabled": "false",
+        "ambari.ldap.advanced.referrals": "follow",
+        "ambari.ldap.authentication.enabled": "true"
       }
     return ldap_properties_map
 
@@ -7098,96 +7116,155 @@ class TestAmbariServer(TestCase):
   def _init_test_ldap_properties_map_invalid_input_2():
     ldap_properties_map = \
       {
-        LDAP_PRIMARY_URL_PROPERTY: "a:3",
-        "authentication.ldap.useSSL": "false",
-        "authentication.ldap.userObjectClass": "user",
-        "authentication.ldap.usernameAttribute": "uid",
-        "authentication.ldap.groupObjectClass": "group",
-        "authentication.ldap.groupNamingAttr": "cn",
-        "authentication.ldap.groupMembershipAttr": "member",
-        "authentication.ldap.dnAttribute": "dn",
-        "authentication.ldap.baseDn": "base",
-        "authentication.ldap.referral": "follow",
-        "authentication.ldap.bindAnonymously": "true",
-        "client.security": "ldap",
-        "ambari.ldap.isConfigured": "true"
+        "ambari.ldap.connectivity.server.host": "a",
+        "ambari.ldap.connectivity.server.port" : "3",
+        "ambari.ldap.connectivity.use_ssl": "false",
+        "ambari.ldap.attributes.user.object_class": "user",
+        "ambari.ldap.attributes.user.name_attr": "uid",
+        "ambari.ldap.attributes.group.object_class": "group",
+        "ambari.ldap.attributes.group.name_attr": "cn",
+        "ambari.ldap.attributes.group.member_attr": "member",
+        "ambari.ldap.attributes.dn_attr": "dn",
+        "ambari.ldap.attributes.user.search_base": "base",
+        "ambari.ldap.advanced.referrals": "follow",
+        "ambari.ldap.connectivity.anonymous_bind": "true",
+        "ambari.ldap.advance.collision_behavior": "skip",
+        "ambari.ldap.advanced.force_lowercase_usernames": "false",
+        "ambari.ldap.advanced.pagination_enabled": "false",
+        "ambari.ldap.authentication.enabled": "true"
       }
     return ldap_properties_map
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  @patch("urllib2.urlopen")
   @patch("__builtin__.raw_input")
+  @patch("ambari_server.userInput.get_password")
   @patch("ambari_server.setupSecurity.get_is_secure")
   @patch("ambari_server.setupSecurity.get_YN_input")
   @patch("ambari_server.setupSecurity.update_properties_2")
   @patch("ambari_server.setupSecurity.search_file")
   @patch("ambari_server.setupSecurity.get_ambari_properties")
-  @patch("ambari_server.setupSecurity.is_root")
-  def test_setup_ldap_invalid_input(self, is_root_method, get_ambari_properties_method,
+  @patch("ambari_server.setupSecurity.logger")
+  @patch("ambari_server.setupSecurity.is_server_runing")
+  def test_setup_ldap_invalid_input(self, is_server_runing_method, logger_mock, get_ambari_properties_method,
                                     search_file_message,
                                     update_properties_method,
                                     get_YN_input_method,
                                     get_is_secure_method,
-                                    raw_input_mock):
+                                    get_password_mock, raw_input_mock, urlopen_mock):
     out = StringIO.StringIO()
     sys.stdout = out
-    is_root_method.return_value = True
+    is_server_runing_method.return_value = (True, 0)
     search_file_message.return_value = "filepath"
 
-    configs = {SECURITY_MASTER_KEY_LOCATION: "filepath",
-               SECURITY_KEYS_DIR: tempfile.gettempdir(),
-               SECURITY_IS_ENCRYPTION_ENABLED: "true"
-               }
+    properties = Properties();
+    properties.process_pair(SECURITY_MASTER_KEY_LOCATION, "filepath")
+    properties.process_pair(SECURITY_KEYS_DIR, tempfile.gettempdir())
+    properties.process_pair(SECURITY_IS_ENCRYPTION_ENABLED, "true")
+    properties.process_pair(CLIENT_API_PORT_PROPERTY, '8080')
 
-    get_ambari_properties_method.return_value = configs
-    raw_input_mock.side_effect = ['a:3', 'b:b', 'hody', 'b:2', 'false', 'user', 'uid', 'group', 'cn', 'member', 'dn', 'base', 'follow', 'true']
+    get_ambari_properties_method.return_value = properties
+    raw_input_mock.side_effect = ['a', '3', 'b', 'b', 'hody', 'b', '2', 'false', 'user', 'uid', 'group', 'cn', 'member', 'dn', 'base', 'follow', 'true', 'skip', 'false', 'false', 'admin']
+    get_password_mock.side_effect = ['admin']
     set_silent(False)
     get_YN_input_method.return_value = True
+    
+    response = MagicMock()
+    response.getcode.return_value = 200
+    urlopen_mock.return_value = response
 
     options = self._create_empty_options_mock()
     setup_ldap(options)
-
-    ldap_properties_map = TestAmbariServer._init_test_ldap_properties_map_invalid_input_1()
-
-    sorted_x = sorted(ldap_properties_map.iteritems(), key=operator.itemgetter(0))
-    sorted_y = sorted(update_properties_method.call_args[0][1].iteritems(),
-                      key=operator.itemgetter(0))
-    self.assertEquals(sorted_x, sorted_y)
+    
+    requestCall = urlopen_mock.call_args_list[0]
+    args, kwargs = requestCall
+    request = args[0]
+    requestData = json.loads(request.data)
+    self.assertTrue(isinstance(requestData, dict))
+    ldapProperties = requestData['Configuration']['properties'];
+    properties_updated_in_ambari_db = sorted(ldapProperties.iteritems(), key=operator.itemgetter(0))
+    properties_should_be_updated_in_ambari_db = sorted(TestAmbariServer._init_test_ldap_properties_map_invalid_input_1().iteritems(), key=operator.itemgetter(0))
+    self.assertEqual(properties_should_be_updated_in_ambari_db, properties_updated_in_ambari_db)
+    
+    properties_updated_in_ambari_dot_properties = sorted(update_properties_method.call_args[0][1].iteritems(), key=operator.itemgetter(0))
+    properties_should_be_updated_in_ambari_dot_properties = sorted({"client.security": "ldap"}.iteritems(), key=operator.itemgetter(0))
+    self.assertEquals(properties_should_be_updated_in_ambari_dot_properties, properties_updated_in_ambari_dot_properties)
+    
+    self.assertTrue(urlopen_mock.called)
+    self.assertTrue(update_properties_method.called)
     self.assertTrue(get_YN_input_method.called)
-    self.assertEquals(14, raw_input_mock.call_count)
-
+    self.assertEquals(21, raw_input_mock.call_count)
+    self.assertEqual(1, get_password_mock.call_count)
+    
     raw_input_mock.reset_mock()
-    raw_input_mock.side_effect = ['a:3', '', 'b:2', 'false', 'user', 'uid', 'group', 'cn', 'member', 'dn', 'base', 'follow', 'true']
+    raw_input_mock.side_effect = ['a', '3', '', '', 'b', '2', 'false', 'user', 'uid', 'group', 'cn', 'member', 'dn', 'base', 'follow', 'true', 'skip', 'false', 'false', 'admin']
+    get_password_mock.reset_mock()
+    get_password_mock.side_effect = ['admin']
+
+    urlopen_mock.reset_mock()
+    urlopen_mock.return_value = response
 
     setup_ldap(options)
 
-    ldap_properties_map = TestAmbariServer._init_test_ldap_properties_map_invalid_input_2()
+    requestCall = urlopen_mock.call_args_list[0]
+    args, kwargs = requestCall
+    request = args[0]
+    requestData = json.loads(request.data)
+    self.assertTrue(isinstance(requestData, dict))
+    ldapProperties = requestData['Configuration']['properties'];
+    properties_updated_in_ambari_db = sorted(ldapProperties.iteritems(), key=operator.itemgetter(0))
+    properties_should_be_updated_in_ambari_db = sorted(TestAmbariServer._init_test_ldap_properties_map_invalid_input_2().iteritems(), key=operator.itemgetter(0))
+    self.assertEqual(properties_should_be_updated_in_ambari_db, properties_updated_in_ambari_db)
+    
+    properties_updated_in_ambari_dot_properties = sorted(update_properties_method.call_args[0][1].iteritems(), key=operator.itemgetter(0))
+    properties_should_be_updated_in_ambari_dot_properties = sorted({"client.security": "ldap"}.iteritems(), key=operator.itemgetter(0))
+    self.assertEquals(properties_should_be_updated_in_ambari_dot_properties, properties_updated_in_ambari_dot_properties)
 
-    sorted_x = sorted(ldap_properties_map.iteritems(), key=operator.itemgetter(0))
-    sorted_y = sorted(update_properties_method.call_args[0][1].iteritems(),
-                      key=operator.itemgetter(0))
-    self.assertEquals(sorted_x, sorted_y)
-    self.assertEquals(13, raw_input_mock.call_count)
+    self.assertTrue(urlopen_mock.called)
+    self.assertTrue(update_properties_method.called)
+    self.assertTrue(get_YN_input_method.called)
+    self.assertEquals(20, raw_input_mock.call_count)
+    self.assertEqual(1, get_password_mock.call_count)
 
     sys.stdout = sys.__stdout__
     pass
 
+  @patch("ambari_server.setupSecurity.is_server_runing")
+  def test_setup_ldap_should_fail_if_ambari_server_is_not_running(self, is_server_runing_mock):
+    out = StringIO.StringIO()
+    sys.stdout = out
+    is_server_runing_mock.return_value = (False, 0)
+    try:
+      setup_ldap(self._create_empty_options_mock())
+      self.fail("Should throw exception")
+    except FatalException as fe:
+      self.assertTrue("Ambari Server is not running." == fe.reason)
+      pass
+    
+    sys.stdout = sys.__stdout__
+    pass
 
   @staticmethod
   @OsFamilyFuncImpl(OSConst.WINSRV_FAMILY)
   def _init_test_ldap_properties_map():
     ldap_properties_map = \
       {
-        "authentication.ldap.primaryUrl": "test",
-        "authentication.ldap.secondaryUrl": "test",
-        "authentication.ldap.useSSL": "false",
-        "authentication.ldap.usernameAttribute": "test",
-        "authentication.ldap.baseDn": "test",
-        "authentication.ldap.bindAnonymously": "false",
-        "authentication.ldap.managerDn": "test",
-        "authentication.ldap.referral": "test",
+        "ambari.ldap.connectivity.server.host": "test",
+        "ambari.ldap.connectivity.server.port" : "1",
+        "ambari.ldap.connectivity.secondary.server.host": "test",
+        "ambari.ldap.connectivity.secondary.server.port" : "2",
+        "ambari.ldap.connectivity.use_ssl": "false",
+        "ambari.ldap.attributes.user.name_attr": "test",
+        "ambari.ldap.attributes.user.search_base": "test",
+        "ambari.ldap.connectivity.anonymous_bind": "false",
+        "ambari.ldap.advance.collision_behavior": "skip",
+        "ambari.ldap.advanced.force_lowercase_usernames": "false",
+        "ambari.ldap.advanced.pagination_enabled": "false",
+        "ambari.ldap.connectivity.bind_dn": "test",
+        "ambari.ldap.advanced.referrals": "test",
         "client.security": "ldap",
         LDAP_MGR_PASSWORD_PROPERTY: "ldap-password.dat",
-        "ambari.ldap.isConfigured": "true"
+        "ambari.ldap.authentication.enabled": "true"
       }
     return ldap_properties_map
 
@@ -7196,26 +7273,31 @@ class TestAmbariServer(TestCase):
   def _init_test_ldap_properties_map():
     ldap_properties_map = \
       {
-        "authentication.ldap.primaryUrl": "test",
-        "authentication.ldap.secondaryUrl": "test",
-        "authentication.ldap.useSSL": "false",
-        "authentication.ldap.userObjectClass": "test",
-        "authentication.ldap.usernameAttribute": "test",
-        "authentication.ldap.baseDn": "test",
-        "authentication.ldap.bindAnonymously": "false",
-        "authentication.ldap.managerDn": "test",
-        "authentication.ldap.groupObjectClass": "test",
-        "authentication.ldap.groupMembershipAttr": "test",
-        "authentication.ldap.groupNamingAttr": "test",
-        "authentication.ldap.dnAttribute": "test",
-        "authentication.ldap.referral": "test",
-        "client.security": "ldap",
+        "ambari.ldap.connectivity.server.host": "test",
+        "ambari.ldap.connectivity.server.port" : "1",
+        "ambari.ldap.connectivity.secondary.server.host": "test",
+        "ambari.ldap.connectivity.secondary.server.port" : "1",
+        "ambari.ldap.connectivity.use_ssl": "false",
+        "ambari.ldap.attributes.user.object_class": "test",
+        "ambari.ldap.attributes.user.name_attr": "test",
+        "ambari.ldap.attributes.user.search_base": "test",
+        "ambari.ldap.connectivity.anonymous_bind": "false",
+        "ambari.ldap.advance.collision_behavior": "skip",
+        "ambari.ldap.advanced.force_lowercase_usernames": "false",
+        "ambari.ldap.advanced.pagination_enabled": "false",
+        "ambari.ldap.connectivity.bind_dn": "test",
+        "ambari.ldap.attributes.group.object_class": "test",
+        "ambari.ldap.attributes.group.member_attr": "test",
+        "ambari.ldap.attributes.group.name_attr": "test",
+        "ambari.ldap.attributes.dn_attr": "test",
+        "ambari.ldap.advanced.referrals": "test",
         LDAP_MGR_PASSWORD_PROPERTY: "ldap-password.dat",
-        "ambari.ldap.isConfigured": "true"
+        "ambari.ldap.authentication.enabled": "true"
       }
     return ldap_properties_map
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  @patch("urllib2.urlopen")
   @patch("ambari_server.setupSecurity.get_is_secure")
   @patch("ambari_server.setupSecurity.encrypt_password")
   @patch("ambari_server.setupSecurity.save_passwd_for_alias")
@@ -7225,40 +7307,33 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.setupSecurity.get_validated_string_input")
   @patch("ambari_server.serverConfiguration.search_file")
   @patch("ambari_server.setupSecurity.get_ambari_properties")
-  @patch("ambari_server.setupSecurity.is_root")
   @patch("ambari_server.setupSecurity.read_password")
   @patch("os.path.exists")
-  def test_setup_ldap(self, exists_method, read_password_method, is_root_method, get_ambari_properties_method,
+  @patch("ambari_server.setupSecurity.logger")
+  @patch("ambari_server.setupSecurity.is_server_runing")
+  def test_setup_ldap(self, is_server_runing_method, logger_mock, exists_method, read_password_method, get_ambari_properties_method,
                       search_file_message,
                       get_validated_string_input_method,
                       configure_ldap_password_method, update_properties_method,
                       get_YN_input_method, save_passwd_for_alias_method,
-                      encrypt_password_method, get_is_secure_method):
+                      encrypt_password_method, get_is_secure_method, urlopen_mock):
     out = StringIO.StringIO()
     sys.stdout = out
 
     options = self._create_empty_options_mock()
-    # Testing call under non-root
-    is_root_method.return_value = False
-    try:
-      setup_ldap(options)
-      self.fail("Should throw exception")
-    except FatalException as fe:
-      # Expected
-      self.assertTrue("root-level" in fe.reason)
-      pass
-
-    # Testing call under root
-    is_root_method.return_value = True
+    options.ambari_admin_username = 'admin'
+    options.ambari_admin_password = 'admin'
+    is_server_runing_method.return_value = (True, 0)
 
     search_file_message.return_value = "filepath"
 
-    configs = {SECURITY_MASTER_KEY_LOCATION: "filepath",
-               SECURITY_KEYS_DIR: tempfile.gettempdir(),
-               SECURITY_IS_ENCRYPTION_ENABLED: "true"
-    }
+    properties = Properties();
+    properties.process_pair(SECURITY_MASTER_KEY_LOCATION, "filepath")
+    properties.process_pair(SECURITY_KEYS_DIR, tempfile.gettempdir())
+    properties.process_pair(SECURITY_IS_ENCRYPTION_ENABLED, "true")
+    properties.process_pair(CLIENT_API_PORT_PROPERTY, '8080')
 
-    get_ambari_properties_method.return_value = configs
+    get_ambari_properties_method.return_value = properties
     configure_ldap_password_method.return_value = "password"
     save_passwd_for_alias_method.return_value = 0
     encrypt_password_method.return_value = get_alias_string(LDAP_MGR_PASSWORD_ALIAS)
@@ -7269,11 +7344,15 @@ class TestAmbariServer(TestCase):
       else:
         return True
 
-    get_YN_input_method.side_effect = [True, ]
+    get_YN_input_method.side_effect = yn_input_side_effect
 
     def valid_input_side_effect(*args, **kwargs):
-      if 'Bind anonymously' in args[0]:
+      if 'Bind anonymously' in args[0] or 'lower-case' in args[0] or 'paginated' in args[0]:
         return 'false'
+      if 'username collisions' in args[0]:
+        return 'skip'
+      if 'URL Port' in args[0]:
+        return '1'
       if args[1] == "true" or args[1] == "false":
         return args[1]
       else:
@@ -7281,14 +7360,27 @@ class TestAmbariServer(TestCase):
 
     get_validated_string_input_method.side_effect = valid_input_side_effect
 
+    response = MagicMock()
+    response.getcode.return_value = 200
+    urlopen_mock.return_value = response
+
     setup_ldap(options)
 
-    ldap_properties_map = TestAmbariServer._init_test_ldap_properties_map()
-
-    sorted_x = sorted(ldap_properties_map.iteritems(), key=operator.itemgetter(0))
-    sorted_y = sorted(update_properties_method.call_args[0][1].iteritems(),
-                      key=operator.itemgetter(0))
-    self.assertEquals(sorted_x, sorted_y)
+    requestCall = urlopen_mock.call_args_list[0]
+    args, kwargs = requestCall
+    request = args[0]
+    requestData = json.loads(request.data)
+    self.assertTrue(isinstance(requestData, dict))
+    ldapProperties = requestData['Configuration']['properties'];
+    properties_updated_in_ambari_db = sorted(ldapProperties.iteritems(), key=operator.itemgetter(0))
+    properties_should_be_updated_in_ambari_db = sorted(TestAmbariServer._init_test_ldap_properties_map().iteritems(), key=operator.itemgetter(0))
+    self.assertEqual(properties_should_be_updated_in_ambari_db, properties_updated_in_ambari_db)
+    
+    properties_updated_in_ambari_dot_properties = sorted(update_properties_method.call_args[0][1].iteritems(), key=operator.itemgetter(0))
+    properties_should_be_updated_in_ambari_dot_properties = sorted({"client.security": "ldap"}.iteritems(), key=operator.itemgetter(0))
+    self.assertEquals(properties_should_be_updated_in_ambari_dot_properties, properties_updated_in_ambari_dot_properties)
+    
+    self.assertTrue(urlopen_mock.called)
     self.assertTrue(update_properties_method.called)
     self.assertTrue(configure_ldap_password_method.called)
     self.assertTrue(get_validated_string_input_method.called)
@@ -7314,6 +7406,8 @@ class TestAmbariServer(TestCase):
           return "bogus"
         else:
           return "valid"
+      if 'URL Port' in args[0]:
+        return '1'
       if args[1] == "true" or args[1] == "false":
         return args[1]
       else:
@@ -7326,10 +7420,11 @@ class TestAmbariServer(TestCase):
     get_validated_string_input_method.side_effect = input_enable_ssl
     read_password_method.return_value = "password"
     get_YN_input_method.reset_mock()
-    get_YN_input_method.side_effect = [True, True]
+    get_YN_input_method.side_effect = [True, True, True]
     update_properties_method.reset_mock()
 
-    options.ldap_url = None
+    options.ldap_primary_host = None
+    options.ldap_primary_port = None
     options.ldap_member_attr = None
     setup_ldap(options)
 
@@ -7337,14 +7432,17 @@ class TestAmbariServer(TestCase):
 
     ldap_properties_map = \
       {
-        "authentication.ldap.primaryUrl": "test",
-        "authentication.ldap.secondaryUrl": "test",
-        "authentication.ldap.useSSL": "true",
-        "authentication.ldap.usernameAttribute": "test",
-        "authentication.ldap.baseDn": "test",
-        "authentication.ldap.dnAttribute": "test",
-        "authentication.ldap.bindAnonymously": "false",
-        "authentication.ldap.managerDn": "test",
+        "ambari.ldap.connectivity.server.host": "a",
+        "ambari.ldap.connectivity.server.port" : "3",
+        "ambari.ldap.connectivity.secondary.server.host": "b",
+        "ambari.ldap.connectivity.secondary.server.port" : "2",
+        "ambari.ldap.connectivity.use_ssl": "true",
+        "ambari.ldap.attributes.user.name_attr": "test",
+        "ambari.ldap.attributes.user.search_base": "test",
+        "ambari.ldap.attributes.dn_attr": "test",
+        "ambari.ldap.connectivity.anonymous_bind": "false",
+        "ambari.ldap.advance.collision_behavior": "skip",
+        "ambari.ldap.connectivity.bind_dn": "test",
         "client.security": "ldap",
         "ssl.trustStore.type": "test",
         "ssl.trustStore.path": "valid",
@@ -7359,18 +7457,196 @@ class TestAmbariServer(TestCase):
     sys.stdout = sys.__stdout__
     pass
 
+  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch("urllib2.urlopen")
+  @patch("ambari_server.setupSecurity.get_YN_input")
+  @patch("ambari_server.setupSecurity.read_password")
   @patch("ambari_server.setupSecurity.get_validated_string_input")
   @patch("ambari_server.setupSecurity.get_ambari_properties")
   @patch("ambari_server.setupSecurity.is_server_runing")
+  def test_setup_ldap_primary_host_and_port_with_ldap_url_option(self, is_server_runing_method, get_ambari_properties_method,
+                                                                get_validated_string_input_method, read_password_method, get_YN_input_method, urlopen_method):
+
+    out = StringIO.StringIO()
+    sys.stdout = out
+
+    is_server_runing_method.return_value = (True, 0)
+
+    def yn_input_side_effect(*args, **kwargs):
+      if 'TrustStore' in args[0]:
+        return False
+      else:
+        return True
+
+    get_YN_input_method.side_effect = yn_input_side_effect
+    get_ambari_properties_method.return_value = Properties()
+    read_password_method.return_value = 'password'
+
+    def valid_input_side_effect(*args, **kwargs):
+      if 'Bind anonymously' in args[0] or 'lower-case' in args[0] or 'paginated' in args[0]:
+        return 'false'
+      if 'username collisions' in args[0]:
+        return 'skip'
+      if 'URL Port' in args[0]:
+        return '1'
+      if 'Primary URL' in args[0]:
+        return kwargs['answer']
+      if args[1] == "true" or args[1] == "false":
+        return args[1]
+      else:
+        return "test"
+
+    get_validated_string_input_method.side_effect = valid_input_side_effect
+
+    response = MagicMock()
+    response.getcode.return_value = 200
+    urlopen_method.return_value = response
+
+    options =  self._create_empty_options_mock()
+    options.ambari_admin_username = 'admin'
+    options.ambari_admin_password = 'admin'
+    options.ldap_url = "a:1"
+
+    setup_ldap(options)
+
+    requestCall = urlopen_method.call_args_list[0]
+    args, kwargs = requestCall
+    request = args[0]
+    requestData = json.loads(request.data)
+    self.assertTrue(isinstance(requestData, dict))
+    ldapProperties = requestData['Configuration']['properties'];
+    self.assertTrue('ambari.ldap.connectivity.server.host' in ldapProperties)
+    self.assertTrue('ambari.ldap.connectivity.server.port' in ldapProperties)
+    self.assertEqual(ldapProperties['ambari.ldap.connectivity.server.host'], 'a')
+    self.assertEqual(ldapProperties['ambari.ldap.connectivity.server.port'], '1')
+
+    sys.stdout = sys.__stdout__
+    pass
+
+  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  @patch("urllib2.urlopen")
+  @patch("ambari_server.setupSecurity.get_YN_input")
+  @patch("ambari_server.setupSecurity.get_validated_string_input")
+  @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_server_runing")
+  def test_setup_ldap_with_ambari_admin_username_and_password_options(self, is_server_runing_method, get_ambari_properties_method,
+                                                                get_validated_string_input_method, get_YN_input_method, urlopen_method):
+
+    out = StringIO.StringIO()
+    sys.stdout = out
+
+    is_server_runing_method.return_value = (True, 0)
+
+    def yn_input_side_effect(*args, **kwargs):
+      return False if 'TrustStore' in args[0] else True
+
+    get_YN_input_method.side_effect = yn_input_side_effect
+    get_ambari_properties_method.return_value = Properties()
+
+    def valid_input_side_effect(*args, **kwargs):
+      if 'lower-case' in args[0] or 'paginated' in args[0]:
+        return 'false'
+      if 'Bind anonymously' in args[0]:
+        return 'true'
+      if 'username collisions' in args[0]:
+        return 'skip'
+      if 'URL Port' in args[0]:
+        return '1'
+      if 'Ambari Admin' in args[0]:
+        raise Exception("ShouldNotBeInvoked") # no user name/password should be read by the mock
+      if 'Primary URL' in args[0]:
+        return kwargs['answer']
+      if args[1] == "true" or args[1] == "false":
+        return args[1]
+      else:
+        return "test"
+
+    get_validated_string_input_method.side_effect = valid_input_side_effect
+
+    response = MagicMock()
+    response.getcode.return_value = 200
+    urlopen_method.return_value = response
+    options = self._create_empty_options_mock()
+    options.ambari_admin_username = 'admin'
+    options.ambari_admin_password = 'admin'
+
+    setup_ldap(options)
+
+    self.assertTrue(urlopen_method.called)
+
+    sys.stdout = sys.__stdout__
+    pass
+
+  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  @patch("urllib2.urlopen")
+  @patch("ambari_server.setupSecurity.get_YN_input")
+  @patch("ambari_server.setupSecurity.get_validated_string_input")
+  @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_server_runing")
+  def test_setup_ldap_enforcement_cli_option(self, is_server_runing_method, get_ambari_properties_method,
+                                            get_validated_string_input_method, get_YN_input_method, urlopen_method):
+    out = StringIO.StringIO()
+    sys.stdout = out
+
+    is_server_runing_method.return_value = (True, 0)
+
+    def yn_input_side_effect(*args, **kwargs):
+      if 'do you wish to use LDAP instead' in args[0]:
+        raise Exception("ShouldNotBeInvoked") # should not be asked
+      else:
+        return False if 'TrustStore' in args[0] else True
+
+    get_YN_input_method.side_effect = yn_input_side_effect
+    get_ambari_properties_method.return_value = Properties()
+
+    def valid_input_side_effect(*args, **kwargs):
+      if 'lower-case' in args[0] or 'paginated' in args[0]:
+        return 'false'
+      if 'Bind anonymously' in args[0]:
+        return 'true'
+      if 'username collisions' in args[0]:
+        return 'skip'
+      if 'URL Port' in args[0]:
+        return '1'
+      if 'Primary URL' in args[0]:
+        return kwargs['answer']
+      if args[1] == "true" or args[1] == "false":
+        return args[1]
+      else:
+        return "test"
+
+    get_validated_string_input_method.side_effect = valid_input_side_effect
+
+    response = MagicMock()
+    response.getcode.return_value = 200
+    urlopen_method.return_value = response
+
+    options = self._create_empty_options_mock()
+    options.ambari_admin_username = 'admin'
+    options.ambari_admin_password = 'admin'
+    options.ldap_force_setup = True
+
+    setup_ldap(options)
+
+    self.assertTrue(urlopen_method.called)
+
+    sys.stdout = sys.__stdout__
+    pass
+
+  @patch("urllib2.urlopen")
+  @patch("ambari_server.setupSecurity.get_validated_string_input")
+  @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
+  @patch("ambari_server.setupSecurity.is_server_runing")
   @patch("ambari_server.setupSecurity.is_root")
-  def test_ldap_sync_all(self, is_root_method, is_server_runing_mock, get_ambari_properties_mock,
+  @patch("ambari_server.setupSecurity.logger")
+  def test_ldap_sync_all(self, logger_mock, is_root_method, is_server_runing_mock, is_ldap_enabled_mock, get_ambari_properties_mock,
       get_validated_string_input_mock, urlopen_mock):
 
     is_root_method.return_value = True
     is_server_runing_mock.return_value = (True, 0)
+    is_ldap_enabled_mock.return_value = 'true'
     properties = Properties()
-    properties.process_pair(IS_LDAP_CONFIGURED, 'true')
     properties.process_pair(CLIENT_API_PORT_PROPERTY, '8080')
     get_ambari_properties_mock.return_value = properties
     get_validated_string_input_mock.side_effect = ['admin', 'admin']
@@ -7404,9 +7680,11 @@ class TestAmbariServer(TestCase):
   @patch("urllib2.urlopen")
   @patch("ambari_server.setupSecurity.get_validated_string_input")
   @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
   @patch("ambari_server.setupSecurity.is_server_runing")
   @patch("ambari_server.setupSecurity.is_root")
-  def test_ldap_sync_users(self, is_root_method, is_server_runing_mock, get_ambari_properties_mock,
+  @patch("ambari_server.setupSecurity.logger")
+  def test_ldap_sync_users(self, logger_mock, is_root_method, is_server_runing_mock, is_ldap_enabled_mock, get_ambari_properties_mock,
                          get_validated_string_input_mock, urlopen_mock, os_path_exists_mock, open_mock):
 
     os_path_exists_mock.return_value = 1
@@ -7416,9 +7694,7 @@ class TestAmbariServer(TestCase):
     open_mock.return_value = f
     is_root_method.return_value = True
     is_server_runing_mock.return_value = (True, 0)
-    properties = Properties()
-    properties.process_pair(IS_LDAP_CONFIGURED, 'true')
-    get_ambari_properties_mock.return_value = properties
+    is_ldap_enabled_mock.return_value = 'true'
     get_validated_string_input_mock.side_effect = ['admin', 'admin']
 
     response = MagicMock()
@@ -7450,9 +7726,11 @@ class TestAmbariServer(TestCase):
   @patch("urllib2.urlopen")
   @patch("ambari_server.setupSecurity.get_validated_string_input")
   @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
   @patch("ambari_server.setupSecurity.is_server_runing")
   @patch("ambari_server.setupSecurity.is_root")
-  def test_ldap_sync_groups(self, is_root_method, is_server_runing_mock, get_ambari_properties_mock,
+  @patch("ambari_server.setupSecurity.logger")
+  def test_ldap_sync_groups(self, logger_mock, is_root_method, is_server_runing_mock, is_ldap_enabled_mock, get_ambari_properties_mock,
                            get_validated_string_input_mock, urlopen_mock, os_path_exists_mock, open_mock):
 
     os_path_exists_mock.return_value = 1
@@ -7462,9 +7740,7 @@ class TestAmbariServer(TestCase):
     open_mock.return_value = f
     is_root_method.return_value = True
     is_server_runing_mock.return_value = (True, 0)
-    properties = Properties()
-    properties.process_pair(IS_LDAP_CONFIGURED, 'true')
-    get_ambari_properties_mock.return_value = properties
+    is_ldap_enabled_mock.return_value = 'true'
     get_validated_string_input_mock.side_effect = ['admin', 'admin']
 
     response = MagicMock()
@@ -7494,15 +7770,17 @@ class TestAmbariServer(TestCase):
   @patch("urllib2.urlopen")
   @patch("ambari_server.setupSecurity.get_validated_string_input")
   @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
   @patch("ambari_server.setupSecurity.is_server_runing")
   @patch("ambari_server.setupSecurity.is_root")
-  def test_ldap_sync_ssl(self, is_root_method, is_server_runing_mock, get_ambari_properties_mock,
+  @patch("ambari_server.setupSecurity.logger")
+  def test_ldap_sync_ssl(self, logger_mock, is_root_method, is_server_runing_mock, is_ldap_enabled_mock, get_ambari_properties_mock,
                          get_validated_string_input_mock, urlopen_mock):
 
     is_root_method.return_value = True
     is_server_runing_mock.return_value = (True, 0)
+    is_ldap_enabled_mock.return_value = 'true'
     properties = Properties()
-    properties.process_pair(IS_LDAP_CONFIGURED, 'true')
     properties.process_pair(SSL_API, 'true')
     properties.process_pair(SSL_API_PORT, '8443')
     get_ambari_properties_mock.return_value = properties
@@ -7525,7 +7803,7 @@ class TestAmbariServer(TestCase):
 
     sync_ldap(options)
 
-    url = '{0}://{1}:{2!s}{3}'.format('https', '127.0.0.1', '8443', '/api/v1/ldap_sync_events')
+    url = '{0}://{1}:{2!s}{3}'.format('https', socket.getfqdn(), '8443', '/api/v1/ldap_sync_events')
     request = urlopen_mock.call_args_list[0][0][0]
 
     self.assertEquals(url, str(request.get_full_url()))
@@ -7537,16 +7815,17 @@ class TestAmbariServer(TestCase):
   @patch("urllib2.urlopen")
   @patch("ambari_server.setupSecurity.get_validated_string_input")
   @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
   @patch("ambari_server.setupSecurity.is_server_runing")
   @patch("ambari_server.setupSecurity.is_root")
-  def test_ldap_sync_existing(self, is_root_method, is_server_runing_mock, get_ambari_properties_mock,
+  @patch("ambari_server.setupSecurity.logger")
+  def test_ldap_sync_existing(self, logger_mock, is_root_method, is_server_runing_mock, is_ldap_enabled_mock, get_ambari_properties_mock,
                          get_validated_string_input_mock, urlopen_mock):
 
     is_root_method.return_value = True
     is_server_runing_mock.return_value = (True, 0)
-    properties = Properties()
-    properties.process_pair(IS_LDAP_CONFIGURED, 'true')
-    get_ambari_properties_mock.return_value = properties
+    is_ldap_enabled_mock.return_value = 'true'
+    get_ambari_properties_mock.return_value = Properties()
     get_validated_string_input_mock.side_effect = ['admin', 'admin']
 
     response = MagicMock()
@@ -7571,17 +7850,16 @@ class TestAmbariServer(TestCase):
 
   @patch("urllib2.urlopen")
   @patch("ambari_server.setupSecurity.get_validated_string_input")
-  @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
   @patch("ambari_server.setupSecurity.is_server_runing")
   @patch("ambari_server.setupSecurity.is_root")
-  def test_ldap_sync_no_sync_mode(self, is_root_method, is_server_runing_mock, get_ambari_properties_mock,
+  @patch("ambari_server.setupSecurity.logger")
+  def test_ldap_sync_no_sync_mode(self, logger_mock, is_root_method, is_server_runing_mock, is_ldap_enabled_mock,
                      get_validated_string_input_mock, urlopen_mock):
 
     is_root_method.return_value = True
     is_server_runing_mock.return_value = (True, 0)
-    properties = Properties()
-    properties.process_pair(IS_LDAP_CONFIGURED, 'true')
-    get_ambari_properties_mock.return_value = properties
+    is_ldap_enabled_mock.return_value = 'true'
     get_validated_string_input_mock.side_effect = ['admin', 'admin']
 
     response = MagicMock()
@@ -7607,17 +7885,16 @@ class TestAmbariServer(TestCase):
 
   @patch("urllib2.urlopen")
   @patch("ambari_server.setupSecurity.get_validated_string_input")
-  @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
   @patch("ambari_server.setupSecurity.is_server_runing")
   @patch("ambari_server.setupSecurity.is_root")
-  def test_ldap_sync_error_status(self, is_root_method, is_server_runing_mock, get_ambari_properties_mock,
+  @patch("ambari_server.setupSecurity.logger")
+  def test_ldap_sync_error_status(self, logger_mock, is_root_method, is_server_runing_mock, is_ldap_enabled_mock,
       get_validated_string_input_mock, urlopen_mock):
 
     is_root_method.return_value = True
     is_server_runing_mock.return_value = (True, 0)
-    properties = Properties()
-    properties.process_pair(IS_LDAP_CONFIGURED, 'true')
-    get_ambari_properties_mock.return_value = properties
+    is_ldap_enabled_mock.return_value = 'true'
     get_validated_string_input_mock.side_effect = ['admin', 'admin']
 
     response = MagicMock()
@@ -7643,12 +7920,12 @@ class TestAmbariServer(TestCase):
   @patch("urllib2.urlopen")
   @patch("urllib2.Request")
   @patch("base64.encodestring")
-  @patch("ambari_server.setupSecurity.is_root")
   @patch("ambari_server.setupSecurity.is_server_runing")
-  @patch("ambari_server.setupSecurity.get_ambari_properties")
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
   @patch("ambari_server.setupSecurity.get_validated_string_input")
-  def test_sync_ldap_forbidden(self, get_validated_string_input_method, get_ambari_properties_method,
-                                is_server_runing_method, is_root_method,
+  @patch("ambari_server.setupSecurity.logger")
+  def test_sync_ldap_forbidden(self, logger_mock, get_validated_string_input_method, is_ldap_enabled_mock,
+                                is_server_runing_method,
                                 encodestring_method, request_constructor, urlopen_method):
 
     options = self._create_empty_options_mock()
@@ -7657,38 +7934,8 @@ class TestAmbariServer(TestCase):
     options.ldap_sync_users = None
     options.ldap_sync_groups = None
 
-    is_root_method.return_value = False
-    try:
-      sync_ldap(options)
-      self.fail("Should throw exception if not root")
-    except FatalException as fe:
-      # Expected
-      self.assertTrue("root-level" in fe.reason)
-      pass
-    is_root_method.return_value = True
-
-    is_server_runing_method.return_value = (None, None)
-    try:
-      sync_ldap(options)
-      self.fail("Should throw exception if ambari is stopped")
-    except FatalException as fe:
-      # Expected
-      self.assertTrue("not running" in fe.reason)
-      pass
-    is_server_runing_method.return_value = (True, None)
-
-    configs = MagicMock()
-    configs.get_property.return_value = None
-    get_ambari_properties_method.return_value = configs
-    try:
-      sync_ldap(options)
-      self.fail("Should throw exception if ldap is not configured")
-    except FatalException as fe:
-      # Expected
-      self.assertTrue("not configured" in fe.reason)
-      pass
-    configs.get_property.return_value = 'true'
-
+    is_server_runing_method.return_value = (True, 0)
+    is_ldap_enabled_mock.return_value = 'true'
     get_validated_string_input_method.return_value = 'admin'
     encodestring_method.return_value = 'qwe123'
 
@@ -7708,27 +7955,9 @@ class TestAmbariServer(TestCase):
     pass
 
   @patch("ambari_server.setupSecurity.is_root")
-  def test_sync_ldap_ambari_stopped(self, is_root_method):
-    is_root_method.return_value = False
-
-    options = self._create_empty_options_mock()
-    options.ldap_sync_all = True
-    options.ldap_sync_existing = False
-    options.ldap_sync_users = None
-    options.ldap_sync_groups = None
-
-    try:
-      sync_ldap(options)
-      self.fail("Should throw exception if not root")
-    except FatalException as fe:
-      # Expected
-      self.assertTrue("root-level" in fe.reason)
-      pass
-    pass
-
-  @patch("ambari_server.setupSecurity.is_root")
   @patch("ambari_server.setupSecurity.is_server_runing")
-  def test_sync_ldap_ambari_stopped(self, is_server_runing_method, is_root_method):
+  @patch("ambari_server.setupSecurity.logger")
+  def test_sync_ldap_ambari_stopped(self, logger_mock, is_server_runing_method, is_root_method):
     is_root_method.return_value = True
     is_server_runing_method.return_value = (None, None)
 
@@ -7747,17 +7976,15 @@ class TestAmbariServer(TestCase):
       pass
     pass
 
-  @patch("ambari_server.setupSecurity.is_root")
+  @patch("ambari_server.setupSecurity.get_validated_string_input")
   @patch("ambari_server.setupSecurity.is_server_runing")
-  @patch("ambari_server.setupSecurity.get_ambari_properties")
-  def test_sync_ldap_not_configured(self, get_ambari_properties_method,
-                     is_server_runing_method, is_root_method):
-    is_root_method.return_value = True
+  @patch("ambari_server.setupSecurity.is_ldap_enabled")
+  @patch("ambari_server.setupSecurity.logger")
+  def test_sync_ldap_not_configured(self, logger_mock,  is_ldap_enabled_mock,
+                     is_server_runing_method, get_validated_string_input):
+    get_validated_string_input.return_value = 'admin'
     is_server_runing_method.return_value = (True, None)
-
-    configs = MagicMock()
-    configs.get_property.return_value = None
-    get_ambari_properties_method.return_value = configs
+    is_ldap_enabled_mock.return_value = 'false'
 
     options = self._create_empty_options_mock()
     options.ldap_sync_all = True
@@ -7974,10 +8201,6 @@ class TestAmbariServer(TestCase):
   @patch("ambari_server.serverConfiguration.get_ambari_properties")
   @patch("ambari_server.serverConfiguration.get_ambari_version")
   def test_check_database_name_property(self, get_ambari_version_mock, get_ambari_properties_mock, write_property_mock):
-    parser = OptionParser()
-    parser.add_option('--database', default=None, help="Database to use embedded|oracle|mysql|mssql|postgres", dest="dbms")
-    args = parser.parse_args()
-
     # negative case
     get_ambari_properties_mock.return_value = {JDBC_DATABASE_NAME_PROPERTY: ""}
     try:
@@ -8011,7 +8234,7 @@ class TestAmbariServer(TestCase):
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-  @patch("ambari_commons.firewall.run_os_command")
+  @patch("resource_management.core.shell.call")
   @patch("ambari_server.dbConfiguration_linux.PGConfig._is_jdbc_user_changed")
   @patch("ambari_server.serverSetup.verify_setup_allowed")
   @patch("ambari_server.serverSetup.get_YN_input")
@@ -8217,80 +8440,6 @@ class TestAmbariServer(TestCase):
                                                        validatorFunction = is_valid_filepath, answer='/kerberos/admin.keytab')
     pass
 
-  @patch("os.listdir")
-  @patch("os.path.exists")
-  @patch("ambari_server.serverUpgrade.load_stack_values")
-  @patch("ambari_server.serverUpgrade.get_ambari_properties")
-  @patch("ambari_server.serverUpgrade.run_metainfo_upgrade")
-  def test_upgrade_local_repo(self,
-                           run_metainfo_upgrade_mock,
-                           get_ambari_properties_mock,
-                           load_stack_values_mock,
-                           os_path_exists_mock,
-                           os_listdir_mock):
-
-    from mock.mock import call
-    args = MagicMock()
-    args.persistence_type = "local"
-
-    def load_values_side_effect(*args, **kwargs):
-      res = {}
-      res['a'] = 'http://oldurl'
-      if -1 != args[1].find("HDPLocal"):
-        res['a'] = 'http://newurl'
-      return res
-
-    load_stack_values_mock.side_effect = load_values_side_effect
-
-    properties = Properties()
-    get_ambari_properties_mock.return_value = properties
-    os_path_exists_mock.return_value = 1
-    os_listdir_mock.return_value = ['1.1']
-
-    upgrade_local_repo(args)
-
-    self.assertTrue(get_ambari_properties_mock.called)
-    self.assertTrue(load_stack_values_mock.called)
-    self.assertTrue(run_metainfo_upgrade_mock.called)
-    run_metainfo_upgrade_mock.assert_called_with(args, {'a': 'http://newurl'})
-    pass
-
-  @patch("os.listdir")
-  @patch("os.path.exists")
-  @patch("ambari_server.serverUpgrade.load_stack_values")
-  @patch("ambari_server.serverUpgrade.get_ambari_properties")
-  @patch("ambari_server.serverUpgrade.run_metainfo_upgrade")
-  def test_upgrade_local_repo_nochange(self,
-                         run_metainfo_upgrade_mock,
-                         get_ambari_properties_mock,
-                         load_stack_values_mock,
-                         os_path_exists_mock,
-                         os_listdir_mock):
-
-    from mock.mock import call
-    args = MagicMock()
-    args.persistence_type = "local"
-
-    def load_values_side_effect(*args, **kwargs):
-      res = {}
-      res['a'] = 'http://oldurl'
-      return res
-
-    load_stack_values_mock.side_effect = load_values_side_effect
-
-    properties = Properties()
-    get_ambari_properties_mock.return_value = properties
-    os_path_exists_mock.return_value = 1
-    os_listdir_mock.return_value = ['1.1']
-
-    upgrade_local_repo(args)
-
-    self.assertTrue(get_ambari_properties_mock.called)
-    self.assertTrue(load_stack_values_mock.called)
-    self.assertTrue(run_metainfo_upgrade_mock.called)
-    run_metainfo_upgrade_mock.assert_called_with(args, {})
-    pass
-
   @patch("os.path.exists")
   @patch.object(ResourceFilesKeeper, "perform_housekeeping")
   def test_refresh_stack_hash(self,
@@ -8304,19 +8453,12 @@ class TestAmbariServer(TestCase):
     self.assertTrue(perform_housekeeping_mock.called)
     pass
 
-  @not_for_platform(PLATFORM_WINDOWS)
-  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  @patch("ambari_server.dbConfiguration.decrypt_password_for_alias")
   @patch("ambari_server.dbConfiguration_linux.run_os_command")
   @patch("ambari_server.dbConfiguration_linux.print_error_msg")
-  @patch("ambari_server.dbConfiguration.get_ambari_properties")
-  def test_change_objects_owner_both(self,
-                                     get_ambari_properties_mock,
-                                     print_error_msg_mock,
-                                     run_os_command_mock):
+  def test_change_tables_owner_no_tables(self, print_error_msg_mock, run_os_command_mock,
+                    decrypt_password_for_alias_mock):
     args = MagicMock()
-    args.master_key = None
-
     del args.database_index
     del args.dbms
     del args.database_host
@@ -8324,30 +8466,27 @@ class TestAmbariServer(TestCase):
     del args.database_name
     del args.database_username
     del args.database_password
-    del args.persistence_type
+    del args.init_script_file
+    del args.drop_script_file
 
-    stdout = " stdout "
-    stderr = " stderr "
-    run_os_command_mock.return_value = 1, stdout, stderr
-    get_ambari_properties_mock.return_value = Properties()
+    properties = Properties()
+    properties.process_pair(JDBC_PASSWORD_PROPERTY, get_alias_string("mypwdalias"))
 
-    set_verbose(True)
-    self.assertRaises(FatalException, change_objects_owner, args)
-    print_error_msg_mock.assert_any_call("stderr:\nstderr")
-    print_error_msg_mock.assert_any_call("stdout:\nstdout")
-    pass
+    decrypt_password_for_alias_mock.return_value = "password"
 
-  @not_for_platform(PLATFORM_WINDOWS)
-  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+    run_os_command_mock.return_value = 0, "", ""
+
+    dbms = PGConfig(args, properties, "local")
+    result = dbms._change_tables_owner()
+    self.assertFalse(result)
+    self.assertEquals(print_error_msg_mock.call_args_list[0][0][0], 'Failed to get list of ambari tables')
+
+  @patch("ambari_server.dbConfiguration.decrypt_password_for_alias")
   @patch("ambari_server.dbConfiguration_linux.run_os_command")
   @patch("ambari_server.dbConfiguration_linux.print_error_msg")
-  @patch("ambari_server.dbConfiguration.get_ambari_properties")
-  def test_change_objects_owner_only_stdout(self,
-                                            get_ambari_properties_mock,
-                                            print_error_msg_mock,
-                                            run_os_command_mock):
+  def test_change_tables_owner_fatal_psql(self, print_error_msg_mock, run_os_command_mock,
+                                         decrypt_password_for_alias_mock):
     args = MagicMock()
-
     del args.database_index
     del args.dbms
     del args.database_host
@@ -8355,29 +8494,30 @@ class TestAmbariServer(TestCase):
     del args.database_name
     del args.database_username
     del args.database_password
-    del args.persistence_type
+    del args.init_script_file
+    del args.drop_script_file
 
-    stdout = " stdout "
-    stderr = ""
-    run_os_command_mock.return_value = 1, stdout, stderr
-    get_ambari_properties_mock.return_value = Properties()
+    properties = Properties()
+    properties.process_pair(JDBC_PASSWORD_PROPERTY, get_alias_string("mypwdalias"))
 
-    set_verbose(True)
-    self.assertRaises(FatalException, change_objects_owner, args)
-    print_error_msg_mock.assert_called_once_with("stdout:\nstdout")
-    pass
+    decrypt_password_for_alias_mock.return_value = "password"
 
-  @not_for_platform(PLATFORM_WINDOWS)
-  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+    run_os_command_mock.return_value = 0, "", "psql: could not connect to server: No such file or directory"
+
+    dbms = PGConfig(args, properties, "local")
+    result = dbms._change_tables_owner()
+    self.assertFalse(result)
+    self.assertEquals(print_error_msg_mock.call_args_list[0][0][0], """Failed to get list of ambari tables. Message from psql:
+ stdout:
+ stderr:psql: could not connect to server: No such file or directory
+""")
+
+  @patch("ambari_server.dbConfiguration.decrypt_password_for_alias")
   @patch("ambari_server.dbConfiguration_linux.run_os_command")
   @patch("ambari_server.dbConfiguration_linux.print_error_msg")
-  @patch("ambari_server.dbConfiguration.get_ambari_properties")
-  def test_change_objects_owner_only_stderr(self,
-                                            get_ambari_properties_mock,
-                                            print_error_msg_mock,
-                                            run_os_command_mock):
+  def test_change_tables_owner(self, print_error_msg_mock, run_os_command_mock,
+                                          decrypt_password_for_alias_mock):
     args = MagicMock()
-
     del args.database_index
     del args.dbms
     del args.database_host
@@ -8385,18 +8525,26 @@ class TestAmbariServer(TestCase):
     del args.database_name
     del args.database_username
     del args.database_password
-    del args.persistence_type
+    del args.init_script_file
+    del args.drop_script_file
 
-    stdout = ""
-    stderr = " stderr "
-    run_os_command_mock.return_value = 1, stdout, stderr
-    get_ambari_properties_mock.return_value = Properties()
+    properties = Properties()
+    properties.process_pair(JDBC_PASSWORD_PROPERTY, get_alias_string("mypwdalias"))
 
-    set_verbose(True)
-    self.assertRaises(FatalException, change_objects_owner, args)
-    print_error_msg_mock.assert_called_once_with("stderr:\nstderr")
-    pass
+    decrypt_password_for_alias_mock.return_value = "password"
 
+    run_os_command_mock.side_effect = [(0, "tbl1\n,tbl2", ""),
+                                       (0, "", ""),
+                                       (0, "", ""),
+                                       (0, "postgres", ""),
+                                       (0, "ALTER TABLE", ""),
+                                       (0, "postgres", ""),
+                                       (0, "ALTER TABLE", "")]
+
+    dbms = PGConfig(args, properties, "local")
+    result = dbms._change_tables_owner()
+    self.assertTrue(result)
+    self.assertEquals(run_os_command_mock.call_count, 7)
 
   @patch("os.path.isdir", new = MagicMock(return_value=True))
   @patch("os.access", new = MagicMock(return_value=True))
@@ -8413,7 +8561,8 @@ class TestAmbariServer(TestCase):
   @patch("os.path.isfile")
   @patch("sys.exit")
   @patch("ambari_server.userInput.get_YN_input")
-  def test_update_host_names(self, getYNInput_mock, sysExitMock, isFileMock, getJavaExePathMock,
+  @patch("ambari_server.hostUpdate.logger")
+  def test_update_host_names(self, logger_mock, getYNInput_mock, sysExitMock, isFileMock, getJavaExePathMock,
                              getAmbariPropertiesMock, parsePropertiesFileMock, ensureDriverInstalledMock, readAmbariUserMock,
                              ensureCanStartUnderCurrentUserMock, generateEnvMock, runOSCommandMock, isServerRunningMock):
     properties = Properties()
@@ -8447,58 +8596,114 @@ class TestAmbariServer(TestCase):
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch.object(_ambari_server_, "is_server_runing")
-  @patch("optparse.OptionParser")
-  def test_main_test_status_running(self, optionParserMock, is_server_runing_method):
-    opm = optionParserMock.return_value
-    options = self._create_empty_options_mock()
-    del options.exit_message
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_main_test_status_running(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock,
+                                    logger_mock, is_server_runing_method):
 
-    args = ["status"]
-    opm.parse_args.return_value = (options, args)
-
-    is_server_runing_method.return_value = (True, 100)
-
-    options.dbms = None
-    options.sid_or_sname = "sid"
-
+    import sys
+    tmp_argv = sys.argv
     try:
-      _ambari_server_.mainBody()
-    except SystemExit as e:
-      self.assertTrue(e.code == 0)
+      sys.argv = ['ambari-server', "status"]
 
-    self.assertTrue(is_server_runing_method.called)
-    pass
+      is_server_runing_method.return_value = (True, 100)
+
+
+      try:
+        _ambari_server_.mainBody()
+      except SystemExit as e:
+        self.assertTrue(e.code == 0)
+
+      self.assertTrue(is_server_runing_method.called)
+      pass
+    finally:
+      sys.argv = tmp_argv
 
 
   @not_for_platform(PLATFORM_WINDOWS)
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
   @patch.object(_ambari_server_, "is_server_runing")
-  @patch("optparse.OptionParser")
-  def test_main_test_status_not_running(self, optionParserMock, is_server_runing_method):
-    opm = optionParserMock.return_value
-    options = self._create_empty_options_mock()
-    del options.exit_message
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_main_test_status_not_running(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock,
+                                        logger_mock, is_server_runing_method):
 
-    args = ["status"]
-    opm.parse_args.return_value = (options, args)
-
-    is_server_runing_method.return_value = (False, None)
-
-    options.dbms = None
-    options.sid_or_sname = "sid"
-
+    import sys
+    tmp_argv = sys.argv
     try:
-      _ambari_server_.mainBody()
-    except SystemExit as e:
-      self.assertTrue(e.code == 3)
+      sys.argv = ['ambari-server', "status"]
 
-    self.assertTrue(is_server_runing_method.called)
-    pass
+      is_server_runing_method.return_value = (False, None)
+
+      try:
+        _ambari_server_.mainBody()
+      except SystemExit as e:
+        self.assertTrue(e.code == 3)
+
+      self.assertTrue(is_server_runing_method.called)
+      pass
+    finally:
+      sys.argv = tmp_argv
+
+  @not_for_platform(PLATFORM_WINDOWS)
+  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  @patch.object(_ambari_server_, "logger")
+  @patch("ambari_server.serverConfiguration.get_ambari_properties")
+  @patch.object(_ambari_server_, "setup_logging")
+  @patch.object(_ambari_server_, "init_logging")
+  def test_status_extra_option(self, init_logging_mock, setup_logging_mock, get_ambari_properties_mock,
+                                        logger_mock):
+
+    import sys
+    tmp_argv = sys.argv
+    try:
+      sys.argv = ['ambari-server', "status", '--skip-database-check']
+      flag = False
+      try:
+        _ambari_server_.mainBody()
+      except SystemExit as e:
+        self.assertEquals(e.code, 2)
+        flag = True
+
+      self.assertTrue(flag)
+
+      pass
+    finally:
+      sys.argv = tmp_argv
+
+  def test_web_server_startup_timeout(self):
+    from ambari_server.serverConfiguration import get_web_server_startup_timeout
+    from ambari_server.serverConfiguration import WEB_SERVER_STARTUP_TIMEOUT
+
+    properties = Properties()
+    timeout = get_web_server_startup_timeout(properties)
+    self.assertEquals(90, timeout)
+
+    properties.process_pair(WEB_SERVER_STARTUP_TIMEOUT, "")
+    timeout = get_web_server_startup_timeout(properties)
+    self.assertEquals(90, timeout)
+
+    properties.process_pair(WEB_SERVER_STARTUP_TIMEOUT, "120")
+    timeout = get_web_server_startup_timeout(properties)
+    self.assertEquals(120, timeout)
+
+    properties.process_pair(WEB_SERVER_STARTUP_TIMEOUT, "120  ")
+    timeout = get_web_server_startup_timeout(properties)
+    self.assertEquals(120, timeout)
+
 
   def _create_empty_options_mock(self):
     options = MagicMock()
     options.ldap_url = None
+    options.ldap_primary_host = None
+    options.ldap_primary_port = None
     options.ldap_secondary_url = None
+    options.ldap_secondary_host = None
+    options.ldap_secondary_port = None
     options.ldap_ssl = None
     options.ldap_user_class = None
     options.ldap_user_attr = None
@@ -8512,7 +8717,13 @@ class TestAmbariServer(TestCase):
     options.ldap_save_settings = None
     options.ldap_referral = None
     options.ldap_bind_anonym = None
+    options.ldap_force_setup = None
+    options.ambari_admin_username = None
+    options.ambari_admin_password = None
     options.ldap_sync_admin_name = None
+    options.ldap_sync_username_collisions_behavior = None
+    options.ldap_force_lowercase_usernames = None
+    options.ldap_pagination_enabled = None
     options.ldap_sync_admin_password = None
     options.custom_trust_store = None
     options.trust_store_type = None

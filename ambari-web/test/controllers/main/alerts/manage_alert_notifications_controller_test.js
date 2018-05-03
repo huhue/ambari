@@ -90,6 +90,12 @@ function getInputFields() {
     },
     port: {
       value: ''
+    },
+    scriptDispatchProperty:{
+      value: ''
+    },
+    scriptFileName:{
+      value: ''
     }
   });
 }
@@ -213,6 +219,10 @@ describe('App.ManageAlertNotificationsController', function () {
       });
     });
 
+    it("should reset custom properties",function(){
+       expect(controller.get('inputFields.customProperties')).to.be.eql(Em.A([]));
+    });
+
     it("should call showCreateEditPopup", function () {
       expect(controller.showCreateEditPopup.calledOnce).to.be.true;
     });
@@ -332,6 +342,12 @@ describe('App.ManageAlertNotificationsController', function () {
         port: {
           value: ''
         },
+        scriptDispatchProperty:{
+          value: ''
+        },
+        scriptFileName:{
+          value: ''
+        },
         customProperties: [
           {name: 'customName', value: 'customValue1', defaultValue: 'customValue1'},
           {name: 'customName2', value: 'customValue1', defaultValue: 'customValue1'}
@@ -397,6 +413,12 @@ describe('App.ManageAlertNotificationsController', function () {
           value: 'test1@test.test, test2@test.test'
         },
         port: {},
+        scriptDispatchProperty:{
+          value: ''
+        },
+        scriptFileName:{
+          value: ''
+        },
         customProperties: [
           {name: 'customName', value: 'customValue', defaultValue: 'customValue'}
         ]
@@ -491,6 +513,12 @@ describe('App.ManageAlertNotificationsController', function () {
         port: {
           value: ''
         },
+        scriptDispatchProperty:{
+          value: ''
+        },
+        scriptFileName:{
+          value: ''
+        },
         customProperties: [
           {name: 'customName', value: 'customValue1', defaultValue: 'customValue1'},
           {name: 'customName2', value: 'customValue1', defaultValue: 'customValue1'}
@@ -502,6 +530,172 @@ describe('App.ManageAlertNotificationsController', function () {
       expect(JSON.stringify(controller.get('inputFields'))).to.equal(JSON.stringify({
         name: {
           value: 'test_SNMP_name'
+        },
+        groups: {
+          value: ['test1', 'test2']
+        },
+        global: {
+          value: true,
+          disabled: true
+        },
+        allGroups: {
+          value: 'all'
+        },
+        method: {
+          value: 'Custom SNMP'
+        },
+        email: {
+          value: 'c6401.ambari.apache.org, c6402.ambari.apache.org'
+        },
+        severityFilter: {
+          value: ['OK', 'UNKNOWN']
+        },
+        description: {
+          value: 'test_description'
+        },
+        SMTPServer: {},
+        SMTPPort: {},
+        SMTPUseAuthentication: {
+          value: true
+        },
+        SMTPUsername: {},
+        SMTPPassword: {},
+        retypeSMTPPassword: {},
+        SMTPSTARTTLS: {
+          value: true
+        },
+        emailFrom: {},
+        version: {
+          value:'SNMPv1'
+        },
+        OIDs: {
+          value: '1'
+        },
+        community: {
+          value: 'snmp'
+        },
+        host: {
+          value: 'c6401.ambari.apache.org, c6402.ambari.apache.org'
+        },
+        port: {
+          value: 161
+        },
+        scriptDispatchProperty:{
+          value: ''
+        },
+        scriptFileName:{
+          value: ''
+        },
+        customProperties: [
+          {name: 'customName', value: 'customValue', defaultValue: 'customValue'}
+        ]
+      }));
+
+    });
+
+    it("should map properties from selectedAlertNotification to inputFields (ambari.dispatch.recipients ignored) - AMBARI_SNMP", function () {
+
+      controller.set('selectedAlertNotification', Em.Object.create({
+        name: 'AMBARI_SNMP_name',
+        global: true,
+        description: 'test_description',
+        groups: ['test1', 'test2'],
+        type: 'AMBARI_SNMP',
+        alertStates: ['OK', 'UNKNOWN'],
+        properties: {
+          'ambari.dispatch.recipients': [
+            'c6401.ambari.apache.org',
+            'c6402.ambari.apache.org'
+          ],
+          'customName': 'customValue',
+          'ambari.dispatch.snmp.version': 'SNMPv1',
+          'ambari.dispatch.snmp.community': 'public',
+          'ambari.dispatch.snmp.port': 161
+
+        }
+      }));
+
+      controller.set('inputFields', Em.Object.create({
+        name: {
+          value: ''
+        },
+        groups: {
+          value: []
+        },
+        global: {
+          value: false
+        },
+        allGroups: {
+          value: false
+        },
+        method: {
+          value: ''
+        },
+        email: {
+          value: ''
+        },
+        severityFilter: {
+          value: []
+        },
+        description: {
+          value: ''
+        },
+        SMTPServer: {
+          value: ''
+        },
+        SMTPPort: {
+          value: ''
+        },
+        SMTPUseAuthentication: {
+          value: ''
+        },
+        SMTPUsername: {
+          value: ''
+        },
+        SMTPPassword: {
+          value: ''
+        },
+        retypeSMTPPassword: {
+          value: ''
+        },
+        SMTPSTARTTLS: {
+          value: ''
+        },
+        emailFrom: {
+          value: ''
+        },
+        version: {
+          value: ''
+        },
+        OIDs: {
+          value: ''
+        },
+        community: {
+          value: ''
+        },
+        host: {
+          value: ''
+        },
+        port: {
+          value: ''
+        },
+        scriptDispatchProperty:{
+          value: ''
+        },
+        scriptFileName:{
+          value: ''
+        },
+        customProperties: [
+          {name: 'customName', value: 'customValue1', defaultValue: 'customValue1'},
+          {name: 'customName2', value: 'customValue1', defaultValue: 'customValue1'}
+        ]
+      }));
+
+      controller.fillEditCreateInputs();
+
+      expect(JSON.stringify(controller.get('inputFields'))).to.equal(JSON.stringify({
+        name: {
+          value: 'AMBARI_SNMP_name'
         },
         groups: {
           value: ['test1', 'test2']
@@ -540,11 +734,9 @@ describe('App.ManageAlertNotificationsController', function () {
         version: {
           value:'SNMPv1'
         },
-        OIDs: {
-          value: '1'
-        },
+        OIDs: {},
         community: {
-          value: 'snmp'
+          value: 'public'
         },
         host: {
           value: 'c6401.ambari.apache.org, c6402.ambari.apache.org'
@@ -552,12 +744,170 @@ describe('App.ManageAlertNotificationsController', function () {
         port: {
           value: 161
         },
+        scriptDispatchProperty:{
+          value: ''
+        },
+        scriptFileName:{
+          value: ''
+        },
         customProperties: [
           {name: 'customName', value: 'customValue', defaultValue: 'customValue'}
         ]
       }));
 
-    })
+    });
+
+    it("should map properties from selectedAlertNotification to inputFields - ALERT_SCRIPT", function () {
+
+          controller.set('selectedAlertNotification', Em.Object.create({
+            name: 'test_alert_script',
+            global: true,
+            description: 'test_description',
+            groups: ['test1', 'test2'],
+            type: 'ALERT_SCRIPT',
+            alertStates: ['OK', 'UNKNOWN'],
+            properties: {
+              'ambari.dispatch-property.script': "com.mycompany.dispatch.syslog.script",
+              'ambari.dispatch-property.script.filename': 'a.py',
+              'customName': 'customValue'
+            }
+          }));
+
+          controller.set('inputFields', Em.Object.create({
+            name: {
+              value: ''
+            },
+            groups: {
+              value: []
+            },
+            global: {
+              value: false
+            },
+            allGroups: {
+              value: false
+            },
+            method: {
+              value: ''
+            },
+            email: {
+              value: ''
+            },
+            severityFilter: {
+              value: []
+            },
+            description: {
+              value: ''
+            },
+            SMTPServer: {
+              value: ''
+            },
+            SMTPPort: {
+              value: ''
+            },
+            SMTPUseAuthentication: {
+              value: ''
+            },
+            SMTPUsername: {
+              value: ''
+            },
+            SMTPPassword: {
+              value: ''
+            },
+            retypeSMTPPassword: {
+              value: ''
+            },
+            SMTPSTARTTLS: {
+              value: ''
+            },
+            emailFrom: {
+              value: ''
+            },
+            version: {
+              value: ''
+            },
+            OIDs: {
+              value: ''
+            },
+            community: {
+              value: ''
+            },
+            host: {
+              value: ''
+            },
+            port: {
+              value: ''
+            },
+            scriptDispatchProperty: {
+              value: ''
+            },
+            scriptFileName: {
+              value: ''
+            },
+            customProperties: [
+              {name: 'customName', value: 'customValue1', defaultValue: 'customValue1'},
+              {name: 'customName2', value: 'customValue1', defaultValue: 'customValue1'}
+            ]
+          }));
+
+          controller.fillEditCreateInputs();
+
+          expect(JSON.stringify(controller.get('inputFields'))).to.equal(JSON.stringify({
+            name: {
+              value: 'test_alert_script'
+            },
+            groups: {
+              value: ['test1', 'test2']
+            },
+            global: {
+              value: true,
+              disabled: true
+            },
+            allGroups: {
+              value: 'all'
+            },
+            method: {
+              value: 'Alert Script'
+            },
+            email: {
+              value: ''
+            },
+            severityFilter: {
+              value: ['OK', 'UNKNOWN']
+            },
+            description: {
+              value: 'test_description'
+            },
+            SMTPServer: {},
+            SMTPPort: {},
+            SMTPUseAuthentication: {
+              value: true
+            },
+            SMTPUsername: {},
+            SMTPPassword: {},
+            retypeSMTPPassword: {},
+            SMTPSTARTTLS: {
+              value: true
+            },
+            emailFrom: {},
+            version: {},
+            OIDs: {},
+            community: {},
+            host: {
+              value: ''
+            },
+            port: {},
+            scriptDispatchProperty: {
+               value: 'com.mycompany.dispatch.syslog.script'
+            },
+            scriptFileName:{
+               value: 'a.py'
+            },
+            customProperties: [
+              {name: 'customName', value: 'customValue', defaultValue: 'customValue'}
+            ]
+          }));
+
+        });
   });
 
   describe("#showCreateEditPopup()", function () {
@@ -610,7 +960,7 @@ describe('App.ManageAlertNotificationsController', function () {
         view = getBodyClass();
       });
 
-      App.TestAliases.testAsComputedOr(getBodyClass(), 'someErrorExists', ['nameError', 'emailToError', 'emailFromError', 'smtpPortError', 'hostError', 'portError', 'smtpUsernameError', 'smtpPasswordError', 'passwordError']);
+      App.TestAliases.testAsComputedOr(getBodyClass(), 'someErrorExists', ['nameError', 'emailToError', 'emailFromError', 'smtpPortError', 'hostError', 'portError', 'smtpUsernameError', 'smtpPasswordError', 'passwordError','scriptFileNameError']);
 
       describe('#selectAllGroups', function () {
 
@@ -821,6 +1171,11 @@ describe('App.ManageAlertNotificationsController', function () {
               method: 'SNMP',
               errors: ['emailToError', 'emailFromError', 'smtpPortError', 'smtpUsernameError', 'smtpPasswordError', 'passwordError'],
               validators: ['portValidation', 'hostsValidation']
+            },
+            {
+              method: 'ALERT_SCRIPT',
+              errors: ['scriptFileNameError'],
+              validators: ['scriptFileNameValidation']
             }
           ],
           validators = [];
@@ -869,6 +1224,10 @@ describe('App.ManageAlertNotificationsController', function () {
         });
 
       });
+
+      App.TestAliases.testAsComputedEqualProperties(getBodyClass(), 'allGroupsSelected', 'groupSelect.selection.length', 'groupSelect.content.length');
+
+      App.TestAliases.testAsComputedEqualProperties(getBodyClass(), 'allSeveritySelected', 'severitySelect.selection.length', 'severitySelect.content.length');
 
     });
 
@@ -1177,5 +1536,11 @@ describe('App.ManageAlertNotificationsController', function () {
     });
 
   });
+
+  App.TestAliases.testAsComputedMapBy(getController(), 'customPropertyNames', 'inputFields.customProperties', 'name');
+
+  App.TestAliases.testAsComputedExistsInByKey(getController(), 'isNewCustomPropertyExists', 'newCustomProperty.name', 'customPropertyNames', ['customA', 'customB']);
+
+  App.TestAliases.testAsComputedExistsInByKey(getController(), 'isNewCustomPropertyIgnored', 'newCustomProperty.name', 'ignoredCustomProperties', ['customA', 'customB']);
 
 });

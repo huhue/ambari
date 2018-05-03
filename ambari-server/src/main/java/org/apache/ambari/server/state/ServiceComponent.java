@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,10 +19,12 @@
 package org.apache.ambari.server.state;
 
 import java.util.Map;
-import java.util.concurrent.locks.ReadWriteLock;
+import java.util.Set;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.controller.ServiceComponentResponse;
+import org.apache.ambari.server.controller.internal.DeleteHostComponentStatusMetaData;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 
 public interface ServiceComponent {
 
@@ -44,6 +46,8 @@ public interface ServiceComponent {
 
   String getServiceName();
 
+  String getDisplayName();
+
   long getClusterId();
 
   String getClusterName();
@@ -52,15 +56,28 @@ public interface ServiceComponent {
 
   void setDesiredState(State state);
 
-  StackId getDesiredStackVersion();
+  /**
+   * Gets the desired repository for this service component.
+   *
+   * @return
+   */
+  RepositoryVersionEntity getDesiredRepositoryVersion();
 
-  void setDesiredStackVersion(StackId stackVersion);
+  StackId getDesiredStackId();
 
   String getDesiredVersion();
 
-  void setDesiredVersion(String version);
+  void setDesiredRepositoryVersion(RepositoryVersionEntity repositoryVersionEntity);
+
+  /**
+   * Refresh Component info due to current stack
+   * @throws AmbariException
+   */
+  void updateComponentInfo() throws AmbariException;
 
   Map<String, ServiceComponentHost> getServiceComponentHosts();
+
+  Set<String> getServiceComponentsHosts();
 
   ServiceComponentHost getServiceComponentHost(String hostname)
       throws AmbariException;
@@ -73,12 +90,6 @@ public interface ServiceComponent {
 
   ServiceComponentResponse convertToResponse();
 
-  void refresh();
-
-  boolean isPersisted();
-
-  void persist();
-
   void debugDump(StringBuilder sb);
 
   boolean isClientComponent();
@@ -89,19 +100,28 @@ public interface ServiceComponent {
 
   boolean canBeRemoved();
 
-  void deleteAllServiceComponentHosts() throws AmbariException;
+  void deleteAllServiceComponentHosts(DeleteHostComponentStatusMetaData deleteMetaData) throws AmbariException;
 
-  void deleteServiceComponentHosts(String hostname)
+  void deleteServiceComponentHosts(String hostname, DeleteHostComponentStatusMetaData deleteMetaData)
       throws AmbariException;
 
   ServiceComponentHost addServiceComponentHost(
       String hostName) throws AmbariException;
 
-  void delete() throws AmbariException;
+  void delete(DeleteHostComponentStatusMetaData deleteMetaData);
 
   /**
-   * Get lock to control access to cluster structure
-   * @return cluster-global lock
+   * This method computes the state of the repository that's associated with the desired
+   * version.  It is used, for example, when a host component reports its version and the
+   * state can be in flux.
+   *
+   * @param reportedVersion
+   * @throws AmbariException
    */
-  ReadWriteLock getClusterGlobalLock();
+  void updateRepositoryState(String reportedVersion) throws AmbariException;
+
+  /**
+   * @return the repository state for the desired version
+   */
+  RepositoryVersionState getRepositoryState();
 }

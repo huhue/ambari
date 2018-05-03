@@ -19,21 +19,19 @@
 
 var App = require('app');
 
-App.ApplicationController = Em.Controller.extend(App.UserPref, {
+App.ApplicationController = Em.Controller.extend(App.Persist, {
 
   name: 'applicationController',
 
   isPollerRunning: false,
 
-  clusterName: function () {
-    return (App.router.get('clusterController.clusterName') || 'My Cluster');
-  }.property('App.router.clusterController.clusterName'),
+  clusterName: Em.computed.alias('App.router.clusterController.clusterName'),
 
   /**
    * set ambari server version from installerController or mainController, making sure version shown up all the time
    */
   ambariVersion: function () {
-    return (App.router.get('installerController.ambariServerVersion') || App.router.get('mainController.ambariServerVersion') || Em.I18n.t('common.notAvailable'));
+    return App.router.get('installerController.ambariServerVersion') || App.router.get('mainController.ambariServerVersion') || Em.I18n.t('common.notAvailable');
   }.property('App.router.installerController.ambariServerVersion', 'App.router.mainController.ambariServerVersion'),
 
   clusterDisplayName: Em.computed.truncate('clusterName', 13, 10),
@@ -57,9 +55,63 @@ App.ApplicationController = Em.Controller.extend(App.UserPref, {
     return true;
   }.property('App.router.clusterInstallCompleted', 'isClusterDataLoaded'),
 
-  init: function(){
-    this._super();
-  },
+  /**
+   * Determines if "Manage Ambari" menu-item should be shown
+   *
+   * @type {boolean}
+   */
+  showManageAmbari: function () {
+    if (App.router.get('clusterInstallCompleted')) {
+      return this.get('isClusterDataLoaded');
+    }
+    return App.get('isPermissionDataLoaded');
+  }.property('App.router.clusterInstallCompleted', 'isClusterDataLoaded', 'App.isPermissionDataLoaded'),
+
+  /**
+   * Determines if upgrade label should be shown
+   *
+   * @type {boolean}
+   */
+  showUpgradeLabel: Em.computed.or('App.upgradeInProgress', 'App.upgradeHolding', 'App.upgradeSuspended'),
+
+  /**
+   * @return {{msg: string, cls: string, icon: string}}
+   */
+  upgradeMap: function () {
+    var upgradeInProgress = App.get('upgradeInProgress');
+    var upgradeHolding = App.get('upgradeHolding');
+    var upgradeSuspended = App.get('upgradeSuspended');
+    var isDowngrade = App.router.get('mainAdminStackAndUpgradeController.isDowngrade');
+    var typeSuffix = isDowngrade ? 'downgrade' : 'upgrade';
+    var hasUpgradePrivilege = App.isAuthorized('CLUSTER.UPGRADE_DOWNGRADE_STACK');
+    var wizardWatcherController = App.router.get('wizardWatcherController');
+    var isNotWizardUser;
+    var wizardUserName;
+    if (upgradeInProgress) {
+      isNotWizardUser =wizardWatcherController.get('isNonWizardUser');
+      wizardUserName = wizardWatcherController.get('wizardUser');
+      return {
+        cls: hasUpgradePrivilege? 'upgrade-in-progress' : 'upgrade-in-progress not-allowed-cursor',
+        icon: 'glyphicon-cog',
+        msg: isNotWizardUser ?  Em.I18n.t('admin.stackVersions.version.' + typeSuffix + '.running.nonWizard').format(wizardUserName) : Em.I18n.t('admin.stackVersions.version.' + typeSuffix + '.running')
+      }
+    }
+    if (upgradeHolding) {
+      return {
+        cls: hasUpgradePrivilege? 'upgrade-holding' : 'upgrade-holding not-allowed-cursor',
+        icon: 'glyphicon-pause',
+        msg: Em.I18n.t('admin.stackVersions.version.' + typeSuffix + '.pause')
+      }
+    }
+    if (upgradeSuspended) {
+      return {
+        cls: hasUpgradePrivilege? 'upgrade-aborted' : 'upgrade-aborted not-allowed-cursor',
+        icon: 'glyphicon-pause',
+        msg: Em.I18n.t('admin.stackVersions.version.' + typeSuffix + '.suspended')
+      }
+    }
+    return {};
+  }.property('App.upgradeInProgress', 'App.upgradeHolding', 'App.upgradeSuspended', 'App.router.mainAdminStackAndUpgradeController.isDowngrade'),
 
   startKeepAlivePoller: function() {
     if (!this.get('isPollerRunning')) {
@@ -81,8 +133,6 @@ App.ApplicationController = Em.Controller.extend(App.UserPref, {
   },
 
   showAboutPopup: function() {
-
-    var self = this;
     App.ModalPopup.show({
       header: Em.I18n.t('common.aboutAmbari'),
       secondary: false,

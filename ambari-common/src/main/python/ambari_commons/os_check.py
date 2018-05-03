@@ -86,6 +86,9 @@ def _is_oracle_linux():
 def _is_redhat_linux():
   return _IS_REDHAT_LINUX
 
+def _is_powerpc():
+  return platform.processor() == 'powerpc' or platform.machine().startswith('ppc')
+
 def advanced_check(distribution):
   distribution = list(distribution)
   if os.path.exists(SYSTEM_RELEASE_FILE):
@@ -93,8 +96,8 @@ def advanced_check(distribution):
       issue_content = fp.read()
   
     if "Amazon" in issue_content:
-      distribution[0] = "amazon"
-      search_groups = re.search('(\d+\.\d+)', issue_content)
+      distribution[0] = "amazonlinux"
+      search_groups = re.search(' release (\d+)', issue_content)
       
       if search_groups:
         distribution[1] = search_groups.group(1)
@@ -160,6 +163,8 @@ class OS_CONST_TYPE(type):
 
 class OSConst:
   __metaclass__ = OS_CONST_TYPE
+
+  systemd_redhat_os_major_versions = ["7"]
 
 
 class OSCheck:
@@ -255,6 +260,9 @@ class OSCheck:
 
     if operatingSystem == '':
       raise Exception("Cannot detect os type. Exiting...")
+
+    if _is_powerpc():
+      operatingSystem += '-ppc'
     
     return operatingSystem
 

@@ -22,6 +22,7 @@ var InitialData = {
     'loginName': '',
     'authenticated': false,
     'configs': [],
+    'tags': [],
     'tables': {
       'filterConditions': {},
       'displayLength': {},
@@ -47,6 +48,7 @@ var InitialData = {
   'RemoveHawqStandbyWizard': {},
   'ActivateHawqStandbyWizard': {},
   'RAHighAvailabilityWizard': {},
+  'NameNodeFederationWizard': {},
   'RollbackHighAvailabilityWizard': {},
   'MainAdminStackAndUpgrade': {},
   'KerberosDisable': {},
@@ -221,12 +223,14 @@ App.db.setSortingStatuses = function (name, sortingConditions) {
   App.db.set('app.tables.sortingConditions', name, sortingConditions);
 };
 
-App.db.setSelectedHosts = function (name, selectedHosts) {
-  App.db.set('app.tables.selectedItems', name, selectedHosts);
+App.db.setSelectedHosts = function (selectedHosts) {
+  App.db.set('app.tables.selectedItems', 'mainHostController', selectedHosts);
 };
 
-App.db.setHosts = function (hostInfo) {
-  App.db.set('Installer', 'hostInfo', hostInfo);
+App.db.unselectHosts = function (hostsToUnselect = []) {
+  let selectedHosts = App.db.getSelectedHosts();
+  selectedHosts = selectedHosts.filter(host => hostsToUnselect.indexOf(host) === -1);
+  App.db.setSelectedHosts(selectedHosts);
 };
 
 App.db.setMasterComponentHosts = function (masterComponentHosts) {
@@ -249,6 +253,10 @@ App.db.setStacks = function (stacks) {
   App.db.set('Installer', 'stacksVersions', stacks);
 };
 
+App.db.setOses = function (oses) {
+  App.db.set('Installer', 'operatingSystems', oses);
+};
+
 App.db.setRepos = function (repos) {
   App.db.set('Installer', 'repositories', repos);
 };
@@ -259,6 +267,10 @@ App.db.setLocalRepoVDFData = function (data) {
 
 App.db.setConfigs = function (configs) {
   App.db.set('app', 'configs', configs);
+};
+
+App.db.setTags = function (tags) {
+  App.db.set('app', 'tags', tags);
 };
 
 /**
@@ -357,6 +369,10 @@ App.db.setKerberosWizardConfigTag = function (tag) {
   App.db.set('KerberosWizard', tag.name, tag.value);
 };
 
+App.db.setManageJournalNodeWizardConfigTag = function (tag) {
+  App.db.set('ManageJournalNodeWizard', tag.name, tag.value);
+};
+
 /**
  * Get user model from db
  * @return {*}
@@ -397,8 +413,8 @@ App.db.getSortingStatuses = function (name) {
   return name ? App.db.get('app.tables.sortingConditions', name): null;
 };
 
-App.db.getSelectedHosts = function (name) {
-  return App.db.get('app.tables.selectedItems', name) || [];
+App.db.getSelectedHosts = function () {
+  return App.db.get('app.tables.selectedItems', 'mainHostController') || [];
 };
 
 /**
@@ -412,10 +428,6 @@ App.db.getWizardCurrentStep = function (wizardType) {
 
 App.db.getAllHostNames = function () {
   return App.db.get('Installer', 'hostNames');
-};
-
-App.db.getHosts = function () {
-  return App.db.get('Installer', 'hostInfo');
 };
 
 App.db.getMasterToReassign = function () {
@@ -440,6 +452,10 @@ App.db.getDisableSecurityStatus = function () {
 
 App.db.getStacks = function () {
   return App.db.get('Installer', 'stacksVersions');
+};
+
+App.db.getOses = function () {
+  return App.db.get('Installer', 'operatingSystems');
 };
 
 App.db.getRepos = function () {
@@ -506,8 +522,16 @@ App.db.getReassignMasterWizardComponentDir = function () {
   return App.db.get('ReassignMaster', 'componentDir');
 };
 
+App.db.getManageJournalNodeWizardConfigTag = function (tag) {
+  return App.db.get('ManageJournalNodeWizard', tag);
+};
+
 App.db.getConfigs = function () {
   return App.db.get('app', 'configs');
+};
+
+App.db.getTags = function () {
+  return App.db.get('app', 'tags');
 };
 
 App.db.getReassignMasterWizardReassignHosts = function () {

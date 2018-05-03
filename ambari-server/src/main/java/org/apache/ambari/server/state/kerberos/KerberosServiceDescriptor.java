@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,35 +17,15 @@
  */
 package org.apache.ambari.server.state.kerberos;
 
-import org.apache.ambari.server.AmbariException;
-
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
-/**
- * Represents information required to configure Kerberos for a particular service.
- * <p/>
- * The data map is expected to have the following properties:
- * <ul>
- * <li>name</li>
- * <li>components</li>
- * <li>identities</li>
- * <li>configurations</li>
- * </ul>
- * Example:
- * <pre>
- *  "name" => "SERVICE",
- *  "identities" => Collection&lt;Map&lt;String, Object&gt;&gt;
- *  "components" => Collection&lt;Map&lt;String, Object&gt;&gt;
- *  "configurations" => Collection&lt;Map&lt;String, Object&gt;&gt;
- * </pre>
- */
+import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang.builder.HashCodeBuilder;
 
 /**
  * KerberosServiceDescriptor is an implementation of an AbstractKerberosDescriptorContainer that
@@ -66,6 +46,7 @@ import java.util.Map;
  *      "title": "KerberosServiceDescriptor",
  *      "description": "Describes an Ambari service",
  *      "type": "object",
+ *      "preconfigure": "boolean",
  *      "properties": {
  *        "name": {
  *          "description": "An identifying name for this service descriptor.",
@@ -105,10 +86,18 @@ import java.util.Map;
  */
 public class KerberosServiceDescriptor extends AbstractKerberosDescriptorContainer {
 
+  static final String KEY_PRECONFIGURE = "preconfigure";
+  static final String KEY_COMPONENTS = Type.COMPONENT.getDescriptorPluralName();
+
   /**
    * A Map of the components contained within this KerberosServiceDescriptor
    */
   private Map<String, KerberosComponentDescriptor> components;
+
+  /**
+   * A Boolean value indicating whether this service should be pre-configured (true) or not.
+   */
+  private Boolean preconfigure = null;
 
   /**
    * Creates a new KerberosServiceDescriptor
@@ -123,6 +112,16 @@ public class KerberosServiceDescriptor extends AbstractKerberosDescriptorContain
     // The name for this KerberosServiceDescriptor is stored in the "name" entry in the map
     // This is not automatically set by the super classes.
     this(getStringValue(data, "name"), data);
+  }
+
+  @Override
+  public Collection<? extends AbstractKerberosDescriptorContainer> getChildContainers() {
+    return (components == null) ? null : Collections.unmodifiableCollection(components.values());
+  }
+
+  @Override
+  public AbstractKerberosDescriptorContainer getChildContainer(String name) {
+    return getComponent(name);
   }
 
   /**
@@ -142,7 +141,7 @@ public class KerberosServiceDescriptor extends AbstractKerberosDescriptorContain
     setName(name);
 
     if (data != null) {
-      Object list = data.get(KerberosDescriptorType.COMPONENT.getDescriptorPluralName());
+      Object list = data.get(KEY_COMPONENTS);
       if (list instanceof Collection) {
         // Assume list is Collection<Map<String, Object>>
         for (Object item : (Collection) list) {
@@ -151,6 +150,8 @@ public class KerberosServiceDescriptor extends AbstractKerberosDescriptorContain
           }
         }
       }
+
+      setPreconfigure(getBooleanValue(data, KEY_PRECONFIGURE));
     }
   }
 
@@ -190,7 +191,7 @@ public class KerberosServiceDescriptor extends AbstractKerberosDescriptorContain
       }
 
       if (components == null) {
-        components = new HashMap<String, KerberosComponentDescriptor>();
+        components = new TreeMap<>();
       }
 
       components.put(name, component);
@@ -224,6 +225,24 @@ public class KerberosServiceDescriptor extends AbstractKerberosDescriptorContain
   }
 
   /**
+   * Indicate whether this service should be preconfigured when determining configurations.
+   *
+   * @return true, to preconfigure; false, otherwise
+   */
+  public boolean shouldPreconfigure() {
+    return Boolean.TRUE.equals(preconfigure);
+  }
+
+  /**
+   * Sets whether this service should be preconfigured when determining configurations or not.
+   *
+   * @param preconfigure true, to preconfigure; false, otherwise
+   */
+  public void setPreconfigure(Boolean preconfigure) {
+    this.preconfigure = preconfigure;
+  }
+
+  /**
    * Gets the requested AbstractKerberosDescriptor implementation using a type name and a relevant
    * descriptor name.
    * <p/>
@@ -235,8 +254,8 @@ public class KerberosServiceDescriptor extends AbstractKerberosDescriptorContain
    * @return a AbstractKerberosDescriptor representing the requested descriptor or null if not found
    */
   @Override
-  protected AbstractKerberosDescriptor getDescriptor(KerberosDescriptorType type, String name) {
-    if (KerberosDescriptorType.COMPONENT == type) {
+  protected AbstractKerberosDescriptor getDescriptor(Type type, String name) {
+    if (Type.COMPONENT == type) {
       return getComponent(name);
     } else {
       return super.getDescriptor(type, name);
@@ -256,42 +275,51 @@ public class KerberosServiceDescriptor extends AbstractKerberosDescriptorContain
     Map<String, Object> map = super.toMap();
 
     if (components != null) {
-      List<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
+      List<Map<String, Object>> list = new ArrayList<>();
       for (KerberosComponentDescriptor component : components.values()) {
         list.add(component.toMap());
       }
-      map.put(KerberosDescriptorType.COMPONENT.getDescriptorPluralName(), list);
+      map.put(KEY_COMPONENTS, list);
+    }
+
+    if (preconfigure != null) {
+      map.put(KEY_PRECONFIGURE, preconfigure.toString());
     }
 
     return map;
   }
 
+  public List<KerberosIdentityDescriptor> getComponentIdentities(String componentName) {
+    return getComponent(componentName) != null
+        ? nullToEmpty(getComponent(componentName).getIdentities())
+        : Collections.emptyList();
+  }
+
   @Override
   public int hashCode() {
-    return super.hashCode() +
-        ((getComponents() == null)
-            ? 0
-            : getComponents().hashCode());
+    return new HashCodeBuilder()
+        .appendSuper(super.hashCode())
+        .append(components)
+        .append(preconfigure)
+        .toHashCode();
   }
 
   @Override
   public boolean equals(Object object) {
-    if (object == null) {
-      return false;
-    } else if (object == this) {
+    if (object == this) {
       return true;
-    } else if (object.getClass() == KerberosServiceDescriptor.class) {
-      KerberosServiceDescriptor descriptor = (KerberosServiceDescriptor) object;
-      return super.equals(object) &&
-          (
-              (getComponents() == null)
-                  ? (descriptor.getComponents() == null)
-                  : getComponents().equals(descriptor.getComponents())
-          );
-    } else {
+    }
+
+    if (!(object instanceof KerberosServiceDescriptor)) {
       return false;
     }
-  }
 
+    KerberosServiceDescriptor that = (KerberosServiceDescriptor) object;
+    return new EqualsBuilder()
+        .appendSuper(super.equals(object))
+        .append(components, components)
+        .append(preconfigure, that.preconfigure)
+        .isEquals();
+  }
 }
 

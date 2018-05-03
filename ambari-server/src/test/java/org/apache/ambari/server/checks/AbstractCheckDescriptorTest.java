@@ -17,74 +17,59 @@
  */
 package org.apache.ambari.server.checks;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-
-import junit.framework.Assert;
 import static org.easymock.EasyMock.anyString;
 import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.expectLastCall;
-import static org.easymock.EasyMock.replay;
+
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 
 import org.apache.ambari.server.AmbariException;
-import org.apache.ambari.server.api.services.AmbariMetaInfo;
-import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.controller.PrereqCheckRequest;
-import org.apache.ambari.server.orm.dao.ClusterVersionDAO;
-import org.apache.ambari.server.orm.dao.HostVersionDAO;
-import org.apache.ambari.server.orm.dao.RepositoryVersionDAO;
-import org.apache.ambari.server.orm.dao.UpgradeDAO;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
+import org.apache.ambari.server.state.RepositoryType;
 import org.apache.ambari.server.state.Service;
-import org.apache.ambari.server.state.ServiceImpl;
+import org.apache.ambari.server.state.repository.ClusterVersionSummary;
+import org.apache.ambari.server.state.repository.VersionDefinitionXml;
 import org.apache.ambari.server.state.stack.PrereqCheckType;
 import org.apache.ambari.server.state.stack.PrerequisiteCheck;
-import org.apache.ambari.server.state.stack.upgrade.RepositoryVersionHelper;
 import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
-import org.apache.commons.collections.map.HashedMap;
 import org.easymock.EasyMock;
+import org.easymock.EasyMockSupport;
+import org.easymock.Mock;
+import org.junit.Before;
 import org.junit.Test;
 
-import com.google.inject.AbstractModule;
-import com.google.inject.Guice;
-import com.google.inject.Injector;
+import com.google.common.collect.Sets;
 import com.google.inject.Provider;
+
+import junit.framework.Assert;
 
 /**
  * Unit tests for AbstractCheckDescriptor
  */
-public class AbstractCheckDescriptorTest {
-  final private Clusters clusters = EasyMock.createNiceMock(Clusters.class);
+public class AbstractCheckDescriptorTest extends EasyMockSupport {
+  @Mock
+  private Clusters clusters;
 
-  private class TestCheckImpl extends AbstractCheckDescriptor {
-    private PrereqCheckType m_type;
+  /**
+   * Used to mock out what services will be provided to us by the VDF/cluster.
+   */
+  @Mock
+  private ClusterVersionSummary m_clusterVersionSummary;
 
-    TestCheckImpl(PrereqCheckType type) {
-      super(null);
-      m_type = type;
+  /**
+   *
+   */
+  @Mock
+  private VersionDefinitionXml m_vdfXml;
 
-      clustersProvider = new Provider<Clusters>() {
-        @Override
-        public Clusters get() {
-          return clusters;
-        }
-      };
-    }
-
-    @Override
-    public PrereqCheckType getType() {
-      return m_type;
-    }
-
-    @Override
-    public void perform(PrerequisiteCheck prerequisiteCheck,
-        PrereqCheckRequest request) throws AmbariException {
-    }
+  @Before
+  public void setup() throws Exception {
+    injectMocks(this);
   }
 
   @Test
@@ -93,7 +78,7 @@ public class AbstractCheckDescriptorTest {
 
     Assert.assertEquals("", check.formatEntityList(null));
 
-    final LinkedHashSet<String> failedOn = new LinkedHashSet<String>();
+    final LinkedHashSet<String> failedOn = new LinkedHashSet<>();
     Assert.assertEquals("", check.formatEntityList(failedOn));
 
     failedOn.add("host1");
@@ -118,7 +103,7 @@ public class AbstractCheckDescriptorTest {
   @Test
   public void testIsApplicable() throws Exception{
     final String clusterName = "c1";
-    final Cluster cluster = EasyMock.createMock(Cluster.class);
+    final Cluster cluster = createMock(Cluster.class);
 
 
     Map<String, Service> services = new HashMap<String, Service>(){{
@@ -127,44 +112,198 @@ public class AbstractCheckDescriptorTest {
       put("SERVICE3", null);
     }};
 
+    Set<String> oneServiceList = Sets.newHashSet("SERVICE1");
+    Set<String> atLeastOneServiceList = Sets.newHashSet("SERVICE1", "MISSING_SERVICE");
+    Set<String> allServicesList = Sets.newHashSet("SERVICE1", "SERVICE2");
+    Set<String> missingServiceList = Sets.newHashSet("MISSING_SERVICE");
+
     expect(clusters.getCluster(anyString())).andReturn(cluster).atLeastOnce();
     expect(cluster.getServices()).andReturn(services).atLeastOnce();
 
-    replay(clusters, cluster);
+    RepositoryVersionEntity repositoryVersion = createNiceMock(RepositoryVersionEntity.class);
+    expect(repositoryVersion.getType()).andReturn(RepositoryType.STANDARD).anyTimes();
+    expect(repositoryVersion.getRepositoryXml()).andReturn(m_vdfXml).atLeastOnce();
+    expect(m_vdfXml.getClusterSummary(EasyMock.anyObject(Cluster.class))).andReturn(
+        m_clusterVersionSummary).atLeastOnce();
 
-    AbstractCheckDescriptor check = new TestCheckImpl(PrereqCheckType.SERVICE);
+    expect(m_clusterVersionSummary.getAvailableServiceNames()).andReturn(
+        allServicesList).atLeastOnce();
+
+
+    replayAll();
+
+    TestCheckImpl check = new TestCheckImpl(PrereqCheckType.SERVICE);
     PrereqCheckRequest request = new PrereqCheckRequest(clusterName, UpgradeType.ROLLING);
-
-    List<String> oneServiceList = new ArrayList<String>() {{
-      add("SERVICE1");
-    }};
-    List<String> atLeastOneServiceList = new ArrayList<String>() {{
-      add("SERVICE1");
-      add("NON_EXISTED_SERVICE");
-    }};
-    List<String> allServicesList = new ArrayList<String>(){{
-      add("SERVICE1");
-      add("SERVICE2");
-    }};
-    List<String> nonExistedList = new ArrayList<String>(){{
-      add("NON_EXISTED_SERVICE");
-    }};
+    request.setTargetRepositoryVersion(repositoryVersion);
 
     // case, where we need at least one service to be present
-    Assert.assertEquals(true, check.isApplicable(request, oneServiceList, false));
-    Assert.assertEquals(true, check.isApplicable(request, atLeastOneServiceList, false));
+    check.setApplicableServices(oneServiceList);
+    Assert.assertTrue(check.isApplicable(request));
 
-    // case, where all services need to be present
-    Assert.assertEquals(false, check.isApplicable(request,atLeastOneServiceList, true));
-    Assert.assertEquals(true, check.isApplicable(request, allServicesList, true));
+    check.setApplicableServices(atLeastOneServiceList);
+    Assert.assertTrue(check.isApplicable(request));
 
-    // Case with empty list of the required services
-    Assert.assertEquals(false, check.isApplicable(request, new ArrayList<String>(), true));
-    Assert.assertEquals(false, check.isApplicable(request, new ArrayList<String>(), false));
-
-    // Case with non existed services
-    Assert.assertEquals(false, check.isApplicable(request, nonExistedList, false));
-    Assert.assertEquals(false, check.isApplicable(request, nonExistedList, true));
+    check.setApplicableServices(missingServiceList);
+    Assert.assertFalse(check.isApplicable(request));
   }
 
+  /**
+   * Tests that even though the services are installed, the check doesn't match
+   * since it's for a service not in the PATCH.
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testIsApplicableForPatch() throws Exception {
+    final String clusterName = "c1";
+    final Cluster cluster = createMock(Cluster.class);
+
+    Map<String, Service> services = new HashMap<String, Service>() {
+      {
+        put("SERVICE1", null);
+        put("SERVICE2", null);
+        put("SERVICE3", null);
+      }
+    };
+
+    Set<String> oneServiceList = Sets.newHashSet("SERVICE1");
+
+    expect(clusters.getCluster(anyString())).andReturn(cluster).atLeastOnce();
+    expect(cluster.getServices()).andReturn(services).atLeastOnce();
+
+    RepositoryVersionEntity repositoryVersion = createNiceMock(RepositoryVersionEntity.class);
+    expect(repositoryVersion.getType()).andReturn(RepositoryType.STANDARD).anyTimes();
+    expect(repositoryVersion.getRepositoryXml()).andReturn(m_vdfXml).atLeastOnce();
+    expect(m_vdfXml.getClusterSummary(EasyMock.anyObject(Cluster.class))).andReturn(
+        m_clusterVersionSummary).atLeastOnce();
+
+    // the cluster summary will only return 1 service for the upgrade, even
+    // though this cluster has 2 services installed
+    expect(m_clusterVersionSummary.getAvailableServiceNames()).andReturn(
+        oneServiceList).atLeastOnce();
+
+    replayAll();
+
+    TestCheckImpl check = new TestCheckImpl(PrereqCheckType.SERVICE);
+    PrereqCheckRequest request = new PrereqCheckRequest(clusterName, UpgradeType.ROLLING);
+    request.setTargetRepositoryVersion(repositoryVersion);
+
+    // since the check is for SERVICE2, it should not match even though its
+    // installed since the repository is only for SERVICE1
+    check.setApplicableServices(Sets.newHashSet("SERVICE2"));
+    Assert.assertFalse(check.isApplicable(request));
+
+    // ok, so now change the check to match against SERVICE1
+    check.setApplicableServices(Sets.newHashSet("SERVICE1"));
+    Assert.assertTrue(check.isApplicable(request));
+  }
+
+  /**
+   * Tests {@link UpgradeCheck#required()}.
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testRequired() throws Exception {
+    RollingTestCheckImpl rollingCheck = new RollingTestCheckImpl(PrereqCheckType.SERVICE);
+    Assert.assertTrue(rollingCheck.isRequired(UpgradeType.ROLLING));
+    Assert.assertFalse(rollingCheck.isRequired(UpgradeType.NON_ROLLING));
+
+    NotRequiredCheckTest notRequiredCheck = new NotRequiredCheckTest(PrereqCheckType.SERVICE);
+    Assert.assertFalse(notRequiredCheck.isRequired(UpgradeType.ROLLING));
+    Assert.assertFalse(notRequiredCheck.isRequired(UpgradeType.NON_ROLLING));
+    Assert.assertFalse(notRequiredCheck.isRequired(UpgradeType.HOST_ORDERED));
+
+    TestCheckImpl requiredCheck = new TestCheckImpl(PrereqCheckType.SERVICE);
+    Assert.assertTrue(requiredCheck.isRequired(UpgradeType.ROLLING));
+    Assert.assertTrue(requiredCheck.isRequired(UpgradeType.NON_ROLLING));
+    Assert.assertTrue(requiredCheck.isRequired(UpgradeType.HOST_ORDERED));
+  }
+
+  @UpgradeCheck(
+      group = UpgradeCheckGroup.DEFAULT,
+      order = 1.0f,
+      required = { UpgradeType.ROLLING, UpgradeType.NON_ROLLING, UpgradeType.HOST_ORDERED })
+  private class TestCheckImpl extends AbstractCheckDescriptor {
+    private PrereqCheckType m_type;
+    private Set<String> m_applicableServices = Sets.newHashSet();
+
+    TestCheckImpl(PrereqCheckType type) {
+      super(null);
+      m_type = type;
+
+      clustersProvider = new Provider<Clusters>() {
+        @Override
+        public Clusters get() {
+          return clusters;
+        }
+      };
+    }
+
+    @Override
+    public PrereqCheckType getType() {
+      return m_type;
+    }
+
+    @Override
+    public void perform(PrerequisiteCheck prerequisiteCheck, PrereqCheckRequest request)
+        throws AmbariException {
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Set<String> getApplicableServices() {
+      return m_applicableServices;
+    }
+
+    void setApplicableServices(Set<String> applicableServices) {
+      m_applicableServices = applicableServices;
+    }
+  }
+
+  @UpgradeCheck(group = UpgradeCheckGroup.DEFAULT, order = 1.0f, required = { UpgradeType.ROLLING })
+  private class RollingTestCheckImpl extends AbstractCheckDescriptor {
+    private PrereqCheckType m_type;
+
+    RollingTestCheckImpl(PrereqCheckType type) {
+      super(null);
+      m_type = type;
+
+      clustersProvider = new Provider<Clusters>() {
+        @Override
+        public Clusters get() {
+          return clusters;
+        }
+      };
+    }
+
+    @Override
+    public void perform(PrerequisiteCheck prerequisiteCheck, PrereqCheckRequest request)
+        throws AmbariException {
+    }
+  }
+
+  @UpgradeCheck(group = UpgradeCheckGroup.DEFAULT, order = 1.0f)
+  private class NotRequiredCheckTest extends AbstractCheckDescriptor {
+    private PrereqCheckType m_type;
+
+    NotRequiredCheckTest(PrereqCheckType type) {
+      super(null);
+      m_type = type;
+
+      clustersProvider = new Provider<Clusters>() {
+        @Override
+        public Clusters get() {
+          return clusters;
+        }
+      };
+    }
+
+    @Override
+    public void perform(PrerequisiteCheck prerequisiteCheck, PrereqCheckRequest request)
+        throws AmbariException {
+    }
+  }
 }

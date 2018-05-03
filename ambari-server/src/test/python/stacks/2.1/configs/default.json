@@ -1,38 +1,181 @@
 {
+    "localComponents": [
+        "APP_TIMELINE_SERVER",
+        "TEZ_CLIENT",
+        "DATANODE",
+        "HDFS_CLIENT",
+        "ZOOKEEPER_SERVER",
+        "RESOURCEMANAGER",
+        "MAPREDUCE2_CLIENT",
+        "YARN_CLIENT",
+        "HISTORYSERVER",
+        "ZOOKEEPER_CLIENT",
+        "NAMENODE"
+    ],
     "roleCommand": "SERVICE_CHECK", 
     "clusterName": "c1", 
-    "hostname": "c6401.ambari.apache.org", 
-    "hostLevelParams": {
-        "not_managed_hdfs_path_list": "[\"/apps/hive/warehouse\",\"/apps/falcon\",\"/mr-history/done\",\"/app-logs\",\"/tmp\"]",
-        "agent_stack_retry_count": "5",
-        "agent_stack_retry_on_unavailability": "false",
-        "jdk_location": "http://c6401.ambari.apache.org:8080/resources/", 
-        "ambari_db_rca_password": "mapred", 
-        "ambari_db_rca_url": "jdbc:postgresql://c6401.ambari.apache.org/ambarirca", 
-        "jce_name": "UnlimitedJCEPolicyJDK7.zip", 
-        "stack_version": "2.1",
-        "stack_name": "HDP", 
-        "ambari_db_rca_driver": "org.postgresql.Driver", 
-        "jdk_name": "jdk-7u67-linux-x64.tar.gz",
-        "ambari_db_rca_username": "mapred", 
-        "java_home": "/usr/jdk64/jdk1.7.0_45",
-        "java_version": "8",
-        "db_name": "ambari"
-    }, 
     "commandType": "EXECUTION_COMMAND", 
     "roleParams": {}, 
     "serviceName": "HIVE",
     "role": "HIVE_SERVER",
-    "commandParams": {
-        "version": "2.2.1.0-2067",
-        "command_timeout": "300",
-        "service_package_folder": "OOZIE",
-        "script_type": "PYTHON",
-        "script": "scripts/service_check.py",
-        "excluded_hosts": "host1,host2"
-    },
     "taskId": 152, 
-    "public_hostname": "c6401.ambari.apache.org", 
+    "commandParams": {
+        "service_package_folder": "common-services/HDFS/2.1.0.2.0/package", 
+        "script": "scripts/service_check.py", 
+        "hooks_folder": "stack-hooks", 
+        "version": "2.2.1.0-2067", 
+        "command_timeout": "300", 
+        "script_type": "PYTHON"
+    },
+    "clusterLevelParams": {
+        "stack_version": "2.1", 
+        "not_managed_hdfs_path_list": "[\"/apps/hive/warehouse\",\"/apps/falcon\",\"/mr-history/done\",\"/app-logs\",\"/tmp\"]",
+        "hooks_folder": "stack-hooks", 
+        "stack_name": "HDP", 
+        "group_list": "[\"hdfs\",\"hadoop\",\"users\"]", 
+        "user_groups": "{\"hive\":[\"hadoop\"], \"oozie\":[\"hadoop\",\"users\"], \"nobody\":[\"hadoop\",\"nobody\"], \"ambari-qa\":[\"hadoop\",\"users\"], \"flume\":[\"hadoop\"], \"hdfs\":[\"hadoop\"], \"storm\":[\"hadoop\"], \"mapred\":[\"hadoop\"], \"hbase\":[\"hadoop\"], \"tez\":[\"hadoop\",\"users\"], \"zookeeper\":[\"hadoop\"], \"falcon\":[\"hadoop\",\"users\"], \"sqoop\":[\"hadoop\"], \"yarn\":[\"hadoop\"], \"hcat\":[\"hadoop\"]}", 
+        "cluster_name": "c1", 
+        "user_list": "[\"ambari-qa\",\"hdfs\"]"
+    },
+    "ambariLevelParams": {
+        "jdk_location": "http://c6401.ambari.apache.org:8080/resources",
+        "agent_stack_retry_count": "5", 
+        "db_driver_filename": "mysql-connector-java.jar", 
+        "agent_stack_retry_on_unavailability": "false", 
+        "ambari_db_rca_url": "jdbc:postgresql://c6401.ambari.apache.org/ambarirca", 
+        "jce_name": "jce_policy-7.zip", 
+        "java_version": "7", 
+        "ambari_db_rca_password": "mapred", 
+        "host_sys_prepped": "false", 
+        "db_name": "ambari", 
+        "oracle_jdbc_url": "http://c6401.ambari.apache.org/resources/ojdbc6.jar",
+        "ambari_db_rca_driver": "org.postgresql.Driver", 
+        "ambari_db_rca_username": "mapred", 
+        "jdk_name": "jdk-7u45-linux-x64.tar.gz", 
+        "java_home": "/usr/jdk64/jdk1.7.0_45", 
+        "mysql_jdbc_url": "http://c6401.ambari.apache.org/resources/mysql-connector-java.jar"
+    },
+    "repositoryFile": {
+        "resolved": true, 
+        "repoVersion": "2.6.4.0-60", 
+        "repositories": [
+            {
+                "mirrorsList": null, 
+                "ambariManaged": true, 
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-60", 
+                "repoName": "HDP", 
+                "components": null, 
+                "osType": "redhat6", 
+                "distribution": null, 
+                "repoId": "HDP-2.6-repo-1"
+            }, 
+            {
+                "mirrorsList": null, 
+                "ambariManaged": true, 
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-60", 
+                "repoName": "HDP-GPL", 
+                "components": null, 
+                "osType": "redhat6", 
+                "distribution": null, 
+                "repoId": "HDP-2.6-GPL-repo-1"
+            }, 
+            {
+                "mirrorsList": null, 
+                "ambariManaged": true, 
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6", 
+                "repoName": "HDP-UTILS", 
+                "components": null, 
+                "osType": "redhat6", 
+                "distribution": null, 
+                "repoId": "HDP-UTILS-1.1.0.22-repo-1"
+            }
+        ], 
+        "feature": {
+            "m_isScoped": true, 
+            "m_isPreInstalled": false
+        }, 
+        "stackName": "HDP", 
+        "repoVersionId": 1
+    },
+    "agentLevelParams": {
+        "public_hostname": null, 
+        "hostname": "c6401.ambari.apache.org", 
+        "agentConfigParams": {
+            "agent": {
+                "parallel_execution": 0, 
+                "use_system_proxy_settings": true
+            }
+        }, 
+        "agentCacheDir": "/var/lib/ambari-agent/cache"
+    },
+    "hostLevelParams": {
+        "recoveryConfig": {
+            "retryGap": "5", 
+            "windowInMinutes": "60", 
+            "maxLifetimeCount": "1024", 
+            "components": "", 
+            "maxCount": "6", 
+            "type": "AUTO_START"
+        }, 
+        "hostRepositories": {
+            "componentRepos": {
+                "NAMENODE": 1, 
+                "SECONDARY_NAMENODE": 1, 
+                "DATANODE": 1, 
+                "HDFS_CLIENT": 1
+            }, 
+            "commandRepos": {
+                "1": {
+                    "resolved": true, 
+                    "repoVersion": "2.1.4.0-60", 
+                    "repositories": [
+                        {
+                            "mirrorsList": null, 
+                            "ambariManaged": true, 
+                            "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-60", 
+                            "repoName": "HDP", 
+                            "components": null, 
+                            "osType": "redhat6", 
+                            "distribution": null, 
+                            "repoId": "HDP-2.6-repo-1"
+                        }, 
+                        {
+                            "mirrorsList": null, 
+                            "ambariManaged": true, 
+                            "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-60", 
+                            "repoName": "HDP-GPL", 
+                            "components": null, 
+                            "osType": "redhat6", 
+                            "distribution": null, 
+                            "repoId": "HDP-2.6-GPL-repo-1"
+                        }, 
+                        {
+                            "mirrorsList": null, 
+                            "ambariManaged": true, 
+                            "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6", 
+                            "repoName": "HDP-UTILS", 
+                            "components": null, 
+                            "osType": "redhat6", 
+                            "distribution": null, 
+                            "repoId": "HDP-UTILS-1.1.0.22-repo-1"
+                        }
+                    ], 
+                    "feature": {
+                        "m_isScoped": true, 
+                        "m_isPreInstalled": false
+                    }, 
+                    "stackName": "HDP", 
+                    "repoVersionId": 1
+                }
+            }
+        }
+    },
+    "serviceLevelParams": {
+        "credentialStoreEnabled": false, 
+        "status_commands_timeout": 300, 
+        "version": "2.7.3", 
+        "service_package_folder": "common-services/HDFS/2.1.0.2.0/package"
+    },
     "configurations": {
       "falcon-startup.properties": {
             "*.oozie.feed.workflow.builder": "org.apache.falcon.workflow.OozieFeedWorkflowBuilder",
@@ -69,6 +212,9 @@
             "*.log.cleanup.frequency.months.retention": "months(3)",
             "*.log.cleanup.frequency.minutes.retention": "hours(6)",
             "*.domain": "${falcon.app.type}"
+      },
+      "falcon-client.properties": {
+            "falcon.url": "http://{{falcon_host}}:{{falcon_port}}"
       },
       "mapred-site": {
             "mapreduce.jobhistory.address": "c6402.ambari.apache.org:10020", 
@@ -251,7 +397,7 @@
             "XAAUDIT.DB.DATABASE_NAME": "{{xa_audit_db_name}}", 
             "XAAUDIT.DB.HOSTNAME": "{{xa_db_host}}", 
             "XAAUDIT.SOLR.IS_ENABLED": "false", 
-            "ranger-storm-plugin-enabled": "Yes", 
+            "ranger-storm-plugin-enabled": "No", 
             "SSL_KEYSTORE_FILE_PATH": "/etc/hadoop/conf/ranger-plugin-keystore.jks", 
             "XAAUDIT.HDFS.DESTINTATION_OPEN_RETRY_INTERVAL_SECONDS": "60", 
             "XAAUDIT.DB.USER_NAME": "{{xa_audit_db_user}}", 
@@ -579,7 +725,7 @@
             "yarn.nodemanager.address": "0.0.0.0:45454", 
             "yarn.nodemanager.container-monitor.interval-ms": "3000", 
             "yarn.nodemanager.log-aggregation.compression-type": "gz", 
-            "yarn.nodemanager.log.retain-second": "604800", 
+            "yarn.nodemanager.log.retain-seconds": "604800",
             "yarn.nodemanager.delete.debug-delay-sec": "0", 
             "yarn.nodemanager.log-dirs": "/hadoop/yarn/log", 
             "yarn.nodemanager.health-checker.interval-ms": "135000", 
@@ -615,7 +761,11 @@
             "yarn_user": "yarn", 
             "resourcemanager_heapsize": "1024", 
             "yarn_log_dir_prefix": "/var/log/hadoop-yarn",
-            "is_supported_yarn_ranger": "false"
+            "is_supported_yarn_ranger": "false",
+            "service_check.queue.name": "default"
+        },
+        "container-executor": {
+            "content": "yarn.nodemanager.local-dirs=/hadoop/yarn/local\nyarn.nodemanager.log-dirs=/hadoop/yarn/log\nyarn.nodemanager.linux-container-executor.group=hadoop\nbanned.users=hdfs,yarn,mapred,bin\nmin.user.id=500"
         },
         "hadoop-env": {
             "namenode_opt_maxnewsize": "200m", 
@@ -645,7 +795,8 @@
             "hive_log_dir": "/var/log/hive", 
             "hive_user": "hive", 
             "hcat_log_dir": "/var/log/webhcat", 
-            "hive_database": "New MySQL Database"
+            "hive_database": "New MySQL Database",
+            "hive_security_authorization": "None"
         },
         "hbase-env": {
             "hbase_pid_dir": "/var/run/hbase", 
@@ -758,6 +909,9 @@
         "zookeeper-log4j": {
             "property1": "value1"
         },
+        "falcon-log4j": {
+            "content": "<?xml version=1.0 encoding=UTF-8 ?> <!--   Licensed to the Apache Software Foundation (ASF) under one   or more contributor license agreements.  See the NOTICE file   distributed with this work for additional information   regarding copyright ownership.  The ASF licenses this file   to you under the Apache License, Version 2.0 (the   License); you may not use this file except in compliance   with the License.  You may obtain a copy of the License at        http://www.apache.org/licenses/LICENSE-2.0    Unless required by applicable law or agreed to in writing, software   distributed under the License is distributed on an AS IS BASIS,   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.   See the License for the specific language governing permissions and   limitations under the License.   -->  <!--     This is used for falcon packaging only.   -->  <!DOCTYPE log4j:configuration SYSTEM log4j.dtd>  <log4j:configuration xmlns:log4j=http://jakarta.apache.org/log4j/>     <appender name=FILE class=org.apache.log4j.DailyRollingFileAppender>         <param name=File value=${falcon.log.dir}/${falcon.app.type}.application.log/>         <param name=Append value=true/>         <param name=Threshold value=debug/>         <param name=MaxFileSize value={{falcon_log_maxfilesize}}MB />         <param name=MaxBackupIndex value={{falcon_log_maxbackupindex}} />         <layout class=org.apache.log4j.PatternLayout>             <param name=ConversionPattern value=%d %-5p - [%t:%x] ~ %m (%c{1}:%L)%n/>         </layout>     </appender>      <appender name=AUDIT class=org.apache.log4j.DailyRollingFileAppender>         <param name=File value=${falcon.log.dir}/${falcon.app.type}.audit.log/>         <param name=Append value=true/>         <param name=Threshold value=debug/>         <layout class=org.apache.log4j.PatternLayout>             <param name=ConversionPattern value=%d %x %m%n/>         </layout>     </appender>      <appender name=METRIC class=org.apache.log4j.DailyRollingFileAppender>         <param name=File value=${falcon.log.dir}/${falcon.app.type}.metric.log/>         <param name=Append value=true/>         <param name=Threshold value=debug/>         <layout class=org.apache.log4j.PatternLayout>             <param name=ConversionPattern value=%d %m%n/>         </layout>     </appender>      <appender name=FeedSLA class=org.apache.log4j.DailyRollingFileAppender>         <param name=File value=${falcon.log.dir}/${falcon.app.type}.feed.sla.log/>         <param name=Append value=true/>         <param name=Threshold value=debug/>         <layout class=org.apache.log4j.PatternLayout>             <param name=ConversionPattern value=%d %m%n/>         </layout>     </appender>      <appender name=ALERT class=org.apache.log4j.DailyRollingFileAppender>         <param name=File value=${falcon.log.dir}/${falcon.app.type}.alerts.log/>         <param name=Append value=true/>         <param name=Threshold value=debug/>         <layout class=org.apache.log4j.PatternLayout>             <param name=ConversionPattern value=%d %m%n/>         </layout>     </appender>      <appender name=SECURITY class=org.apache.log4j.DailyRollingFileAppender>         <param name=File value=${falcon.log.dir}/${falcon.app.type}.security.audit.log/>         <param name=Append value=true/>         <param name=Threshold value=debug/>         <param name=MaxFileSize value={{falcon_security_log_maxfilesize}}MB/>         <param name=MaxBackupIndex value={{falcon_security_log_maxbackupindex}}/>         <layout class=org.apache.log4j.PatternLayout>             <param name=ConversionPattern value=%d %x %m%n/>         </layout>     </appender>      <logger name=org.apache.falcon additivity=false>         <level value=debug/>         <appender-ref ref=FILE/>     </logger>      <logger name=AUDIT>         <level value=info/>         <appender-ref ref=AUDIT/>     </logger>      <logger name=METRIC>         <level value=info/>         <appender-ref ref=METRIC/>     </logger>      <logger name=FeedSLA>         <level value=debug/>         <appender-ref ref=FeedSLA/>     </logger>      <logger name=org.apache.hadoop.security additivity=false>         <level value=info/>         <appender-ref ref=SECURITY/>     </logger>      <logger name=org.apache.hadoop additivity=false>         <level value=info/>         <appender-ref ref=FILE/>     </logger>      <logger name=org.apache.oozie additivity=false>         <level value=info/>         <appender-ref ref=FILE/>     </logger>      <logger name=org.apache.hadoop.hive additivity=false>         <level value=info/>         <appender-ref ref=FILE/>     </logger>      <root>         <priority value=info/>         <appender-ref ref=FILE/>     </root>  </log4j:configuration>     ]]></value>     <value-attributes>       <type>content</type>       <show-property-name>false</show-property-name>     </value-attributes>     <on-ambari-upgrade add=true/>   </property> </configuration> "
+        },
         "ranger-hive-plugin-properties": {
             "XAAUDIT.HDFS.DESTINTATION_FLUSH_INTERVAL_SECONDS": "900", 
             "XAAUDIT.HDFS.DESTINATION_DIRECTORY": "hdfs://__REPLACE__NAME_NODE_HOST:8020/ranger/audit/%app-type%/%time:yyyyMMdd%", 
@@ -789,7 +943,7 @@
             "XAAUDIT.SOLR.MAX_QUEUE_SIZE": "1"
         }
     },
-    "configuration_attributes": {
+    "configurationAttributes": {
       "yarn-site": {
         "final": {
           "yarn.nodemanager.disk-health-checker.min-healthy-disks": "true",
@@ -916,29 +1070,35 @@
         },
         "zookeeper-log4j": {
             "tag": "version1"
+        },
+        "falcon-log4j":{
+            "tag": "version1"
         }
     }, 
-    "commandId": "7-1", 
+    "commandId": "7-1",
+    "availableServices" : {
+        "STORM" : "0.9.1"
+    },
     "clusterHostInfo": {
         "ambari_server_host": [
             "c6401.ambari.apache.org"
         ],
-        "snamenode_host": [
+        "snamenode_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "nm_hosts": [
+        "nodemanager_hosts": [
             "c6402.ambari.apache.org"
         ], 
         "drpc_server_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "slave_hosts": [
+        "datanode_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "ganglia_server_host": [
+        "ganglia_server_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "hive_server_host": [
+        "hive_server_hosts": [
             "c6402.ambari.apache.org"
         ], 
         "logviewer_server_hosts": [
@@ -947,13 +1107,13 @@
         "hive_metastore_host": [
             "c6402.ambari.apache.org"
         ], 
-        "hbase_rs_hosts": [
+        "hbase_regionservers_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "webhcat_server_host": [
+        "webhcat_server_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "zookeeper_hosts": [
+        "zookeeper_server_hosts": [
             "c6401.ambari.apache.org", 
             "c6402.ambari.apache.org"
         ], 
@@ -969,7 +1129,7 @@
             "8670", 
             "8670"
         ], 
-        "rm_host": [
+        "resourcemanaer_hosts": [
             "c6402.ambari.apache.org"
         ], 
         "all_hosts": [
@@ -979,22 +1139,22 @@
         "storm_ui_server_hosts": [
             "c6401.ambari.apache.org"
         ], 
-        "oozie_server": [
+        "oozie_server_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "hs_host": [
+        "historyserver_hosts": [
             "c6402.ambari.apache.org"
         ], 
         "nimbus_hosts": [
             "c6401.ambari.apache.org"
         ], 
-        "namenode_host": [
+        "namenode_hosts": [
             "c6401.ambari.apache.org"
         ], 
         "hbase_master_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "hive_mysql_host": [
+        "mysql_server_hosts": [
             "c6402.ambari.apache.org"
         ],
         "falcon_server_hosts": [

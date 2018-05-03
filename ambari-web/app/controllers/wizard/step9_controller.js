@@ -111,8 +111,10 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
     if (controllerName == 'addHostController' || controllerName == 'addServiceController') {
       validStates.push('INSTALL FAILED');
     }
-    return !validStates.contains(this.get('content.cluster.status'));
+    return !validStates.contains(this.get('content.cluster.status')) || App.get('router.btnClickInProgress');
   }.property('content.cluster.status'),
+
+  isNextButtonDisabled: Em.computed.or('App.router.nextBtnClickInProgress', 'isSubmitDisabled'),
 
   /**
    * Observer function: Enables previous steps link if install task failed in installer wizard.
@@ -421,6 +423,8 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
             return role + Em.I18n.t('installer.step9.serviceStatus.stop.failed');
         }
         break;
+      case 'CUSTOM_COMMAND':
+        role = App.format.commandDetail(task.command_detail, task.request_input, task.ops_display_name);
       case 'EXECUTE' :
       case 'SERVICE_CHECK' :
         switch (task.status) {
@@ -602,11 +606,9 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
       encodeBody: false,
       primary: Em.I18n.t('ok'),
       header: Em.I18n.t('installer.step9.service.start.header'),
-      secondaryClass: "hide",
+      secondary: false,
       body: Em.I18n.t('installer.step9.service.start.failed'),
-      primaryClass: 'btn-success',
-      onPrimary: function() { this.hide(); },
-      onClose: function() { this.hide(); }
+      'data-qa': 'start-failed-modal'
     });
   },
 
@@ -862,19 +864,11 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
         this.changeParseHostInfo(true);
       } else {
         this.set('progress', '34');
-        if (this.get('content.controllerName') === 'installerController') {
-          this.isAllComponentsInstalled().done(function () {
-            self.saveInstalledHosts(self);
-            self.changeParseHostInfo(true);
-          });
-          return;
-        } else {
-          this.launchStartServices(function () {
-            self.saveInstalledHosts(self);
-            self.changeParseHostInfo(true);
-          });
-          return;
-        }
+        this.isAllComponentsInstalled().done(function () {
+          self.saveInstalledHosts(self);
+          self.changeParseHostInfo(true);
+        });
+        return;
       }
     }
     this.changeParseHostInfo(false);
@@ -1053,8 +1047,7 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
         numPolls: this.get('numPolls'),
         callback: this.getLogsByRequest,
         args: [polling, requestId],
-        timeout: 3000,
-        errorLogMessage: 'Install services all retries failed'
+        timeout: 3000
       },
       success: 'reloadSuccessCallback',
       error: 'reloadErrorCallback'
@@ -1085,9 +1078,11 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
    * @method reloadErrorCallback
    */
   reloadErrorCallback: function (jqXHR, ajaxOptions, error, opt, params) {
-    this._super(jqXHR, ajaxOptions, error, opt, params);
     if (jqXHR.status) {
+      this.closeReloadPopup();
       this.loadLogData(true);
+    } else {
+      this._super(jqXHR, ajaxOptions, error, opt, params);
     }
   },
 
@@ -1110,21 +1105,17 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
    */
   isAllComponentsInstalled: function () {
     var dfd = $.Deferred();
-    if (this.get('content.controllerName') !== 'installerController' && this.get('content.controllerName') !== 'addHostController') {
+    App.ajax.send({
+      name: 'wizard.step9.installer.get_host_status',
+      sender: this,
+      data: {
+        cluster: this.get('content.cluster.name')
+      },
+      success: 'isAllComponentsInstalledSuccessCallback',
+      error: 'isAllComponentsInstalledErrorCallback'
+    }).complete(function () {
       dfd.resolve();
-    } else {
-      App.ajax.send({
-        name: 'wizard.step9.installer.get_host_status',
-        sender: this,
-        data: {
-          cluster: this.get('content.cluster.name')
-        },
-        success: 'isAllComponentsInstalledSuccessCallback',
-        error: 'isAllComponentsInstalledErrorCallback'
-      }).complete(function(){
-          dfd.resolve();
-      });
-    }
+    });
     return dfd.promise();
   },
 
@@ -1139,7 +1130,13 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
       isStartError: true,
       isCompleted: false
     };
+    var usedHostWithHeartbeatLost = false;
     var hostsWithHeartbeatLost = [];
+    var usedHosts = this.get('content.masterComponentHosts').filterProperty('isInstalled', false).mapProperty('hostName');
+    this.get('content.slaveComponentHosts').forEach(function(component) {
+      usedHosts = usedHosts.concat(component.hosts.filterProperty('isInstalled', false).mapProperty('hostName'));
+    });
+    usedHosts = usedHosts.uniq();
     jsonData.items.filterProperty('Hosts.host_state', 'HEARTBEAT_LOST').forEach(function (host) {
       var hostComponentObj = {hostName: host.Hosts.host_name};
       var componentArr = [];
@@ -1149,9 +1146,12 @@ App.WizardStep9Controller = Em.Controller.extend(App.ReloadPopupMixin, {
       }, this);
       hostComponentObj.componentNames = stringUtils.getFormattedStringFromArray(componentArr);
       hostsWithHeartbeatLost.pushObject(hostComponentObj);
+      if (!usedHostWithHeartbeatLost && usedHosts.contains(host.Hosts.host_name)) {
+        usedHostWithHeartbeatLost = true;
+      }
     }, this);
     this.set('hostsWithHeartbeatLost', hostsWithHeartbeatLost);
-    if (hostsWithHeartbeatLost.length) {
+    if (usedHostWithHeartbeatLost) {
       this.get('hosts').forEach(function (host) {
         if (hostsWithHeartbeatLost.someProperty(('hostName'), host.get('name'))) {
           host.set('status', 'heartbeat_lost');

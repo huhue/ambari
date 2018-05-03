@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -23,14 +23,15 @@ import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.actionmanager.ActionManager;
-import org.apache.ambari.server.agent.ActionQueue;
 import org.apache.ambari.server.agent.AgentEnv;
 import org.apache.ambari.server.agent.DiskInfo;
 import org.apache.ambari.server.agent.HeartBeatHandler;
@@ -53,18 +54,16 @@ import org.apache.ambari.server.state.HostHealthStatus;
 import org.apache.ambari.server.state.HostHealthStatus.HealthStatus;
 import org.apache.ambari.server.state.HostState;
 import org.apache.ambari.server.state.MaintenanceState;
-import org.apache.ambari.server.state.RepositoryVersionState;
 import org.apache.ambari.server.state.StackId;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 
 public class HostTest {
 
@@ -72,7 +71,7 @@ public class HostTest {
   private Clusters clusters;
   private HostDAO hostDAO;
   private OrmTestHelper helper;
-  private static Log LOG = LogFactory.getLog(HostTest.class);
+  private static final Logger LOG = LoggerFactory.getLogger(HostTest.class);
 
   @Before
    public void setup() throws AmbariException{
@@ -84,8 +83,8 @@ public class HostTest {
   }
 
   @After
-  public void teardown() throws AmbariException {
-    injector.getInstance(PersistService.class).stop();
+  public void teardown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
   @Test
@@ -94,7 +93,7 @@ public class HostTest {
     info.setMemorySize(100);
     info.setProcessorCount(10);
     info.setPhysicalProcessorCount(2);
-    List<DiskInfo> mounts = new ArrayList<DiskInfo>();
+    List<DiskInfo> mounts = new ArrayList<>();
     mounts.add(new DiskInfo("/dev/sda", "/mnt/disk1",
         "5000000", "4000000", "10%", "size", "fstype"));
     info.setMounts(mounts);
@@ -127,11 +126,10 @@ public class HostTest {
   @Test
   public void testHostOs() throws Exception {
     Clusters clusters = mock(Clusters.class);
-    ActionQueue queue = mock(ActionQueue.class);
     ActionManager manager = mock(ActionManager.class);
     Injector injector = mock(Injector.class);
     doNothing().when(injector).injectMembers(any());
-    HeartBeatHandler handler = new HeartBeatHandler(clusters, queue, manager, injector);
+    HeartBeatHandler handler = new HeartBeatHandler(clusters, manager, injector);
     String os = handler.getOsType("RedHat", "6.1");
     Assert.assertEquals("redhat6", os);
     os = handler.getOsType("RedHat", "6");
@@ -145,7 +143,7 @@ public class HostTest {
     HostInfo info = new HostInfo();
     info.setMemorySize(100);
     info.setProcessorCount(10);
-    List<DiskInfo> mounts = new ArrayList<DiskInfo>();
+    List<DiskInfo> mounts = new ArrayList<>();
     mounts.add(new DiskInfo("/dev/sda", "/mnt/disk1",
         "5000000", "4000000", "10%", "size", "fstype"));
     info.setMounts(mounts);
@@ -163,10 +161,12 @@ public class HostTest {
 
     HostRegistrationRequestEvent e =
         new HostRegistrationRequestEvent("foo", agentVersion, currentTime,
-            info, agentEnv);
+            info, agentEnv, currentTime);
+
     if (!firstReg) {
-      Assert.assertTrue(host.isPersisted());
+      Assert.assertNotNull(host.getHostId());
     }
+
     host.handleEvent(e);
     Assert.assertEquals(currentTime, host.getLastRegistrationTime());
 
@@ -364,27 +364,24 @@ public class HostTest {
     Cluster c1 = clusters.getCluster("c1");
 
     helper.getOrCreateRepositoryVersion(stackId, stackId.getStackVersion());
-    c1.createClusterVersion(stackId, stackId.getStackVersion(), "admin",
-        RepositoryVersionState.INSTALLING);
+
     Assert.assertEquals("c1", c1.getClusterName());
-    Assert.assertEquals(1, c1.getClusterId());
     clusters.addHost("h1");
     Host host = clusters.getHost("h1");
     host.setIPv4("ipv4");
     host.setIPv6("ipv6");
 
-    Map<String, String> hostAttributes = new HashMap<String, String>();
+    Map<String, String> hostAttributes = new HashMap<>();
     hostAttributes.put("os_family", "redhat");
     hostAttributes.put("os_release_version", "6.3");
     host.setHostAttributes(hostAttributes);
 
-    host.persist();
     c1.setDesiredStackVersion(stackId);
     clusters.mapHostToCluster("h1", "c1");
 
     ConfigFactory configFactory = injector.getInstance(ConfigFactory.class);
-    Config config = configFactory.createNew(c1, "global",
-        new HashMap<String,String>() {{ put("a", "b"); put("x", "y"); }}, new HashMap<String, Map<String,String>>());
+    Config config = configFactory.createNew(c1, "global", "v1",
+        new HashMap<String,String>() {{ put("a", "b"); put("x", "y"); }}, new HashMap<>());
 
     try {
       host.addDesiredConfig(c1.getClusterId(), true, null, config);
@@ -395,22 +392,18 @@ public class HostTest {
     }
 
 
-    config.setTag("v1");
     host.addDesiredConfig(c1.getClusterId(), true, "_test", config);
 
     Map<String, DesiredConfig> map = host.getDesiredConfigs(c1.getClusterId());
     Assert.assertTrue("Expect desired config to contain global", map.containsKey("global"));
-    Assert.assertEquals("Expect global user to be '_test'", "_test", map.get("global").getUser());
 
-    config = configFactory.createNew(c1, "global",
-        new HashMap<String,String>() {{ put("c", "d"); }}, new HashMap<String, Map<String,String>>());
-    config.setTag("v2");
+    config = configFactory.createNew(c1, "global", "v2",
+        new HashMap<String,String>() {{ put("c", "d"); }}, new HashMap<>());
     host.addDesiredConfig(c1.getClusterId(), true, "_test1", config);
 
     map = host.getDesiredConfigs(c1.getClusterId());
     Assert.assertTrue("Expect desired config to contain global", map.containsKey("global"));
     Assert.assertEquals("Expect version to be 'v2'", "v2", map.get("global").getTag());
-    Assert.assertEquals("Expect user to be '_test1'", "_test1", map.get("global").getUser());
 
     host.addDesiredConfig(c1.getClusterId(), false, "_test2", config);
     map = host.getDesiredConfigs(c1.getClusterId());
@@ -426,22 +419,17 @@ public class HostTest {
     clusters.addCluster("c1", stackId);
     Cluster c1 = clusters.getCluster("c1");
     Assert.assertEquals("c1", c1.getClusterName());
-    Assert.assertEquals(1, c1.getClusterId());
     clusters.addHost("h1");
     Host host = clusters.getHost("h1");
     host.setIPv4("ipv4");
     host.setIPv6("ipv6");
 
-    Map<String, String> hostAttributes = new HashMap<String, String>();
+    Map<String, String> hostAttributes = new HashMap<>();
     hostAttributes.put("os_family", "redhat");
     hostAttributes.put("os_release_version", "6.3");
     host.setHostAttributes(hostAttributes);
 
-    host.persist();
-
     helper.getOrCreateRepositoryVersion(stackId, stackId.getStackVersion());
-    c1.createClusterVersion(stackId, stackId.getStackVersion(), "admin",
-        RepositoryVersionState.INSTALLING);
     c1.setDesiredStackVersion(stackId);
     clusters.mapHostToCluster("h1", "c1");
 
@@ -456,5 +444,20 @@ public class HostTest {
     stateEntity = entity.getHostStateEntity();
     Assert.assertNotNull(stateEntity.getMaintenanceState());
     Assert.assertEquals(MaintenanceState.ON, host.getMaintenanceState(c1.getClusterId()));
+  }
+
+  @Test
+  public void testHostPersist() throws Exception {
+    clusters.addHost("foo");
+    Host host = clusters.getHost("foo");
+
+    String rackInfo = "rackInfo";
+    long lastRegistrationTime = System.currentTimeMillis();
+
+    host.setRackInfo(rackInfo);
+    host.setLastRegistrationTime(lastRegistrationTime);
+
+    Assert.assertEquals(rackInfo, host.getRackInfo());
+    Assert.assertEquals(lastRegistrationTime, host.getLastRegistrationTime());
   }
 }

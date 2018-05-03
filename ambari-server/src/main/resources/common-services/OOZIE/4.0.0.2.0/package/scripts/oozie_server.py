@@ -20,7 +20,6 @@ limitations under the License.
 
 from resource_management.core import Logger
 from resource_management.libraries.script import Script
-from resource_management.libraries.functions import conf_select
 from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions import StackFeature
 from resource_management.libraries.functions.stack_features import check_stack_feature
@@ -42,12 +41,9 @@ from oozie_service import oozie_service
 from oozie_server_upgrade import OozieUpgrade
 
 from check_oozie_server_status import check_oozie_server_status
-
+from resource_management.core.resources.zkmigrator import ZkMigrator
 
 class OozieServer(Script):
-
-  def get_component_name(self):
-    return "oozie-server"
 
   def install(self, env):
     self.install_packages(env)
@@ -57,11 +53,7 @@ class OozieServer(Script):
 
     # The configure command doesn't actually receive the upgrade_type from Script.py, so get it from the config dictionary
     if upgrade_type is None:
-      restart_type = default("/commandParams/restart_type", "")
-      if restart_type.lower() == "rolling_upgrade":
-        upgrade_type = UPGRADE_TYPE_ROLLING
-      elif restart_type.lower() == "nonrolling_upgrade":
-        upgrade_type = UPGRADE_TYPE_NON_ROLLING
+      upgrade_type = Script.get_upgrade_type(default("/commandParams/upgrade_type", ""))
 
     if upgrade_type is not None and params.upgrade_direction == Direction.UPGRADE and params.version is not None:
       Logger.info(format("Configuring Oozie during upgrade type: {upgrade_type}, direction: {params.upgrade_direction}, and version {params.version}"))
@@ -71,12 +63,8 @@ class OozieServer(Script):
         # This is required as both need to be pointing to new installed oozie version.
 
         # Sets the symlink : eg: <stack-root>/current/oozie-client -> <stack-root>/a.b.c.d-<version>/oozie
-        stack_select.select("oozie-client", params.version)
         # Sets the symlink : eg: <stack-root>/current/oozie-server -> <stack-root>/a.b.c.d-<version>/oozie
-        stack_select.select("oozie-server", params.version)
-
-      if params.version and check_stack_feature(StackFeature.CONFIG_VERSIONING, params.version):
-        conf_select.select(params.stack_name, "oozie", params.version)
+        stack_select.select_packages(params.version)
 
     env.set_params(params)
     oozie(is_server=True)
@@ -109,69 +97,6 @@ class OozieServer(Script):
 @OsFamilyImpl(os_family=OsFamilyImpl.DEFAULT)
 class OozieServerDefault(OozieServer):
 
-  def security_status(self, env):
-    import status_params
-    env.set_params(status_params)
-
-    if status_params.security_enabled:
-      expectations = {
-        "oozie-site":
-          build_expectations('oozie-site',
-                             {
-                               "oozie.authentication.type": "kerberos",
-                               "oozie.service.AuthorizationService.security.enabled": "true",
-                               "oozie.service.HadoopAccessorService.kerberos.enabled": "true"
-                             },
-                             [
-                               "local.realm",
-                               "oozie.authentication.kerberos.principal",
-                               "oozie.authentication.kerberos.keytab",
-                               "oozie.service.HadoopAccessorService.kerberos.principal",
-                               "oozie.service.HadoopAccessorService.keytab.file"
-                             ],
-                             None)
-      }
-
-      security_params = get_params_from_filesystem(status_params.conf_dir,
-                                                   {'oozie-site.xml': FILE_TYPE_XML})
-      result_issues = validate_security_config_properties(security_params, expectations)
-      if not result_issues: # If all validations passed successfully
-        try:
-          # Double check the dict before calling execute
-          if ('oozie-site' not in security_params
-              or 'oozie.authentication.kerberos.principal' not in security_params['oozie-site']
-              or 'oozie.authentication.kerberos.keytab' not in security_params['oozie-site']
-              or 'oozie.service.HadoopAccessorService.kerberos.principal' not in security_params['oozie-site']
-              or 'oozie.service.HadoopAccessorService.keytab.file' not in security_params['oozie-site']):
-            self.put_structured_out({"securityState": "UNSECURED"})
-            self.put_structured_out({"securityIssuesFound": "Keytab file or principal are not set property."})
-            return
-
-          cached_kinit_executor(status_params.kinit_path_local,
-                                status_params.oozie_user,
-                                security_params['oozie-site']['oozie.authentication.kerberos.keytab'],
-                                security_params['oozie-site']['oozie.authentication.kerberos.principal'],
-                                status_params.hostname,
-                                status_params.tmp_dir)
-          cached_kinit_executor(status_params.kinit_path_local,
-                                status_params.oozie_user,
-                                security_params['oozie-site']['oozie.service.HadoopAccessorService.keytab.file'],
-                                security_params['oozie-site']['oozie.service.HadoopAccessorService.kerberos.principal'],
-                                status_params.hostname,
-                                status_params.tmp_dir)
-          self.put_structured_out({"securityState": "SECURED_KERBEROS"})
-        except Exception as e:
-          self.put_structured_out({"securityState": "ERROR"})
-          self.put_structured_out({"securityStateErrorInfo": str(e)})
-      else:
-        issues = []
-        for cf in result_issues:
-          issues.append("Configuration file %s did not pass the validation. Reason: %s" % (cf, result_issues[cf]))
-        self.put_structured_out({"securityIssuesFound": ". ".join(issues)})
-        self.put_structured_out({"securityState": "UNSECURED"})
-    else:
-      self.put_structured_out({"securityState": "UNSECURED"})
-
   def pre_upgrade_restart(self, env, upgrade_type=None):
     """
     Performs the tasks that should be done before an upgrade of oozie. This includes:
@@ -192,15 +117,22 @@ class OozieServerDefault(OozieServer):
 
     Logger.info("Executing Oozie Server Stack Upgrade pre-restart")
 
-    OozieUpgrade.backup_configuration()
-
     if params.version and check_stack_feature(StackFeature.ROLLING_UPGRADE, params.version):
-      conf_select.select(params.stack_name, "oozie", params.version)
-      stack_select.select("oozie-server", params.version)
+      stack_select.select_packages(params.version)
 
-    OozieUpgrade.restore_configuration()
     OozieUpgrade.prepare_libext_directory()
-    
+
+  def disable_security(self, env):
+    import params
+    if not params.stack_supports_zk_security:
+      Logger.info("Stack doesn't support zookeeper security")
+      return
+    if not params.zk_connection_string:
+      Logger.info("No zookeeper connection string. Skipping reverting ACL")
+      return
+    zkmigrator = ZkMigrator(params.zk_connection_string, params.java_exec, params.java64_home, params.jaas_file, params.oozie_user)
+    zkmigrator.set_acls(params.zk_namespace if params.zk_namespace.startswith('/') else '/' + params.zk_namespace, 'world:anyone:crdwa')
+
   def get_log_folder(self):
     import params
     return params.oozie_log_dir
@@ -208,6 +140,10 @@ class OozieServerDefault(OozieServer):
   def get_user(self):
     import params
     return params.oozie_user
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.pid_file]
 
 
 @OsFamilyImpl(os_family=OSConst.WINSRV_FAMILY)

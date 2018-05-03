@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,11 +18,11 @@
 
 package org.apache.ambari.server.topology;
 
-import org.apache.ambari.server.controller.RequestStatusResponse;
-import org.apache.ambari.server.controller.internal.ProvisionAction;
-
 import java.util.Collection;
 import java.util.Map;
+
+import org.apache.ambari.server.controller.RequestStatusResponse;
+import org.apache.ambari.server.controller.internal.ProvisionAction;
 
 /**
  * Represents a full cluster topology including all instance information as well as the associated
@@ -142,9 +142,10 @@ public interface ClusterTopology {
    * Install the specified host.
    *
    * @param hostName  host name
+   * @param skipInstallTaskCreate
    * @return install response
    */
-  RequestStatusResponse installHost(String hostName);
+  RequestStatusResponse installHost(String hostName, boolean skipInstallTaskCreate, boolean skipFailure);
 
   /**
    * Start the specified host.
@@ -152,7 +153,7 @@ public interface ClusterTopology {
    * @param hostName  host name
    * @return start response
    */
-  RequestStatusResponse startHost(String hostName);
+  RequestStatusResponse startHost(String hostName, boolean skipFailure);
 
   void setConfigRecommendationStrategy(ConfigRecommendationStrategy strategy);
 
@@ -177,4 +178,10 @@ public interface ClusterTopology {
    */
   void removeHost(String hostname);
 
+  String getDefaultPassword();
+
+  /**
+   * @return true if the given component belongs to a service that has serviceType=HCFS
+   */
+  boolean isComponentHadoopCompatible(String component);
 }

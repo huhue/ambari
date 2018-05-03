@@ -31,13 +31,16 @@ ExitHelper().register(_shutdown_all)
 
 
 class ThreadPool(object):
-    def __init__(self, core_threads=0, max_threads=20, keepalive=1):
+    def __init__(self, core_threads=0, max_threads=20, keepalive=1, context_injector=None, agent_config=None):
         """
         :param core_threads: maximum number of persistent threads in the pool
         :param max_threads: maximum number of total threads in the pool
         :param thread_class: callable that creates a Thread object
         :param keepalive: seconds to keep non-core worker threads waiting
             for new tasks
+
+        :type context_injector func
+        :type agent_config AmbariConfig.AmbariConfig
         """
         self.core_threads = core_threads
         self.max_threads = max(max_threads, core_threads, 1)
@@ -46,6 +49,9 @@ class ThreadPool(object):
         self._threads_lock = Lock()
         self._threads = set()
         self._shutdown = False
+
+        self._job_context_injector = context_injector
+        self._agent_config = agent_config
 
         _threadpools.add(ref(self))
         logger.info('Started thread pool with %d core threads and %s maximum '
@@ -73,6 +79,9 @@ class ThreadPool(object):
             block = self.keepalive > 0
             timeout = self.keepalive
 
+        if self._job_context_injector is not None:
+            self._job_context_injector(self._agent_config)
+
         while True:
             try:
                 func, args, kwargs = self._queue.get(block, timeout)
@@ -83,6 +92,7 @@ class ThreadPool(object):
                 break
 
             try:
+                logger.debug('Worker thread starting job %s', args[0])
                 func(*args, **kwargs)
             except:
                 logger.exception('Error in worker thread')
@@ -108,7 +118,7 @@ class ThreadPool(object):
         if self._shutdown:
             return
 
-        logging.info('Shutting down thread pool')
+        logger.info('Shutting down thread pool')
         self._shutdown = True
         _threadpools.remove(ref(self))
 

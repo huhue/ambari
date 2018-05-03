@@ -43,6 +43,8 @@ class RangeradminV2:
   sInstance = None
 
   def __init__(self, url='http://localhost:6080', skip_if_rangeradmin_down = True):
+    if url.endswith('/'):
+      url = url.rstrip('/')
     self.base_url = url
     self.url_login = self.base_url + '/login.jsp'
     self.url_login_post = self.base_url + '/j_spring_security_check'
@@ -98,9 +100,9 @@ class RangeradminV2:
 
   def create_ranger_repository(self, component, repo_name, repo_properties,
                                ambari_ranger_admin, ambari_ranger_password,
-                               admin_uname, admin_password, policy_user, is_security_enabled = False, component_user = None,
-                               component_user_principal = None, component_user_keytab = None):
-    if not is_security_enabled :
+                               admin_uname, admin_password, policy_user, is_security_enabled = False, is_stack_supports_ranger_kerberos = False,
+                               component_user = None, component_user_principal = None, component_user_keytab = None):
+    if not is_stack_supports_ranger_kerberos or not is_security_enabled:
       response_code = self.check_ranger_login_urllib2(self.base_url)
       repo_data = json.dumps(repo_properties)
       ambari_ranger_password = unicode(ambari_ranger_password)
@@ -134,8 +136,8 @@ class RangeradminV2:
           Logger.error('Ambari admin user creation failed')
       elif not self.skip_if_rangeradmin_down:
         Logger.error("Connection failed to Ranger Admin !")
-    else:
-      response = self.check_ranger_login_curl(component_user,component_user_keytab,component_user_principal,self.base_url,True)
+    elif is_stack_supports_ranger_kerberos and is_security_enabled:
+      response = self.check_ranger_login_curl(component_user,component_user_keytab,component_user_principal,self.url_login,True)
 
       if response and response[0] == 200:
         retryCount = 0
@@ -320,7 +322,7 @@ class RangeradminV2:
     error_msg = ''
     time_millis = 0
     try:
-      response,error_msg,time_millis = self.call_curl_request(component_user,component_user_keytab,component_user_principal,self.base_url,True)
+      response,error_msg,time_millis = self.call_curl_request(component_user,component_user_keytab,component_user_principal,base_url,True)
     except Fail,fail:
       raise Fail(fail.args)
 
@@ -329,7 +331,7 @@ class RangeradminV2:
 
 
   @safe_retry(times=5, sleep_time=8, backoff_factor=1.5, err_class=Fail, return_on_fail=None)
-  def get_repository_by_name_curl(self, component_user,component_user_keytab,component_user_principal,name, component, status):
+  def get_repository_by_name_curl(self, component_user, component_user_keytab, component_user_principal, name, component, status, is_keyadmin = False):
     """
     :param component_user: service user for which call is to be made
     :param component_user_keytab: keytab of service user
@@ -342,6 +344,8 @@ class RangeradminV2:
     """
     try:
       search_repo_url = self.url_repos_pub + "?serviceName=" + name + "&serviceType=" + component + "&isEnabled=" + status
+      if is_keyadmin:
+        search_repo_url = '{0}&suser=keyadmin'.format(search_repo_url)
       response,error_message,time_in_millis = self.call_curl_request(component_user,component_user_keytab,component_user_principal,search_repo_url,False,request_method='GET')
       response_stripped = response[1:len(response) - 1]
       if response_stripped and len(response_stripped) > 0:
@@ -352,13 +356,13 @@ class RangeradminV2:
           return None
       else:
         return None
-    except Fail, fail:
-      raise Fail(str(fail))
+    except Exception, err:
+      raise Fail('Error in call for getting Ranger service:\n {0}'.format(err))
 
 
 
   @safe_retry(times=5, sleep_time=8, backoff_factor=1.5, err_class=Fail, return_on_fail=None)
-  def create_repository_curl(self,component_user,component_user_keytab,component_user_principal,name, data,policy_user):
+  def create_repository_curl(self, component_user, component_user_keytab, component_user_principal, name, data, policy_user, is_keyadmin = False):
     """
     :param component_user: service user for which call is to be made
     :param component_user_keytab: keytab of service user
@@ -369,6 +373,8 @@ class RangeradminV2:
     """
     try:
       search_repo_url = self.url_repos_pub
+      if is_keyadmin:
+        search_repo_url = '{0}?suser=keyadmin'.format(search_repo_url)
       header = 'Content-Type: application/json'
       method = 'POST'
 
@@ -378,13 +384,14 @@ class RangeradminV2:
         if 'name' in response_json and response_json['name'].lower() == name.lower():
           Logger.info('Repository created Successfully')
           return response_json
-        elif 'exists'.lower() in response_json.lower():
+        elif 'exists' in response.lower():
           Logger.info('Repository {name} already exists'.format(name=name))
+          return response_json
         else:
           Logger.info('Repository creation failed')
           return None
       else:
         Logger.info('Repository creation failed')
         return None
-    except Fail, fail:
-      raise Fail(str(fail))
+    except Exception, err:
+      raise Fail('Error in call for creating Ranger service:\n {0}'.format(err))

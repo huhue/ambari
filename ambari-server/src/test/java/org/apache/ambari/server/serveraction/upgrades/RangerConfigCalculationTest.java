@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,13 +18,17 @@
 package org.apache.ambari.server.serveraction.upgrades;
 
 import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.createMock;
+import static org.easymock.EasyMock.eq;
 import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.expectLastCall;
 import static org.easymock.EasyMock.replay;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.lang.reflect.Field;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -32,10 +36,10 @@ import org.apache.ambari.server.actionmanager.ExecutionCommandWrapper;
 import org.apache.ambari.server.actionmanager.HostRoleCommand;
 import org.apache.ambari.server.agent.CommandReport;
 import org.apache.ambari.server.agent.ExecutionCommand;
+import org.apache.ambari.server.agent.stomp.AgentConfigsHolder;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.Config;
-import org.apache.ambari.server.state.ConfigImpl;
 import org.easymock.EasyMock;
 import org.junit.Before;
 import org.junit.Test;
@@ -49,80 +53,63 @@ public class RangerConfigCalculationTest {
 
   private Injector m_injector;
   private Clusters m_clusters;
+  private AgentConfigsHolder agentConfigsHolder;
   private Field m_clusterField;
+  private Field agentConfigsHolderField;
 
   @Before
   public void setup() throws Exception {
     m_injector = EasyMock.createMock(Injector.class);
     m_clusters = EasyMock.createMock(Clusters.class);
+    agentConfigsHolder = createMock(AgentConfigsHolder.class);
     Cluster cluster = EasyMock.createMock(Cluster.class);
 
-    Config adminConfig = new ConfigImpl("admin-properties") {
-      Map<String, String> mockProperties = new HashMap<String, String>() {{
-        put("DB_FLAVOR", "MYSQL");
-        put("db_host", "host1");
-        put("db_name", "ranger");
-        put("audit_db_name", "ranger_audit");
-      }};
-      @Override
-      public Map<String, String> getProperties() {
-        return mockProperties;
-      }
-    };
+    Map<String, String> mockProperties = new HashMap<String, String>() {{
+      put("DB_FLAVOR", "MYSQL");
+      put("db_host", "host1");
+      put("db_name", "ranger");
+      put("audit_db_name", "ranger_audit");
+    }};
 
-    Config adminSiteConfig = new ConfigImpl("admin-properties") {
-      Map<String, String> mockProperties = new HashMap<String, String>();
-      @Override
-      public Map<String, String> getProperties() {
-        return mockProperties;
-      }
+    Config adminConfig = EasyMock.createNiceMock(Config.class);
+    expect(adminConfig.getType()).andReturn("admin-properties").anyTimes();
+    expect(adminConfig.getProperties()).andReturn(mockProperties).anyTimes();
 
-      @Override
-      public void setProperties(Map<String, String> properties) {
-        mockProperties.putAll(properties);
-      }
+    mockProperties = new HashMap<>();
 
-      @Override
-      public void persist(boolean newConfig) {
-        // no-op
-      }
-    };
+    Config adminSiteConfig = EasyMock.createNiceMock(Config.class);
+    expect(adminSiteConfig.getType()).andReturn("admin-properties").anyTimes();
+    expect(adminSiteConfig.getProperties()).andReturn(mockProperties).anyTimes();
 
-    Config rangerEnv = new ConfigImpl("ranger-env") {
-      Map<String, String> mockProperties = new HashMap<String, String>();
-      @Override
-      public Map<String, String> getProperties() {
-        return mockProperties;
-      }
+    Config rangerEnv = EasyMock.createNiceMock(Config.class);
+    expect(rangerEnv.getType()).andReturn("ranger-env").anyTimes();
+    expect(rangerEnv.getProperties()).andReturn(mockProperties).anyTimes();
 
-      @Override
-      public void setProperties(Map<String, String> properties) {
-        mockProperties.putAll(properties);
-      }
-
-      @Override
-      public void persist(boolean newConfig) {
-        // no-op
-      }
-    };
 
     expect(cluster.getDesiredConfigByType("admin-properties")).andReturn(adminConfig).atLeastOnce();
     expect(cluster.getDesiredConfigByType("ranger-admin-site")).andReturn(adminSiteConfig).atLeastOnce();
     expect(cluster.getDesiredConfigByType("ranger-env")).andReturn(rangerEnv).atLeastOnce();
 
     expect(m_clusters.getCluster((String) anyObject())).andReturn(cluster).anyTimes();
+    expect(cluster.getClusterId()).andReturn(1L).atLeastOnce();
+    expect(cluster.getHosts()).andReturn(Collections.emptyList()).atLeastOnce();
+    agentConfigsHolder.updateData(eq(1L), eq(Collections.emptyList()));
+    expectLastCall().atLeastOnce();
+
     expect(m_injector.getInstance(Clusters.class)).andReturn(m_clusters).atLeastOnce();
 
-    replay(m_injector, m_clusters, cluster);
+    replay(m_injector, m_clusters, cluster, adminConfig, adminSiteConfig, rangerEnv, agentConfigsHolder);
 
-    m_clusterField = RangerConfigCalculation.class.getDeclaredField("m_clusters");
+    m_clusterField = AbstractUpgradeServerAction.class.getDeclaredField("m_clusters");
     m_clusterField.setAccessible(true);
+    agentConfigsHolderField = AbstractUpgradeServerAction.class.getDeclaredField("agentConfigsHolder");
+    agentConfigsHolderField.setAccessible(true);
   }
 
   @Test
   public void testAction() throws Exception {
 
-    Map<String, String> commandParams = new HashMap<String, String>();
+    Map<String, String> commandParams = new HashMap<>();
     commandParams.put("clusterName", "c1");
 
     ExecutionCommand executionCommand = new ExecutionCommand();
@@ -137,6 +124,7 @@ public class RangerConfigCalculationTest {
 
     RangerConfigCalculation action = new RangerConfigCalculation();
     m_clusterField.set(action, m_clusters);
+    agentConfigsHolderField.set(action, agentConfigsHolder);
 
     action.setExecutionCommand(executionCommand);
     action.setHostRoleCommand(hrc);

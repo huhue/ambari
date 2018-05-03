@@ -31,6 +31,7 @@ from resource_management.libraries.resources.modify_properties_file import Modif
 from resource_management.core.source import DownloadSource, InlineTemplate
 from resource_management.core.exceptions import Fail
 from resource_management.core.logger import Logger
+from resource_management.libraries.functions.is_empty import is_empty
 from resource_management.libraries.functions.format import format
 from resource_management.libraries.functions.ranger_functions import Rangeradmin
 from resource_management.libraries.functions.ranger_functions_v2 import RangeradminV2
@@ -56,14 +57,13 @@ def setup_kms_db(stack_version=None):
   if params.has_ranger_admin:
 
     kms_home = params.kms_home
-    version = params.version
+
     if stack_version is not None:
       kms_home = format("{stack_root}/{stack_version}/ranger-kms")
-      version = stack_version
 
     password_validation(params.kms_master_key_password, 'KMS master key')
 
-    copy_jdbc_connector(stack_version=version)
+    copy_jdbc_connector(kms_home)
 
     env_dict = {'RANGER_KMS_HOME':kms_home, 'JAVA_HOME': params.java_home}
     if params.db_flavor.lower() == 'sqla':
@@ -139,11 +139,20 @@ def kms(upgrade_type=None):
       create_parents = True
     )
 
-    if upgrade_type is not None:
-      copy_jdbc_connector(stack_version=params.version)
+    Directory("/etc/security/serverKeys",
+      create_parents = True,
+      cd_access = "a"
+    )
+
+    Directory("/etc/ranger/kms",
+      create_parents = True,
+      cd_access = "a"
+    )
+
+    copy_jdbc_connector(params.kms_home)
 
     File(format("/usr/lib/ambari-agent/{check_db_connection_jar_name}"),
-      content = DownloadSource(format("{jdk_location}{check_db_connection_jar_name}")),
+      content = DownloadSource(format("{jdk_location}/{check_db_connection_jar_name}")),
       mode = 0644,
     )
 
@@ -151,7 +160,17 @@ def kms(upgrade_type=None):
     if params.db_flavor.lower() == 'sqla':
       cp = cp + os.pathsep + format("{kms_home}/ews/webapp/lib/sajdbc4.jar")
     else:
-      cp = cp + os.pathsep + format("{kms_home}/ews/webapp/lib/{jdbc_jar_name}")
+      path_to_jdbc = format("{kms_home}/ews/webapp/lib/{jdbc_jar_name}")
+      if not os.path.isfile(path_to_jdbc):
+        path_to_jdbc = format("{kms_home}/ews/webapp/lib/") + \
+                       params.default_connectors_map[params.db_flavor.lower()] if params.db_flavor.lower() in params.default_connectors_map else None
+        if not os.path.isfile(path_to_jdbc):
+          path_to_jdbc = format("{kms_home}/ews/webapp/lib/") + "*"
+          error_message = "Error! Sorry, but we can't find jdbc driver with default name " + params.default_connectors_map[params.db_flavor] + \
+                " in ranger kms lib dir. So, db connection check can fail. Please run 'ambari-server setup --jdbc-db={db_name} --jdbc-driver={path_to_jdbc} on server host.'"
+          Logger.error(error_message)
+
+      cp = cp + os.pathsep + path_to_jdbc
 
     db_connection_check_command = format(
       "{java_home}/bin/java -cp {cp} org.apache.ambari.server.DBConnectionVerification '{ranger_kms_jdbc_connection_url}' {db_user} {db_password!p} {ranger_kms_jdbc_driver}")
@@ -162,7 +181,10 @@ def kms(upgrade_type=None):
 
     Execute(db_connection_check_command, path='/usr/sbin:/sbin:/usr/local/bin:/bin:/usr/bin', tries=5, try_sleep=10, environment=env_dict)
 
-    if params.xa_audit_db_is_enabled:
+    if params.xa_audit_db_is_enabled and params.driver_source is not None and not params.driver_source.endswith("/None"):
+      if params.xa_previous_jdbc_jar and os.path.isfile(params.xa_previous_jdbc_jar):
+        File(params.xa_previous_jdbc_jar, action='delete')
+
       File(params.downloaded_connector_path,
         content = DownloadSource(params.driver_source),
         mode = 0644
@@ -194,6 +216,22 @@ def kms(upgrade_type=None):
               group = params.kms_group,
               recursive_ownership = True,
     )
+
+    Directory(params.ranger_kms_pid_dir,
+      mode=0755,
+      owner = params.kms_user,
+      group = params.user_group,
+      cd_access = "a",
+      create_parents=True
+    )
+
+    if params.stack_supports_pid:
+      File(format('{kms_conf_dir}/ranger-kms-env-piddir.sh'),
+        content = format("export RANGER_KMS_PID_DIR_PATH={ranger_kms_pid_dir}\nexport KMS_USER={kms_user}"),
+        owner = params.kms_user,
+        group = params.kms_group,
+        mode=0755
+      )
 
     Directory(params.kms_log_dir,
       owner = params.kms_user,
@@ -241,20 +279,38 @@ def kms(upgrade_type=None):
     do_keystore_setup(params.credential_provider_path, params.masterkey_alias, params.kms_master_key_password)
     if params.stack_support_kms_hsm and params.enable_kms_hsm:
       do_keystore_setup(params.credential_provider_path, params.hms_partition_alias, unicode(params.hms_partition_passwd))
+    if params.stack_supports_ranger_kms_ssl and params.ranger_kms_ssl_enabled:
+      do_keystore_setup(params.ranger_kms_cred_ssl_path, params.ranger_kms_ssl_keystore_alias, params.ranger_kms_ssl_passwd)
+
+    # remove plain-text password from xml configs
+    dbks_site_copy = {}
+    dbks_site_copy.update(params.config['configurations']['dbks-site'])
+
+    for prop in params.dbks_site_password_properties:
+      if prop in dbks_site_copy:
+        dbks_site_copy[prop] = "_"
 
     XmlConfig("dbks-site.xml",
       conf_dir=params.kms_conf_dir,
-      configurations=params.config['configurations']['dbks-site'],
-      configuration_attributes=params.config['configuration_attributes']['dbks-site'],
+      configurations=dbks_site_copy,
+      configuration_attributes=params.config['configurationAttributes']['dbks-site'],
       owner=params.kms_user,
       group=params.kms_group,
       mode=0644
     )
 
+    ranger_kms_site_copy = {}
+    ranger_kms_site_copy.update(params.config['configurations']['ranger-kms-site'])
+    if params.stack_supports_ranger_kms_ssl:
+      # remove plain-text password from xml configs
+      for prop in params.ranger_kms_site_password_properties:
+        if prop in ranger_kms_site_copy:
+          ranger_kms_site_copy[prop] = "_"
+
     XmlConfig("ranger-kms-site.xml",
       conf_dir=params.kms_conf_dir,
-      configurations=params.config['configurations']['ranger-kms-site'],
-      configuration_attributes=params.config['configuration_attributes']['ranger-kms-site'],
+      configurations=ranger_kms_site_copy,
+      configuration_attributes=params.config['configurationAttributes']['ranger-kms-site'],
       owner=params.kms_user,
       group=params.kms_group,
       mode=0644
@@ -263,7 +319,7 @@ def kms(upgrade_type=None):
     XmlConfig("kms-site.xml",
       conf_dir=params.kms_conf_dir,
       configurations=params.config['configurations']['kms-site'],
-      configuration_attributes=params.config['configuration_attributes']['kms-site'],
+      configuration_attributes=params.config['configurationAttributes']['kms-site'],
       owner=params.kms_user,
       group=params.kms_group,
       mode=0644
@@ -272,7 +328,7 @@ def kms(upgrade_type=None):
     File(os.path.join(params.kms_conf_dir, "kms-log4j.properties"),
       owner=params.kms_user,
       group=params.kms_group,
-      content=params.kms_log4j,
+      content=InlineTemplate(params.kms_log4j),
       mode=0644
     )
     if params.security_enabled:
@@ -280,18 +336,27 @@ def kms(upgrade_type=None):
       XmlConfig("core-site.xml",
         conf_dir=params.kms_conf_dir,
         configurations=params.config['configurations']['core-site'],
-        configuration_attributes=params.config['configuration_attributes']['core-site'],
+        configuration_attributes=params.config['configurationAttributes']['core-site'],
         owner=params.kms_user,
         group=params.kms_group,
         mode=0644
       )
+    else:
+      File(format('{kms_conf_dir}/core-site.xml'), action="delete")
 
-def copy_jdbc_connector(stack_version=None):
+def copy_jdbc_connector(kms_home):
   import params
 
-  kms_home = params.kms_home
-  if stack_version is not None:
-    kms_home = format("{stack_root}/{stack_version}/ranger-kms")
+  if params.jdbc_jar_name is None and params.driver_curl_source.endswith("/None"):
+    error_message = "Error! Sorry, but we can't find jdbc driver related to {0} database to download from {1}. \
+    Please run 'ambari-server setup --jdbc-db={db_name} --jdbc-driver={path_to_jdbc} on server host.'".format(params.db_flavor, params.jdk_location)
+    Logger.error(error_message)
+
+  if params.driver_curl_source and not params.driver_curl_source.endswith("/None"):
+    if params.previous_jdbc_jar and os.path.isfile(params.previous_jdbc_jar):
+      File(params.previous_jdbc_jar, action='delete')
+
+  driver_curl_target = format("{kms_home}/ews/webapp/lib/{jdbc_jar_name}")
 
   File(params.downloaded_custom_connector,
     content = DownloadSource(params.driver_curl_source),
@@ -346,21 +411,26 @@ def enable_kms_plugin():
 
   if params.has_ranger_admin:
 
+    ranger_flag = False
+
     if params.stack_supports_ranger_kerberos and params.security_enabled:
-      ranger_flag = check_ranger_service_support_kerberos()
+      if not is_empty(params.rangerkms_principal) and params.rangerkms_principal != '':
+        ranger_flag = check_ranger_service_support_kerberos(params.kms_user, params.rangerkms_keytab, params.rangerkms_principal)
+      else:
+        ranger_flag = check_ranger_service_support_kerberos(params.kms_user, params.spengo_keytab, params.spnego_principal)
     else:
       ranger_flag = check_ranger_service()
 
     if not ranger_flag:
       Logger.error('Error in Get/Create service for Ranger Kms.')
 
-    current_datetime = datetime.now()
+    current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     File(format('{kms_conf_dir}/ranger-security.xml'),
       owner = params.kms_user,
       group = params.kms_group,
       mode = 0644,
-      content = InlineTemplate(format('<ranger>\n<enabled>{current_datetime}</enabled>\n</ranger>'))
+      content = format('<ranger>\n<enabled>{current_datetime}</enabled>\n</ranger>')
     )
 
     Directory([os.path.join('/etc', 'ranger', params.repo_name), os.path.join('/etc', 'ranger', params.repo_name, 'policycache')],
@@ -376,10 +446,17 @@ def enable_kms_plugin():
       mode = 0644        
     )
 
+    # remove plain-text password from xml configs
+    plugin_audit_properties_copy = {}
+    plugin_audit_properties_copy.update(params.config['configurations']['ranger-kms-audit'])
+
+    if params.plugin_audit_password_property in plugin_audit_properties_copy:
+      plugin_audit_properties_copy[params.plugin_audit_password_property] = "crypted"
+
     XmlConfig("ranger-kms-audit.xml",
       conf_dir=params.kms_conf_dir,
-      configurations=params.config['configurations']['ranger-kms-audit'],
-      configuration_attributes=params.config['configuration_attributes']['ranger-kms-audit'],
+      configurations=plugin_audit_properties_copy,
+      configuration_attributes=params.config['configurationAttributes']['ranger-kms-audit'],
       owner=params.kms_user,
       group=params.kms_group,
       mode=0744)
@@ -387,15 +464,23 @@ def enable_kms_plugin():
     XmlConfig("ranger-kms-security.xml",
       conf_dir=params.kms_conf_dir,
       configurations=params.config['configurations']['ranger-kms-security'],
-      configuration_attributes=params.config['configuration_attributes']['ranger-kms-security'],
+      configuration_attributes=params.config['configurationAttributes']['ranger-kms-security'],
       owner=params.kms_user,
       group=params.kms_group,
       mode=0744)
 
+    # remove plain-text password from xml configs
+    ranger_kms_policymgr_ssl_copy = {}
+    ranger_kms_policymgr_ssl_copy.update(params.config['configurations']['ranger-kms-policymgr-ssl'])
+
+    for prop in params.kms_plugin_password_properties:
+      if prop in ranger_kms_policymgr_ssl_copy:
+        ranger_kms_policymgr_ssl_copy[prop] = "crypted"
+
     XmlConfig("ranger-policymgr-ssl.xml",
       conf_dir=params.kms_conf_dir,
-      configurations=params.config['configurations']['ranger-kms-policymgr-ssl'],
-      configuration_attributes=params.config['configuration_attributes']['ranger-kms-policymgr-ssl'],
+      configurations=ranger_kms_policymgr_ssl_copy,
+      configuration_attributes=params.config['configurationAttributes']['ranger-kms-policymgr-ssl'],
       owner=params.kms_user,
       group=params.kms_group,
       mode=0744)
@@ -415,6 +500,39 @@ def enable_kms_plugin():
       group = params.kms_group,
       mode = 0640
       )
+
+    # create ranger kms audit directory
+    if params.xa_audit_hdfs_is_enabled and params.has_namenode and params.has_hdfs_client_on_node:
+      params.HdfsResource("/ranger/audit",
+                        type="directory",
+                        action="create_on_execute",
+                        owner=params.hdfs_user,
+                        group=params.hdfs_user,
+                        mode=0755,
+                        recursive_chmod=True
+      )
+      params.HdfsResource("/ranger/audit/kms",
+                        type="directory",
+                        action="create_on_execute",
+                        owner=params.kms_user,
+                        group=params.kms_group,
+                        mode=0750,
+                        recursive_chmod=True
+      )
+      params.HdfsResource(None, action="execute")
+
+    if params.xa_audit_hdfs_is_enabled and len(params.namenode_host) > 1:
+      Logger.info('Audit to Hdfs enabled in NameNode HA environment, creating hdfs-site.xml')
+      XmlConfig("hdfs-site.xml",
+        conf_dir=params.kms_conf_dir,
+        configurations=params.config['configurations']['hdfs-site'],
+        configuration_attributes=params.config['configurationAttributes']['hdfs-site'],
+        owner=params.kms_user,
+        group=params.kms_group,
+        mode=0644
+      )
+    else:
+      File(format('{kms_conf_dir}/hdfs-site.xml'), action="delete")
 
 def setup_kms_jce():
   import params
@@ -449,16 +567,19 @@ def setup_kms_jce():
 def check_ranger_service():
   import params
 
-  ranger_adm_obj = Rangeradmin(url=params.policymgr_mgr_url)
+  policymgr_mgr_url = params.policymgr_mgr_url
+  if policymgr_mgr_url.endswith('/'):
+    policymgr_mgr_url = policymgr_mgr_url.rstrip('/')
+  ranger_adm_obj = Rangeradmin(url=policymgr_mgr_url)
   ambari_username_password_for_ranger = format("{ambari_ranger_admin}:{ambari_ranger_password}")
-  response_code = ranger_adm_obj.check_ranger_login_urllib2(params.policymgr_mgr_url)
+  response_code = ranger_adm_obj.check_ranger_login_urllib2(policymgr_mgr_url)
 
   if response_code is not None and response_code == 200:
     user_resp_code = ranger_adm_obj.create_ambari_admin_user(params.ambari_ranger_admin, params.ambari_ranger_password, params.admin_uname_password)
     if user_resp_code is not None and user_resp_code == 200:
-      get_repo_flag = get_repo(params.policymgr_mgr_url, params.repo_name, ambari_username_password_for_ranger)
+      get_repo_flag = get_repo(policymgr_mgr_url, params.repo_name, ambari_username_password_for_ranger)
       if not get_repo_flag:
-        return create_repo(params.policymgr_mgr_url, json.dumps(params.kms_ranger_plugin_repo), ambari_username_password_for_ranger)
+        return create_repo(policymgr_mgr_url, json.dumps(params.kms_ranger_plugin_repo), ambari_username_password_for_ranger)
       else:
         return True
     else:
@@ -526,19 +647,22 @@ def get_repo(url, name, usernamepassword):
   except socket.timeout as e:
     raise Fail("Error creating service. Reason - {0}".format(e))
 
-def check_ranger_service_support_kerberos():
+def check_ranger_service_support_kerberos(user, keytab, principal):
   import params
 
-  ranger_adm_obj = RangeradminV2(url=params.policymgr_mgr_url)
-  response_code = ranger_adm_obj.check_ranger_login_curl(params.kms_user, params.rangerkms_keytab, params.rangerkms_principal, params.policymgr_mgr_url, True)
+  policymgr_mgr_url = params.policymgr_mgr_url
+  if policymgr_mgr_url.endswith('/'):
+    policymgr_mgr_url = policymgr_mgr_url.rstrip('/')
+  ranger_adm_obj = RangeradminV2(url=policymgr_mgr_url)
+  response_code = ranger_adm_obj.check_ranger_login_curl(user, keytab, principal, policymgr_mgr_url, True)
 
   if response_code is not None and response_code[0] == 200:
-    get_repo_name_response = ranger_adm_obj.get_repository_by_name_curl(params.kms_user, params.rangerkms_keytab, params.rangerkms_principal, params.repo_name, 'kms', 'true')
+    get_repo_name_response = ranger_adm_obj.get_repository_by_name_curl(user, keytab, principal, params.repo_name, 'kms', 'true', is_keyadmin = True)
     if get_repo_name_response is not None:
       Logger.info('KMS repository {0} exist'.format(get_repo_name_response['name']))
       return True
     else:
-      create_repo_response = ranger_adm_obj.create_repository_curl(params.kms_user, params.rangerkms_keytab, params.rangerkms_principal, params.repo_name, json.dumps(params.kms_ranger_plugin_repo), None)
+      create_repo_response = ranger_adm_obj.create_repository_curl(user, keytab, principal, params.repo_name, json.dumps(params.kms_ranger_plugin_repo), None, is_keyadmin = True)
       if create_repo_response is not None and len(create_repo_response) > 0:
         return True
       else:
@@ -546,3 +670,11 @@ def check_ranger_service_support_kerberos():
   else:
     Logger.error('Ranger service is not reachable')
     return False
+
+def update_password_configs():
+  import params
+
+  ModifyPropertiesFile(format("{kms_home}/install.properties"),
+    properties = {'db_root_password': '_', 'db_password': '_', 'KMS_MASTER_KEY_PASSWD': '_', 'REPOSITORY_CONFIG_PASSWORD': '_'},
+    owner = params.kms_user,
+  )

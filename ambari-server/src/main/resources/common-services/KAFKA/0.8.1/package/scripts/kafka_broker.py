@@ -19,16 +19,15 @@ limitations under the License.
 from resource_management import Script
 from resource_management.core.logger import Logger
 from resource_management.core.resources.system import Execute, File, Directory
-from resource_management.libraries.functions import conf_select
 from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions import Direction
-from resource_management.libraries.functions.version import compare_versions, format_stack_version
+from resource_management.libraries.functions.version import format_stack_version
 from resource_management.libraries.functions.format import format
 from resource_management.libraries.functions.check_process_status import check_process_status
 from resource_management.libraries.functions import StackFeature
+from resource_management.libraries.functions import upgrade_summary
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions.show_logs import show_logs
-from resource_management.libraries.functions.default import default
 from kafka import ensure_base_directories
 
 import upgrade
@@ -36,9 +35,6 @@ from kafka import kafka
 from setup_ranger_kafka import setup_ranger_kafka
 
 class KafkaBroker(Script):
-
-  def get_component_name(self):
-    return "kafka-broker"
 
   def install(self, env):
     self.install_packages(env)
@@ -52,25 +48,24 @@ class KafkaBroker(Script):
     import params
     env.set_params(params)
 
+    # grab the current version of the component
+    pre_upgrade_version = stack_select.get_role_component_current_stack_version()
+
     if params.version and check_stack_feature(StackFeature.ROLLING_UPGRADE, params.version):
-      stack_select.select("kafka-broker", params.version)
+      stack_select.select_packages(params.version)
 
-    if params.version and check_stack_feature(StackFeature.CONFIG_VERSIONING, params.version):
-      conf_select.select(params.stack_name, "kafka", params.version)
-
-    # This is extremely important since it should only be called if crossing the HDP 2.3.4.0 boundary. 
-    if params.current_version and params.version and params.upgrade_direction:
+    # This is extremely important since it should only be called if crossing the HDP 2.3.4.0 boundary.
+    if params.version and params.upgrade_direction:
       src_version = dst_version = None
       if params.upgrade_direction == Direction.UPGRADE:
-        src_version = format_stack_version(params.current_version)
-        dst_version = format_stack_version(params.version)
+        src_version = upgrade_summary.get_source_version("KAFKA", default_version = params.version)
+        dst_version = upgrade_summary.get_target_version("KAFKA", default_version = params.version)
       else:
         # These represent the original values during the UPGRADE direction
-        src_version = format_stack_version(params.version)
-        dst_version = format_stack_version(params.downgrade_from_version)
+        src_version = upgrade_summary.get_target_version("KAFKA", default_version = params.version)
+        dst_version = upgrade_summary.get_source_version("KAFKA", default_version = params.version)
 
-      # TODO: How to handle the case of crossing stack version boundary in a stack agnostic way?
-      if compare_versions(src_version, '2.3.4.0') < 0 and compare_versions(dst_version, '2.3.4.0') >= 0:
+      if not check_stack_feature(StackFeature.KAFKA_ACL_MIGRATION_SUPPORT, src_version) and check_stack_feature(StackFeature.KAFKA_ACL_MIGRATION_SUPPORT, dst_version):
         # Calling the acl migration script requires the configs to be present.
         self.configure(env, upgrade_type=upgrade_type)
         upgrade.run_migration(env, upgrade_type)
@@ -79,6 +74,12 @@ class KafkaBroker(Script):
     import params
     env.set_params(params)
     self.configure(env, upgrade_type=upgrade_type)
+
+    if params.kerberos_security_enabled:
+      if params.version and check_stack_feature(StackFeature.KAFKA_KERBEROS, params.version):
+        kafka_kinit_cmd = format("{kinit_path_local} -kt {kafka_keytab_path} {kafka_jaas_principal};")
+        Execute(kafka_kinit_cmd, user=params.kafka_user)
+
     if params.is_supported_kafka_ranger:
       setup_ranger_kafka() #Ranger Kafka Plugin related call 
     daemon_cmd = format('source {params.conf_dir}/kafka-env.sh ; {params.kafka_bin} start')
@@ -111,6 +112,20 @@ class KafkaBroker(Script):
           action = "delete"
     )
 
+  def disable_security(self, env):
+    import params
+    if not params.zookeeper_connect:
+      Logger.info("No zookeeper connection string. Skipping reverting ACL")
+      return
+    if not params.secure_acls:
+      Logger.info("The zookeeper.set.acl is false. Skipping reverting ACL")
+      return
+    Execute(
+      "{0} --zookeeper.connect {1} --zookeeper.acl=unsecure".format(params.kafka_security_migrator, params.zookeeper_connect), \
+      user=params.kafka_user, \
+      environment={ 'JAVA_HOME': params.java64_home }, \
+      logoutput=True, \
+      tries=3)
 
   def status(self, env):
     import status_params
@@ -124,6 +139,10 @@ class KafkaBroker(Script):
   def get_user(self):
     import params
     return params.kafka_user
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.kafka_pid_file]
 
 if __name__ == "__main__":
   KafkaBroker().execute()

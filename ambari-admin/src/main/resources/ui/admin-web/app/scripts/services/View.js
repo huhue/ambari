@@ -61,32 +61,6 @@ angular.module('ambariAdminConsole')
     angular.element(this,item);
   }
 
-  ViewUrl.all = function(params) {
-    var deferred = $q.defer();
-
-    $http({
-      method: 'GET',
-      dataType: "json",
-      url: Settings.baseUrl + '/view/urls?'
-      + 'ViewUrlInfo/url_name.matches(.*'+params.searchString+'.*)'
-      + '&ViewUrlInfo/url_suffix.matches(.*'+params.suffixSearch+'.*)'
-      + '&fields=*'
-      + '&from=' + (params.currentPage-1)*params.urlsPerPage
-      + '&page_size=' + params.urlsPerPage
-      + (params.instanceType === '*' ? '' : '&ViewUrlInfo/view_instance_common_name=' + params.instanceType)
-
-    })
-        .success(function(data) {
-          deferred.resolve(new ViewUrl(data));
-        })
-        .error(function(data) {
-          deferred.reject(data);
-        });
-
-    return deferred.promise;
-  };
-
-
   ViewUrl.updateShortUrl = function(payload){
     var deferred = $q.defer();
 
@@ -176,7 +150,7 @@ angular.module('ambariAdminConsole')
     var versions = {};
     angular.forEach(item.versions, function(version) {
       versions[version.ViewVersionInfo.version] = {count: version.instances.length, status: version.ViewVersionInfo.status};
-      if(version.ViewVersionInfo.status === 'DEPLOYED'){ // if atelast one version is deployed
+      if (version.ViewVersionInfo.status === 'DEPLOYED'){ // if at least one version is deployed
         self.canCreateInstance = true;
       }
 
@@ -191,20 +165,16 @@ angular.module('ambariAdminConsole')
     self.versionsList = item.versions;
   }
 
-  View.clusterInheritedPermissionKeys = [
-    "ALL.CLUSTER.ADMINISTRATOR",
-    "ALL.CLUSTER.OPERATOR",
-    "ALL.CLUSTER.USER",
-    "ALL.SERVICE.OPERATOR",
-    "ALL.SERVICE.ADMINISTRATOR"
+  View.permissionRoles = [
+    "CLUSTER.ADMINISTRATOR",
+    "CLUSTER.OPERATOR",
+    "SERVICE.OPERATOR",
+    "SERVICE.ADMINISTRATOR",
+    "CLUSTER.USER"
   ];
 
   View.getInstance = function(viewName, version, instanceName) {
     return ViewInstance.find(viewName, version, instanceName);
-  };
-
-  View.allUrls =  function(req){
-    return ViewUrl.all(req)
   };
 
   View.getUrlInfo = function(urlName){
@@ -316,10 +286,10 @@ angular.module('ambariAdminConsole')
         description: instanceInfo.description
       };
 
-    angular.forEach(instanceInfo.properties, function(property) {
-      if(property.clusterConfig) {
+    angular.forEach(instanceInfo.properties, function (property) {
+      if (property.clusterConfig) {
         properties[property.name] = property.value
-      }else {
+      } else {
         settings[property.name] = property.value
       }
     });
@@ -327,8 +297,8 @@ angular.module('ambariAdminConsole')
     data.properties = settings;
     data.cluster_type = instanceInfo.clusterType;
 
-    if(instanceInfo.clusterName != null) {
-      data.cluster_handle = instanceInfo.clusterName;
+    if (instanceInfo.clusterId != null) {
+      data.cluster_handle = instanceInfo.clusterId;
     } else {
       angular.extend(data.properties, properties);
     }
@@ -378,12 +348,7 @@ angular.module('ambariAdminConsole')
   View.deletePrivilege = function(params) {
     return $http({
       method: 'DELETE',
-      url: Settings.baseUrl + '/views/' + params.view_name +'/versions/'+params.version+'/instances/'+params.instance_name+'/privileges',
-      params: {
-        'PrivilegeInfo/principal_type': params.principalType,
-        'PrivilegeInfo/principal_name': params.principalName,
-        'PrivilegeInfo/permission_name': params.permissionName
-      }
+      url: Settings.baseUrl + '/views/' + params.view_name +'/versions/'+params.version+'/instances/'+params.instance_name+'/privileges/'+params.id
     });
   };
 

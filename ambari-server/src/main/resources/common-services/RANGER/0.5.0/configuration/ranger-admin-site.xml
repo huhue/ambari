@@ -15,15 +15,13 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-
 <configuration supports_final="true">
-
   <property>
     <name>ranger.service.host</name>
     <value>{{ranger_host}}</value>
     <description>Host where ranger service to be installed</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.service.http.enabled</name>
     <value>true</value>
@@ -33,38 +31,38 @@
       <overridable>false</overridable>
       <type>boolean</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.service.http.port</name>
     <value>6080</value>
     <description>HTTP port</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.service.https.port</name>
     <value>6182</value>
     <description>HTTPS port (if SSL is enabled)</description>
-  </property> 
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.service.https.attrib.ssl.enabled</name>
     <value>false</value>
     <description>true/false, set to true if using SSL</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.service.https.attrib.clientAuth</name>
     <value>want</value>
     <description>Needs to be set to want for two way SSL</description>
-  </property> 
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.service.https.attrib.keystore.keyalias</name>
     <value>rangeradmin</value>
     <description>Alias for Ranger Admin key in keystore</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.service.https.attrib.keystore.pass</name>
     <value>xasecure</value>
@@ -73,14 +71,14 @@
     <value-attributes>
       <type>password</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.https.attrib.keystore.file</name>
     <value>/etc/ranger/admin/conf/ranger-admin-keystore.jks</value>
     <description>Ranger admin keystore (specify full path)</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.externalurl</name>
     <value>{{ranger_external_url}}</value>
@@ -90,8 +88,8 @@
       <visible>false</visible>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.jdbc.driver</name>
     <value>com.mysql.jdbc.Driver</value>
@@ -106,8 +104,8 @@
         <name>DB_FLAVOR</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.jdbc.url</name>
     <value>jdbc:mysql://localhost</value>
@@ -130,14 +128,14 @@
         <name>db_name</name>
       </property>
     </depends-on>
-  </property> 
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.jpa.jdbc.user</name>
     <value>{{ranger_db_user}}</value>
     <description>JDBC user</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.jdbc.password</name>
     <value>_</value>
@@ -146,20 +144,20 @@
     <value-attributes>
       <type>password</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.jdbc.credential.alias</name>
     <value>rangeradmin</value>
     <description>Alias name for storing JDBC password</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.credential.provider.path</name>
     <value>/etc/ranger/admin/rangeradmin.jceks</value>
     <description>File for credential store, provide full file path</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.audit.source.type</name>
     <value>solr</value>
@@ -174,19 +172,19 @@
         <name>xasecure.audit.destination.db</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.audit.solr.urls</name>
-    <value></value>
+    <value/>
     <description>Solr url for audit. Example: http://solr_host:6083/solr/ranger_audits</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.authentication.method</name>
     <value>UNIX</value>
     <display-name>Authentication method</display-name>
-    <description>Ranger admin Authentication - UNIX/LDAP/AD/NONE</description>
+    <description>Ranger admin Authentication - UNIX/PAM/LDAP/AD/NONE</description>
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
@@ -196,8 +194,8 @@
         <name>ranger.usersync.source.impl.class</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.url</name>
     <display-name>​LDAP URL</display-name>
@@ -206,8 +204,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
-  </property> 
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.ldap.user.dnpattern</name>
     <value>uid={0},ou=users,dc=xasecure,dc=net</value>
@@ -215,22 +213,22 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.group.searchbase</name>
     <display-name>Group Search Base</display-name>
     <value>{{ranger_ug_ldap_group_searchbase}}</value>
     <description>LDAP group searchbase, only used if Authentication method is LDAP</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.group.searchfilter</name>
     <display-name>Group Search Filter</display-name>
     <value>{{ranger_ug_ldap_group_searchfilter}}</value>
     <description>LDAP group search filter, only used if Authentication method is LDAP</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.user.searchfilter</name>
     <display-name>User Search Filter</display-name>
@@ -239,8 +237,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.group.roleattribute</name>
     <value>cn</value>
@@ -248,8 +246,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.base.dn</name>
     <value>dc=example,dc=com</value>
@@ -257,8 +255,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.bind.dn</name>
     <display-name>Bind User</display-name>
@@ -267,8 +265,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.bind.password</name>
     <display-name>​Bind User Password</display-name>
@@ -279,27 +277,27 @@
       <type>password</type>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.referral</name>
     <value>ignore</value>
-    <description>Set to follow if multiple LDAP servers are configured to return continuation references for results. Set to ignore (default) if no referrals should be followed</description>
+    <description>Set to follow if multiple LDAP servers are configured to return continuation references for results. Set to ignore (default) if no referrals should be followed. Possible values are follow|throw|ignore</description>
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.ad.domain</name>
     <display-name>Domain Name (Only for AD)</display-name>
-    <value></value>
+    <value/>
     <description>AD domain, only used if Authentication method is AD</description>
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.ad.url</name>
     <value>{{ranger_ug_ldap_url}}</value>
@@ -307,8 +305,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.ad.base.dn</name>
     <value>dc=example,dc=com</value>
@@ -316,8 +314,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.ad.bind.dn</name>
     <value>{{ranger_ug_ldap_bind_dn}}</value>
@@ -325,8 +323,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.ad.bind.password</name>
     <value>{{ranger_usersync_ldap_ldapbindpassword}}</value>
@@ -336,8 +334,8 @@
       <type>password</type>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.ad.user.searchfilter</name>
     <value>{{ranger_ug_ldap_user_searchfilter}}</value>
@@ -345,35 +343,35 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ldap.ad.referral</name>
     <value>ignore</value>
-    <description>"Set to follow if multiple LDAP servers are configured to return continuation references for results. Set to ignore (default) if no referrals should be followed"</description>
+    <description>Set to follow if multiple LDAP servers are configured to return continuation references for results. Set to ignore (default) if no referrals should be followed. Possible values are follow|throw|ignore</description>
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.audit.jdbc.driver</name>
     <value>{{ranger_jdbc_driver}}</value>
     <description>JDBC driver class name - for audit DB</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.audit.jdbc.url</name>
     <value>{{audit_jdbc_url}}</value>
     <description>JDBC connect string - auto populated based on other values</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.audit.jdbc.user</name>
     <value>{{ranger_audit_db_user}}</value>
     <description>JDBC user - audit</description>
-  </property> 
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.jpa.audit.jdbc.password</name>
     <value>_</value>
@@ -382,14 +380,14 @@
     <value-attributes>
       <type>password</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.audit.jdbc.credential.alias</name>
     <value>rangeraudit</value>
     <description>Alias name for storing JDBC password - for audit user</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.unixauth.remote.login.enabled</name>
     <value>true</value>
@@ -411,8 +409,8 @@
       </entries>
       <selection-cardinality>1</selection-cardinality>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.unixauth.service.hostname</name>
     <value>{{ugsync_host}}</value>
@@ -420,8 +418,8 @@
     <value-attributes>
       <overridable>false</overridable>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.unixauth.service.port</name>
     <value>5151</value>
@@ -430,20 +428,20 @@
       <type>int</type>
       <overridable>false</overridable>
     </value-attributes>
-  </property>    
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.jpa.jdbc.dialect</name>
     <value>{{jdbc_dialect}}</value>
     <description>JDBC dialect used for policy DB</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.jpa.audit.jdbc.dialect</name>
     <value>{{jdbc_dialect}}</value>
     <description>JDBC dialect used for audit DB</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.audit.solr.zookeepers</name>
     <value>NONE</value>
@@ -458,14 +456,14 @@
         <name>is_solrCloud_enabled</name>
       </property>
     </depends-on>
-  </property> 
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.audit.solr.username</name>
     <value>ranger_solr</value>
     <description>Solr username</description>
-  </property> 
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.audit.solr.password</name>
     <value>NONE</value>
@@ -474,29 +472,35 @@
     <value-attributes>
       <type>password</type>
     </value-attributes>
-  </property> 
-
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>ranger.sso.providerurl</name>
-    <value></value>
+    <value/>
     <display-name>SSO provider url</display-name>
     <description>Example: https://KNOX_HOST:KNOX_PORT/gateway/TOPOLOGY_NAME/knoxsso/api/v1/websso</description>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <depends-on>
+      <property>
+        <type>gateway-site</type>
+        <name>gateway.port</name>
+      </property>
+    </depends-on>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.sso.publicKey</name>
-    <value></value>
+    <value/>
     <display-name>SSO public key</display-name>
     <description>Public key for SSO cookie verification</description>
     <value-attributes>
       <type>multiLine</type>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.sso.cookiename</name>
     <value>hadoop-jwt</value>
@@ -505,15 +509,19 @@
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.sso.enabled</name>
     <value>false</value>
     <display-name>Enable Ranger SSO</display-name>
-    <description></description>
+    <description/>
+    <value-attributes>
+      <overridable>false</overridable>
+      <type>boolean</type>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.sso.query.param.originalurl</name>
     <value>originalUrl</value>
@@ -522,8 +530,14 @@
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <depends-on>
+      <property>
+       <type>gateway-site</type>
+       <name>gateway.port</name>
+      </property>
+    </depends-on>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.sso.browser.useragent</name>
     <value>Mozilla,chrome</value>
@@ -532,6 +546,18 @@
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
+  <property>
+    <name>ranger.ldap.binddn.credential.alias</name>
+    <value>ranger.ldap.bind.password</value>
+    <description></description>
+    <on-ambari-upgrade add="true"/>
+  </property>
+  <property>
+    <name>ranger.ldap.ad.binddn.credential.alias</name>
+    <value>ranger.ldap.ad.bind.password</value>
+    <description></description>
+    <on-ambari-upgrade add="true"/>
+  </property>
 </configuration>

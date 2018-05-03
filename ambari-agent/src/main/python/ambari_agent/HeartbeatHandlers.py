@@ -26,7 +26,8 @@ import signal
 import threading
 import traceback
 from ambari_commons.os_family_impl import OsFamilyImpl
-import sys
+
+from ambari_agent.RemoteDebugUtils import bind_debug_signal_handlers
 
 logger = logging.getLogger()
 
@@ -78,19 +79,17 @@ class HeartbeatStopHandlersWindows(HeartbeatStopHandlers):
 # linux impl
 
 def signal_handler(signum, frame):
-  global _handler
   logger.info("Ambari-agent received {0} signal, stopping...".format(signum))
-  _handler.set_stop()
+  _handler.set()
 
 
 def debug(sig, frame):
-  """Interrupt running process, and provide a python prompt for
-  interactive debugging."""
+  """Interrupt running process, and provide a stacktrace of threads """
   d = {'_frame': frame}  # Allow access to frame object.
-  d.update(frame.f_globals)  # Unless shadowed by global
+  d.update(frame.f_globals)  # Uamnless shadowed by global
   d.update(frame.f_locals)
 
-  message = "Signal received : entering python shell.\nTraceback:\n"
+  message = "Signal received.\nTraceback:\n"
   message += ''.join(traceback.format_stack(frame))
   logger.info(message)
 
@@ -122,21 +121,16 @@ class HeartbeatStopHandlersLinux(HeartbeatStopHandlers):
 
 
 
-def bind_signal_handlers(agentPid):
+def bind_signal_handlers(agentPid, stop_event):
   global _handler
   if OSCheck.get_os_family() != OSConst.WINSRV_FAMILY:
     if os.getpid() == agentPid:
       signal.signal(signal.SIGINT, signal_handler)
       signal.signal(signal.SIGTERM, signal_handler)
-      try:
-        import faulthandler  # This is not default module, has to be installed separately
-        faulthandler.enable(file=sys.stderr, all_threads=True)
-        faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True, chain=False)
-        sys.stderr.write("Registered faulthandler\n")
-      except ImportError:
-        pass  # Module is not included into python distribution
 
-    _handler = HeartbeatStopHandlersLinux()
+      bind_debug_signal_handlers()
+
+    _handler = stop_event
   else:
-    _handler = HeartbeatStopHandlersWindows()
+    _handler = stop_event
   return _handler

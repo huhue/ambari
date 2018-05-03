@@ -18,15 +18,20 @@
 
 package org.apache.ambari.server.security.ldap;
 
+import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.Set;
 
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
+import org.apache.ambari.server.configuration.AmbariServerConfigurationKey;
 import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.ldap.domain.AmbariLdapConfiguration;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.security.ClientSecurityType;
 import org.apache.ambari.server.security.authorization.AuthorizationTestModule;
 import org.apache.ambari.server.security.authorization.Users;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -51,6 +56,9 @@ public class LdapPerformanceTest {
 
   @Inject
   Configuration configuration;
+  
+  @Inject
+  AmbariLdapConfiguration ldapConfiguration;
 
   final String SPRING_CONTEXT_LOCATION = "classpath:webapp/WEB-INF/spring-security.xml";
 
@@ -61,9 +69,23 @@ public class LdapPerformanceTest {
     injector.injectMembers(this);
     injector.getInstance(GuiceJpaInitializer.class);
     configuration.setClientSecurityType(ClientSecurityType.LDAP);
-    configuration.setLdap("c6402.ambari.apache.org:389", "posixAccount", "uid",
-        "posixGroup", "cn", "memberUid", "dc=apache,dc=org", false,
-        "uid=hdfs,ou=people,ou=dev,dc=apache,dc=org", "hdfs");
+    
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.SERVER_HOST, "c6402.ambari.apache.org");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.SERVER_PORT, "389");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.USER_OBJECT_CLASS, "posixAccount");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.USER_NAME_ATTRIBUTE, "uid");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.GROUP_OBJECT_CLASS, "posixGroup");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.GROUP_NAME_ATTRIBUTE, "cn");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.GROUP_MEMBER_ATTRIBUTE, "memberUid");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.USER_SEARCH_BASE, "dc=apache,dc=org");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.ANONYMOUS_BIND, "false");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.BIND_DN, "uid=hdfs,ou=people,ou=dev,dc=apache,dc=org");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.BIND_PASSWORD, "hdfs");
+  }
+
+  @After
+  public void tearDown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
   @Test
@@ -71,11 +93,11 @@ public class LdapPerformanceTest {
     long time = System.currentTimeMillis();
     Set<LdapGroupDto> groups = populator.getExternalLdapGroupInfo();
     Set<LdapUserDto> users = populator.getExternalLdapUserInfo();
-    Set<String> userNames = new HashSet<String>();
+    Set<String> userNames = new HashSet<>();
     for (LdapUserDto user : users) {
       userNames.add(user.getUserName());
     }
-    Set<String> groupNames = new HashSet<String>();
+    Set<String> groupNames = new HashSet<>();
     for (LdapGroupDto group : groups) {
       groupNames.add(group.getGroupName());
     }

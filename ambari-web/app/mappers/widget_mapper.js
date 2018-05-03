@@ -33,7 +33,8 @@ App.widgetMapper = App.QuickDataMapper.create({
     metrics: 'metrics',
     values: 'values',
     description: 'description',
-    scope: 'scope'
+    scope: 'scope',
+    tag: 'tag'
   },
   map: function (json) {
     if (!this.get('model')) return;
@@ -51,8 +52,7 @@ App.widgetMapper = App.QuickDataMapper.create({
         result.push(this.parseIt(item.WidgetInfo, this.config));
       }, this);
 
-      App.store.commit();
-      App.store.loadMany(this.get('model'), result);
+      App.store.safeLoadMany(this.get('model'), result);
     }
   }
 });

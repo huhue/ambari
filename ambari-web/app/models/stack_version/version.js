@@ -34,14 +34,18 @@ App.StackVersion = DS.Model.extend({
   upgradedHosts: DS.attr('array'),
   upgradeFailedHosts: DS.attr('array'),
   currentHosts: DS.attr('array'),
+  supportsRevert: DS.attr('boolean'),
+  revertUpgradeId: DS.attr('number'),
 
-  noInstalledHosts:  Em.computed.empty('installedHosts'),
+  noInstalledHosts: Em.computed.empty('installedHosts'),
 
   noCurrentHosts: Em.computed.empty('currentHosts'),
 
   noInitHosts: Em.computed.empty('notInstalledHosts'),
 
-  isCurrent: Em.computed.equal('state', 'CURRENT')
+  isCurrent: Em.computed.equal('state', 'CURRENT'),
+
+  isOutOfSync: Em.computed.equal('state', 'OUT_OF_SYNC')
 });
 
 App.StackVersion.FIXTURES = [];

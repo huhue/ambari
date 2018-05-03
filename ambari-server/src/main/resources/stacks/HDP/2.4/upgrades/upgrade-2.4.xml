@@ -16,13 +16,12 @@
    limitations under the License.
 -->
 
-
-<upgrade xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<upgrade xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="upgrade-pack.xsd">
   <target>2.4.*.*</target>
   <target-stack>HDP-2.4</target-stack>
-  <type>ROLLING</type>
   <skip-failures>false</skip-failures>
   <skip-service-check-failures>false</skip-service-check-failures>
+  <type>ROLLING</type>
   <prerequisite-checks>
     <!-- List of additional pre-req checks to run in addition to the required pre-reqs -->
     <check>org.apache.ambari.server.checks.HiveMultipleMetastoreCheck</check>
@@ -74,12 +73,6 @@
       <skippable>true</skippable>
       <supports-auto-skip-failure>false</supports-auto-skip-failure>
 
-      <execute-stage service="KNOX" component="KNOX_GATEWAY" title="Backup Knox Data">
-        <task xsi:type="manual">
-          <message>Before continuing, please backup the Knox data. E.g., "cp -RL /usr/hdp/current/knox-server/data/* ~/knox_backup/" on the following host(s): {{hosts.all}}.</message>
-        </task>
-      </execute-stage>
-
       <execute-stage service="HBASE" component="HBASE_MASTER" title="Pre Upgrade HBase Backup">
         <task xsi:type="execute" hosts="master">
           <script>scripts/hbase_upgrade.py</script>
@@ -101,11 +94,11 @@
 
       <execute-stage service="RANGER" component="RANGER_ADMIN" title="Pre Upgrade Ranger Admin Backup">
         <task xsi:type="manual">
-          <message>Before continuing, please backup the Ranger Admin database and Ranger Audit database.
-            If audit database size is too large( > 3GB ) then follow the below instructions:
-            1. Backup the audit table from audit database.
-            2. Truncate audit table.
-            3. Follow upgrade process and once completed then restore audit data to audit table.</message>
+          <message>Before continuing, please backup the Ranger Admin database and Ranger Audit database. If audit database size is too large( > 3GB ) then follow the below instructions:
+          </message>
+          <message>1. Backup the audit table from audit database.</message>
+          <message>2. Truncate audit table.</message>
+          <message>3. Follow upgrade process and once completed then restore audit data to audit table.</message>
         </task>
       </execute-stage>
 
@@ -117,11 +110,12 @@
     </group>
 
     <group name="ZOOKEEPER" title="ZooKeeper">
+      <supports-auto-skip-failure>false</supports-auto-skip-failure>
       <service name="ZOOKEEPER">
         <component>ZOOKEEPER_SERVER</component>
       </service>
     </group>
-    
+
     <group name="RANGER" title="Ranger">
       <skippable>true</skippable>
       <supports-auto-skip-failure>false</supports-auto-skip-failure>
@@ -136,6 +130,13 @@
       <supports-auto-skip-failure>false</supports-auto-skip-failure>
       <service name="RANGER_KMS">
         <component>RANGER_KMS_SERVER</component>
+      </service>
+    </group>
+
+    <group name="KAFKA" title="Kafka">
+      <skippable>true</skippable>
+      <service name="KAFKA">
+        <component>KAFKA_BROKER</component>
       </service>
     </group>
 
@@ -161,9 +162,9 @@
       </service>
     </group>
     
-    <group name="SERVICE_CHECK" title="All Service Checks" xsi:type="service-check">
-      <skippable>true</skippable>
+    <group name="SERVICE_CHECK_1" title="All Service Checks" xsi:type="service-check">
       <direction>UPGRADE</direction>
+      <skippable>true</skippable>
       <priority>
         <service>ZOOKEEPER</service>
         <service>HDFS</service>
@@ -178,8 +179,8 @@
     </group>
     
     <group name="CORE_SLAVES" title="Core Slaves" xsi:type="colocated">
-      <skippable>true</skippable>
       <service-check>false</service-check>
+      <skippable>true</skippable>
       <service name="HDFS">
         <component>DATANODE</component>
         <component>NFS_GATEWAY</component>
@@ -201,9 +202,9 @@
       </batch>
     </group>
     
-    <group name="SERVICE_CHECK" title="All Service Checks" xsi:type="service-check">
-      <skippable>true</skippable>
+    <group name="SERVICE_CHECK_2" title="All Service Checks" xsi:type="service-check">
       <direction>UPGRADE</direction>
+      <skippable>true</skippable>
       <priority>
         <service>ZOOKEEPER</service>
         <service>HDFS</service>
@@ -240,16 +241,6 @@
       <skippable>true</skippable>
       <service name="SPARK">
         <component>SPARK_CLIENT</component>
-      </service>
-    </group>
-
-    <!-- TODO, Atlas doesn't yet support upgrades and the client doesn't exist in hdp-select. -->
-    <group name="ATLAS" title="Atlas">
-      <service-check>false</service-check>
-      <skippable>true</skippable>
-      <supports-auto-skip-failure>false</supports-auto-skip-failure>
-      <service name="ATLAS">
-        <component>ATLAS_SERVER</component>
       </service>
     </group>
 
@@ -328,9 +319,9 @@
       </service>
     </group>
 
-    <group name="SERVICE_CHECK" title="All Service Checks" xsi:type="service-check">
-      <skippable>true</skippable>
+    <group name="SERVICE_CHECK_3" title="All Service Checks" xsi:type="service-check">
       <direction>UPGRADE</direction>
+      <skippable>true</skippable>
       <priority>
         <service>ZOOKEEPER</service>
         <service>HDFS</service>
@@ -341,13 +332,6 @@
         <service>AMBARI_METRICS</service>
         <service>LOGSEARCH</service>
       </exclude>
-    </group>
-
-    <group name="KAFKA" title="Kafka">
-      <skippable>true</skippable>
-      <service name="KAFKA">
-        <component>KAFKA_BROKER</component>
-      </service>
     </group>
 
     <group name="KNOX" title="Knox">
@@ -422,6 +406,16 @@
         </task>
       </execute-stage>
 
+      <execute-stage service="HBASE" component="HBASE_MASTER" title="Delete HBase snapshots">
+        <direction>UPGRADE</direction>
+        <task xsi:type="manual">
+          <message>You can now remove any HBase snapshots which were created at the beginning of the upgrade. To see existing snapshots, use the following HBase shell command:</message>
+          <message>hbase> list_snapshots</message>
+          <message>Once you have found an existing snapshot which you would like to remove, you can use the following command:</message>
+          <message>hbase> delete_snapshot 'snapshotName'</message>
+        </task>
+      </execute-stage>
+
       <execute-stage service="HDFS" component="NAMENODE" title="Execute HDFS Finalize">
         <task xsi:type="execute" hosts="master">
           <script>scripts/namenode.py</script>
@@ -429,7 +423,7 @@
         </task>
       </execute-stage>
       
-      <execute-stage title="Save Cluster State" service="" component="">
+      <execute-stage title="Save Cluster State">
         <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.FinalizeUpgradeAction">
         </task>
       </execute-stage>
@@ -454,36 +448,38 @@
     <service name="RANGER">
       <component name="RANGER_ADMIN">
         <pre-upgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Upgrading Ranger database schema">
+          <task xsi:type="execute" hosts="all">
+            <summary>Stop Ranger Admin</summary>
+            <script>scripts/ranger_admin.py</script>
+            <function>stop</function>
+          </task>
+
+          <task xsi:type="execute" hosts="all">
+            <script>scripts/ranger_admin.py</script>
+            <function>set_pre_start</function>
+          </task>
+
+          <task xsi:type="execute" hosts="any">
+            <summary>Upgrading Ranger database schema</summary>
             <script>scripts/ranger_admin.py</script>
             <function>setup_ranger_database</function>
+          </task>
+
+          <task xsi:type="configure_function" hosts="all" />
+
+          <task xsi:type="execute" hosts="any">
+            <summary>Applying Ranger java patches</summary>
+            <script>scripts/ranger_admin.py</script>
+            <function>setup_ranger_java_patches</function>
           </task>
         </pre-upgrade>
-
-        <pre-downgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Downgrading Ranger database schema">
-            <script>scripts/ranger_admin.py</script>
-            <function>setup_ranger_database</function>
-          </task>
-        </pre-downgrade>
+        
+        <pre-downgrade copy-upgrade="true" />
 
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
 
-        <post-upgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Applying Ranger java patches">
-            <script>scripts/ranger_admin.py</script>
-            <function>setup_ranger_java_patches</function>
-          </task>
-        </post-upgrade>
-
-        <post-downgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Applying Ranger java patches">
-            <script>scripts/ranger_admin.py</script>
-            <function>setup_ranger_java_patches</function>
-          </task>
-        </post-downgrade>
       </component>
 
       <component name="RANGER_USERSYNC">
@@ -496,14 +492,16 @@
     <service name="RANGER_KMS">
       <component name="RANGER_KMS_SERVER">
         <pre-upgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Upgrading Ranger KMS database schema">
+          <task xsi:type="execute" hosts="any" sequential="true">
+            <summary>Upgrading Ranger KMS database schema</summary>
             <script>scripts/kms_server.py</script>
             <function>setup_ranger_kms_database</function>
           </task>
         </pre-upgrade>
 
         <pre-downgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Downgrading Ranger KMS database schema">
+          <task xsi:type="execute" hosts="any" sequential="true">
+            <summary>Downgrading Ranger KMS database schema</summary>
             <script>scripts/kms_server.py</script>
             <function>setup_ranger_kms_database</function>
           </task>
@@ -515,10 +513,24 @@
       </component>
     </service>
 
-    <service name="HDFS">
-      <component name="NAMENODE">
+    <service name="KAFKA">
+      <component name="KAFKA_BROKER">
         <upgrade>
           <task xsi:type="restart-task" />
+        </upgrade>
+      </component>
+    </service>
+
+    <service name="HDFS">
+      <component name="NAMENODE">
+        <pre-upgrade>
+          <task xsi:type="configure" id="hdfs_namenode_prevent_gc_heuristics"/>
+        </pre-upgrade>
+
+        <pre-downgrade/>
+
+        <upgrade>
+          <task xsi:type="restart-task" timeout-config="upgrade.parameter.nn-restart.timeout"/>
         </upgrade>
       </component>
 
@@ -535,6 +547,10 @@
       </component>
 
       <component name="HDFS_CLIENT">
+        <pre-upgrade>
+          <task xsi:type="configure" id="hdfs_user_agent" />
+        </pre-upgrade>
+        <pre-downgrade />
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -570,8 +586,12 @@
 
       <component name="MAPREDUCE2_CLIENT">
         <pre-upgrade>
-          <task xsi:type="server_action" summary="Verifying LZO codec path for mapreduce" class="org.apache.ambari.server.serveraction.upgrades.FixLzoCodecPath"/>
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.FixLzoCodecPath">
+            <summary>Verifying LZO codec path for mapreduce</summary>
+          </task>
         </pre-upgrade>
+
+        <pre-downgrade copy-upgrade="true" />
 
         <upgrade>
           <task xsi:type="restart-task" />
@@ -636,8 +656,13 @@
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_4_0_0_tez_client_adjust_tez_lib_uris_property"/>
 
-          <task xsi:type="server_action" summary="Verifying LZO codec path for Tez" class="org.apache.ambari.server.serveraction.upgrades.FixLzoCodecPath"/>
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.FixLzoCodecPath">
+            <summary>Verifying LZO codec path for Tez</summary>
+          </task>
         </pre-upgrade>
+        
+        <pre-downgrade copy-upgrade="true" />
+        
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -676,24 +701,6 @@
       </component>
 
       <component name="HIVE_SERVER">
-        <pre-upgrade>
-          <task xsi:type="manual">
-            <summary>HiveServer Port Availability</summary>
-            <message>Please note that the HiveServer port will now change to 10010 if Hive is using a binary transfer mode or 10011 if Hive is using an http transport mode. You can use "netstat -anp | grep 1001[01]" to determine if the port is available on each of following HiveServer host(s): {{hosts.all}}. If the port is not available, the process using it must be terminated.</message>
-          </task>
-
-          <task xsi:type="configure" id="hdp_2_4_0_0_hive_server_set_transport_mode"/>
-        </pre-upgrade>
-
-        <pre-downgrade>
-          <task xsi:type="manual">
-            <summary>HiveServer Port Availability</summary>
-            <message>Please note that the HiveServer port will now change to 10000 if Hive is using a binary transfer mode or 10001 if Hive is using an http transport mode. You can use "netstat -anp | grep 1000[01]" to determine if the port is available on each of following HiveServer host(s): {{hosts.all}}. If the port is not available, the process using it must be terminated.</message>
-          </task>
-
-          <task xsi:type="configure" id="hdp_2_4_0_0_hive_server_restore_transport_mode_on_downgrade" />
-        </pre-downgrade>
-
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -739,29 +746,35 @@
     <service name="OOZIE">
       <component name="OOZIE_SERVER">
         <pre-upgrade>
-          <task xsi:type="execute" hosts="all" sequential="true" summary="Shut down all Oozie servers">
+          <task xsi:type="execute" hosts="all" sequential="true">
+            <summary>Shut down all Oozie servers</summary>
             <script>scripts/oozie_server.py</script>
             <function>stop</function>
           </task>
 
-          <task xsi:type="server_action" summary="Adjusting Oozie properties" class="org.apache.ambari.server.serveraction.upgrades.OozieConfigCalculation"/>
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.OozieConfigCalculation">
+            <summary>Adjusting Oozie properties</summary>
+          </task>
 
           <!-- It is extremely important that both of these tasks run on the exact same host. Hence, pick the first alphabetically. -->
           <task xsi:type="configure_function" hosts="first" />
 
-          <task xsi:type="execute" hosts="first" sequential="true" summary="Upgrading the Oozie database and creating a new sharelib">
+          <task xsi:type="execute" hosts="first" sequential="true">
+            <summary>Upgrading the Oozie database and creating a new sharelib</summary>
             <script>scripts/oozie_server_upgrade.py</script>
             <function>upgrade_oozie_database_and_sharelib</function>
           </task>
         </pre-upgrade>
 
         <pre-downgrade>
-          <task xsi:type="execute" hosts="all" sequential="true" summary="Shut down all Oozie servers">
+          <task xsi:type="execute" hosts="all" sequential="true">
+            <summary>Shut down all Oozie servers</summary>
             <script>scripts/oozie_server.py</script>
             <function>stop</function>
           </task>
 
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Create a new sharelib">
+          <task xsi:type="execute" hosts="any" sequential="true">
+            <summary>Create a new sharelib</summary>
             <script>scripts/oozie_server_upgrade.py</script>
             <function>create_sharelib</function>
           </task>
@@ -792,14 +805,6 @@
       </component>
     </service>
 
-    <service name="KAFKA">
-      <component name="KAFKA_BROKER">
-        <upgrade>
-          <task xsi:type="restart-task" />
-        </upgrade>
-      </component>
-    </service>
-
     <service name="KNOX">
       <component name="KNOX_GATEWAY">
         <upgrade>
@@ -810,11 +815,14 @@
 
     <service name="STORM">
       <component name="NIMBUS">
-        <upgrade>
-          <task xsi:type="restart-task" />
-        </upgrade>
-      </component>
-      <component name="STORM_REST_API">
+        <pre-upgrade>
+          <task xsi:type="configure" id="hdp_2_4_0_0_remove_empty_storm_topology_submission_notifier_plugin_class"/>
+
+          <task xsi:type="configure" id="increase_storm_zookeeper_timeouts"/>
+        </pre-upgrade>
+        
+        <pre-downgrade />
+
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>

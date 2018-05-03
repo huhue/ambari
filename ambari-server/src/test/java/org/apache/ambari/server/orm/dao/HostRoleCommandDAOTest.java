@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,11 +17,15 @@
  */
 package org.apache.ambari.server.orm.dao;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
+import javax.persistence.EntityManager;
+
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.HostRoleStatus;
@@ -40,7 +44,6 @@ import org.junit.Test;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 
 import junit.framework.Assert;
 
@@ -70,8 +73,8 @@ public class HostRoleCommandDAOTest {
   }
 
   @After
-  public void teardown() throws AmbariException {
-    m_injector.getInstance(PersistService.class).stop();
+  public void teardown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabase(m_injector.getProvider(EntityManager.class).get());
   }
 
   /**
@@ -88,12 +91,12 @@ public class HostRoleCommandDAOTest {
     RequestEntity requestEntity = new RequestEntity();
     requestEntity.setRequestId(requestId);
     requestEntity.setClusterId(clusterEntity.getClusterId());
-    requestEntity.setStages(new ArrayList<StageEntity>());
+    requestEntity.setStages(new ArrayList<>());
     m_requestDAO.create(requestEntity);
 
     AtomicLong stageId = new AtomicLong(1);
     HostEntity host = m_hostDAO.findByName("test_host1");
-    host.setHostRoleCommandEntities(new ArrayList<HostRoleCommandEntity>());
+    host.setHostRoleCommandEntities(new ArrayList<>());
 
     createStage(stageId.getAndIncrement(), 3, host, requestEntity, HostRoleStatus.COMPLETED);
     createStage(stageId.getAndIncrement(), 2, host, requestEntity, HostRoleStatus.SKIPPED_FAILED);
@@ -123,12 +126,12 @@ public class HostRoleCommandDAOTest {
     RequestEntity requestEntity = new RequestEntity();
     requestEntity.setRequestId(requestId);
     requestEntity.setClusterId(clusterEntity.getClusterId());
-    requestEntity.setStages(new ArrayList<StageEntity>());
+    requestEntity.setStages(new ArrayList<>());
     m_requestDAO.create(requestEntity);
 
     AtomicLong stageId = new AtomicLong(1);
     HostEntity host = m_hostDAO.findByName("test_host1");
-    host.setHostRoleCommandEntities(new ArrayList<HostRoleCommandEntity>());
+    host.setHostRoleCommandEntities(new ArrayList<>());
 
     // start out with a stage that is skippable, supports auto skip, and has
     // auto skip tasks
@@ -172,8 +175,6 @@ public class HostRoleCommandDAOTest {
    * @param hostEntity
    * @param requestEntity
    * @param status
-   * @param skipStage
-   * @param supportsAutoSkipOnFailure
    * @return
    */
   private void createStage(long startStageId, int count, HostEntity hostEntity,
@@ -204,7 +205,7 @@ public class HostRoleCommandDAOTest {
     stageEntity.setClusterId(clusterEntity.getClusterId());
     stageEntity.setRequest(requestEntity);
     stageEntity.setStageId(stageId);
-    stageEntity.setHostRoleCommands(new ArrayList<HostRoleCommandEntity>());
+    stageEntity.setHostRoleCommands(new ArrayList<>());
     stageEntity.setSkippable(skipStage);
     stageEntity.setAutoSkipFailureSupported(supportsAutoSkipOnFailure);
 

@@ -47,6 +47,10 @@ public class AmbariServerSecurityHeaderFilter extends AbstractSecurityHeaderFilt
     setStrictTransportSecurity(configuration.getStrictTransportSecurityHTTPResponseHeader());
     setxFrameOptionsHeader(configuration.getXFrameOptionsHTTPResponseHeader());
     setxXSSProtectionHeader(configuration.getXXSSProtectionHTTPResponseHeader());
+    setXContentTypeHeader(configuration.getXContentTypeHTTPResponseHeader());
+    setCacheControlHeader(configuration.getCacheControlHTTPResponseHeader());
+    setPragmaHeader(configuration.getPragmaHTTPResponseHeader());
+    setCharset(configuration.getCharsetHTTPResponseHeader());
   }
 
 }

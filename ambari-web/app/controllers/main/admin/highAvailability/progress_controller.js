@@ -35,21 +35,8 @@ App.HighAvailabilityProgressPageController = App.HighAvailabilityWizardControlle
         var controller = App.router.get('highAvailabilityWizardController');
         controller.clearTasksData();
         controller.clearStorageData();
-        controller.finish();
-        App.router.get('updateController').set('isWorking', true);
-        App.clusterStatus.setClusterStatus({
-          clusterName: App.router.get('content.cluster.name'),
-          clusterState: 'DEFAULT',
-          localdb: App.db.data
-        }, {
-          alwaysCallback: function () {
-            self.hide();
-            App.router.transitionTo('main.index');
-            Em.run.next(function () {
-              location.reload();
-            });
-          }
-        });
+        controller.resetOnClose(controller, 'main.services.index');
+        this.hide();
       },
       secondary: Em.I18n.t('no'),
       onSecondary: function () {
@@ -80,18 +67,16 @@ App.HighAvailabilityProgressPageController = App.HighAvailabilityWizardControlle
 
   /**
    * Prepare object to send to the server to save configs
-   * Split all configs by site names and tag and note
+   * Split all configs by site names and note
    * @param siteNames Array
    * @param data Object
    * @param note String
    */
   reconfigureSites: function(siteNames, data, note) {
-    var tagName = App.get('testMode') ? 'version1' : 'version' + (new Date).getTime();
     return siteNames.map(function(_siteName) {
       var config = data.items.findProperty('type', _siteName);
       var configToSave = {
         type: _siteName,
-        tag: tagName,
         properties: config && config.properties,
         service_config_version_note: note || ''
       };

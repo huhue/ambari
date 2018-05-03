@@ -26,12 +26,12 @@ describe('App.WizardStep5Controller', function () {
   beforeEach(function () {
     c = App.WizardStep5Controller.create();
     sinon.stub(App.router, 'send', Em.K);
-    App.router.nextBtnClickInProgress = false;
+    App.set('router.nextBtnClickInProgress', false);
   });
 
   afterEach(function () {
     App.router.send.restore();
-    App.router.nextBtnClickInProgress = false;
+    App.set('router.nextBtnClickInProgress', false);
   });
 
   var controller = App.WizardStep5Controller.create();
@@ -94,56 +94,86 @@ describe('App.WizardStep5Controller', function () {
 
   });
 
-  describe('#renderHostInfo', function () {
+  describe('#loadWizardHostsSuccessCallback', function () {
 
     var tests = Em.A([
       {
-        hosts: {
-          h1: {memory: 4, cpu: 1, name: 'host1', bootStatus: 'INIT'},
-          h2: {memory: 3, cpu: 1, name: 'host2', bootStatus: 'INIT'},
-          h3: {memory: 2, cpu: 1, name: 'host3', bootStatus: 'INIT'},
-          h4: {memory: 1, cpu: 1, name: 'host4', bootStatus: 'INIT'}
+        dbHosts: {
+          host1: {bootStatus: 'INIT'},
+          host2: {bootStatus: 'INIT'},
+          host3: {bootStatus: 'INIT'},
+          host4: {bootStatus: 'INIT'}
         },
+        hosts: [
+          {Hosts: {total_mem: 4, cpu_count: 1, host_name: 'host1', bootStatus: 'INIT'}},
+          {Hosts: {total_mem: 3, cpu_count: 1, host_name: 'host2', bootStatus: 'INIT'}},
+          {Hosts: {total_mem: 2, cpu_count: 1, host_name: 'host3', bootStatus: 'INIT'}},
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host4', bootStatus: 'INIT'}}
+        ],
         m: 'no one host is REGISTERED',
         e: []
       },
       {
-        hosts: {
-          h1: {memory: 4, cpu: 1, name: 'host1', bootStatus: 'REGISTERED'},
-          h2: {memory: 3, cpu: 1, name: 'host2', bootStatus: 'REGISTERED'},
-          h3: {memory: 2, cpu: 1, name: 'host3', bootStatus: 'REGISTERED'},
-          h4: {memory: 1, cpu: 1, name: 'host4', bootStatus: 'REGISTERED'}
+        dbHosts: {
+          host1: {bootStatus: 'REGISTERED'},
+          host2: {bootStatus: 'REGISTERED'},
+          host3: {bootStatus: 'REGISTERED'},
+          host4: {bootStatus: 'REGISTERED'}
         },
+        hosts: [
+          {Hosts: {total_mem: 4, cpu_count: 1, host_name: 'host1', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 3, cpu_count: 1, host_name: 'host2', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 2, cpu_count: 1, host_name: 'host3', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host4', bootStatus: 'REGISTERED'}}
+        ],
         m: 'all hosts are REGISTERED, memory',
         e: ['host1', 'host2', 'host3', 'host4']
       },
       {
-        hosts: {
-          h1: {memory: 1, cpu: 4, name: 'host1', bootStatus: 'REGISTERED'},
-          h2: {memory: 1, cpu: 3, name: 'host2', bootStatus: 'REGISTERED'},
-          h3: {memory: 1, cpu: 2, name: 'host3', bootStatus: 'REGISTERED'},
-          h4: {memory: 1, cpu: 1, name: 'host4', bootStatus: 'REGISTERED'}
+        dbHosts: {
+          host1: {bootStatus: 'REGISTERED'},
+          host2: {bootStatus: 'REGISTERED'},
+          host3: {bootStatus: 'REGISTERED'},
+          host4: {bootStatus: 'REGISTERED'}
         },
+        hosts: [
+          {Hosts: {total_mem: 1, cpu_count: 4, host_name: 'host1', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 3, host_name: 'host2', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 2, host_name: 'host3', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host4', bootStatus: 'REGISTERED'}}
+        ],
         m: 'all hosts are REGISTERED, cpu',
         e: ['host1', 'host2', 'host3', 'host4']
       },
       {
-        hosts: {
-          h1: {memory: 1, cpu: 1, name: 'host4', bootStatus: 'REGISTERED'},
-          h2: {memory: 1, cpu: 1, name: 'host2', bootStatus: 'REGISTERED'},
-          h3: {memory: 1, cpu: 1, name: 'host3', bootStatus: 'REGISTERED'},
-          h4: {memory: 1, cpu: 1, name: 'host1', bootStatus: 'REGISTERED'}
+        dbHosts: {
+          host1: {bootStatus: 'REGISTERED'},
+          host2: {bootStatus: 'REGISTERED'},
+          host3: {bootStatus: 'REGISTERED'},
+          host4: {bootStatus: 'REGISTERED'}
         },
+        hosts: [
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host4', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host2', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host3', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host1', bootStatus: 'REGISTERED'}}
+        ],
         m: 'all hosts are REGISTERED, host_name',
         e: ['host1', 'host2', 'host3', 'host4']
       },
       {
-        hosts: {
-          h1: {memory: 2, cpu: 1, name: 'host1', bootStatus: 'REGISTERED'},
-          h2: {memory: 1, cpu: 2, name: 'host3', bootStatus: 'INIT'},
-          h3: {memory: 1, cpu: 1, name: 'host4', bootStatus: 'REGISTERED'},
-          h4: {memory: 1, cpu: 1, name: 'host2', bootStatus: 'INIT'}
+        dbHosts: {
+          host1: {bootStatus: 'REGISTERED'},
+          host2: {bootStatus: 'INIT'},
+          host3: {bootStatus: 'INIT'},
+          host4: {bootStatus: 'REGISTERED'}
         },
+        hosts: [
+          {Hosts: {total_mem: 2, cpu_count: 1, host_name: 'host1', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 2, host_name: 'host3', bootStatus: 'INIT'}},
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host4', bootStatus: 'REGISTERED'}},
+          {Hosts: {total_mem: 1, cpu_count: 1, host_name: 'host2', bootStatus: 'INIT'}}
+        ],
         m: 'mix',
         e: ['host1', 'host4']
       }
@@ -151,8 +181,8 @@ describe('App.WizardStep5Controller', function () {
 
     tests.forEach(function (test) {
       it(test.m, function () {
-        controller.set('content', {hosts: test.hosts});
-        controller.renderHostInfo();
+        controller.set('content', {hosts: test.dbHosts});
+        controller.loadWizardHostsSuccessCallback({items: test.hosts});
         var r = controller.get('hosts');
         expect(Em.A(r).mapProperty('host_name')).to.eql(test.e);
       });
@@ -1149,61 +1179,6 @@ describe('App.WizardStep5Controller', function () {
 
   });
 
-  describe('#getCurrentBlueprint', function () {
-
-    beforeEach(function() {
-      sinon.stub(c, 'getCurrentSlaveBlueprint', function() {
-        return {
-          blueprint_cluster_binding: {
-            host_groups: []
-          },
-          blueprint: {
-            host_groups: []
-          }
-        };
-      });
-    });
-
-    afterEach(function() {
-      c.getCurrentSlaveBlueprint.restore();
-    });
-
-    it('should map masterHostMapping', function () {
-
-      c.reopen({masterHostMapping: [
-        {host_name: 'h1', hostInfo:{}, masterServices: [
-          {serviceId: 's1', component_name: 'c1'},
-          {serviceId: 's2', component_name: 'c2'}
-        ]},
-        {host_name: 'h2', hostInfo:{}, masterServices: [
-          {serviceId: 's1', component_name: 'c1'},
-          {serviceId: 's3', component_name: 'c3'}
-        ]}
-      ]});
-
-      var r = c.getCurrentBlueprint();
-      expect(r).to.eql({"blueprint": {"host_groups": [
-          {"name": "host-group-1", "components": [
-            {"name": "c1"},
-            {"name": "c2"}
-          ]},
-          {"name": "host-group-2", "components": [
-            {"name": "c1"},
-            {"name": "c3"}
-          ]}
-        ]}, "blueprint_cluster_binding": {"host_groups": [
-          {"name": "host-group-1", "hosts": [
-            {"fqdn": "h1"}
-          ]},
-          {"name": "host-group-2", "hosts": [
-            {"fqdn": "h2"}
-          ]}
-        ]}}
-      );
-    });
-
-  });
-
   describe('#updateValidationsSuccessCallback', function() {
 
     beforeEach(function() {
@@ -1280,19 +1255,6 @@ describe('App.WizardStep5Controller', function () {
 
     });
 
-  });
-
-  describe('#submit',function(){
-    it('if Next button is clicked multiple times before the next step renders, it must not be processed',function(){
-      c.reopen({isSubmitDisabled:false, submitDisabled:false, useServerValidation:false});
-      c.submit();
-      expect(App.router.send.calledWith('next')).to.equal(true);
-
-      App.router.send.reset();
-      c.submit();
-      expect(App.router.send.calledWith('next')).to.equal(false);
-
-    });
   });
 
 });

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,6 +19,8 @@ package org.apache.ambari.server.state;
 
 import java.util.Map;
 
+import org.apache.ambari.annotations.Experimental;
+import org.apache.ambari.annotations.ExperimentalFeature;
 import org.apache.ambari.server.orm.entities.ClusterConfigEntity;
 
 import com.google.inject.assistedinject.Assisted;
@@ -27,18 +29,29 @@ import com.google.inject.assistedinject.Assisted;
  * Factory for creating configuration objects using {@link Assisted} constructor parameters
  */
 public interface ConfigFactory {
-  
+
+  /**
+   * Creates a new {@link Config} object using provided values.
+   */
+  @Experimental(feature = ExperimentalFeature.MULTI_SERVICE,
+      comment = "This constructor is only used for test compatibility and should be removed")
+  Config createNew(Cluster cluster, @Assisted("type") String type, @Assisted("tag") String tag,
+      Map<String, String> map, Map<String, Map<String, String>> mapAttributes);
+
+
   /**
    * Creates a new {@link Config} object using provided values.
    *
    * @param cluster
    * @param type
+   * @param tag
    * @param map
    * @param mapAttributes
    * @return
    */
-  Config createNew(Cluster cluster, String type, Map<String, String> map, Map<String, Map<String, String>> mapAttributes);
-  
+  Config createNew(StackId stackId, Cluster cluster, @Assisted("type") String type, @Assisted("tag") String tag,
+      Map<String, String> map, Map<String, Map<String, String>> mapAttributes);
+
   /**
    * Creates a new {@link Config} object using provided entity
    *
@@ -48,4 +61,16 @@ public interface ConfigFactory {
    */
   Config createExisting(Cluster cluster, ClusterConfigEntity entity);
 
+  /**
+   * Creates a read-only instance of a {@link Config} suitable for returning in
+   * REST responses.
+   *
+   * @param type
+   * @param tag
+   * @param map
+   * @param mapAttributes
+   * @return
+   */
+  Config createReadOnly(@Assisted("type") String type, @Assisted("tag") String tag,
+      Map<String, String> map, Map<String, Map<String, String>> mapAttributes);
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+
 '''
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -19,31 +20,53 @@ limitations under the License.
 '''
 
 import json
-from mock.mock import MagicMock, call, patch
+
+from mock.mock import MagicMock, patch
 from stacks.utils.RMFTestCase import *
+from resource_management.core.logger import Logger
+from resource_management.libraries.functions import conf_select
+from resource_management.libraries.script import Script
 
 @patch("os.path.exists", new = MagicMock(return_value=True))
+@patch("os.path.isfile", new = MagicMock(return_value=False))
 class TestHookAfterInstall(RMFTestCase):
+  CONFIG_OVERRIDES = {"serviceName":"HIVE", "role":"HIVE_SERVER"}
+  STACK_VERSION = '2.0.6'
+  def setUp(self):
+    Logger.initialize_logger()
+
+    Script.config = dict()
+    Script.config.update( { "configurations" : { "cluster-env" : {} }, "clusterLevelParams": {} } )
+    Script.config["configurations"]["cluster-env"]["stack_packages"] = RMFTestCase.get_stack_packages()
+    Script.config["clusterLevelParams"] = { "stack_name" : "HDP" }
+
 
   def test_hook_default(self):
 
-    self.executeScript("2.0.6/hooks/after-INSTALL/scripts/hook.py",
+    self.executeScript("after-INSTALL/scripts/hook.py",
                        classname="AfterInstallHook",
                        command="hook",
-                       config_file="default.json"
+                       config_file="default.json",
+                       stack_version = self.STACK_VERSION,
+                       target=RMFTestCase.TARGET_STACK_HOOKS,
+                       config_overrides = self.CONFIG_OVERRIDES
     )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
                               owner = 'hdfs',
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['core-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['core-site'],
+                              configuration_attributes = self.getConfig()['configurationAttributes']['core-site'],
                               only_if="ls /etc/hadoop/conf")
-
+    self.assertResourceCalled('Directory',
+                              '/usr/lib/ambari-logsearch-logfeeder/conf',
+                              mode = 0755,
+                              cd_access = 'a',
+                              create_parents = True)
     self.assertNoMoreResources()
 
-
-  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1243"))
+  @patch("os.path.isdir", new = MagicMock(return_value = True))
+  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1234"))
   @patch("resource_management.libraries.functions.conf_select.create")
   @patch("resource_management.libraries.functions.conf_select.select")
   @patch("os.symlink")
@@ -61,238 +84,51 @@ class TestHookAfterInstall(RMFTestCase):
 
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
-    json_content['hostLevelParams']['stack_version'] = "2.3"
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
 
-    self.executeScript("2.0.6/hooks/after-INSTALL/scripts/hook.py",
+    self.executeScript("after-INSTALL/scripts/hook.py",
                        classname="AfterInstallHook",
                        command="hook",
-                       config_dict = json_content)
+                       stack_version = self.STACK_VERSION,
+                       target=RMFTestCase.TARGET_STACK_HOOKS,
+                       config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES)
 
 
-    self.assertResourceCalled('Execute', 'ambari-sudo.sh /usr/bin/hdp-select set all `ambari-python-wrap /usr/bin/hdp-select versions | grep ^2.3 | tail -1`',
-      only_if = 'ls -d /usr/hdp/2.3*')
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'hive-server2', '2.3.0.0-1234'),
+      sudo = True)
 
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
       owner = 'hdfs',
       group = 'hadoop',
-      conf_dir = "/usr/hdp/current/hadoop-client/conf",
+      conf_dir = "/usr/hdp/2.3.0.0-1234/hadoop/conf",
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['core-site'],
-      only_if="ls /usr/hdp/current/hadoop-client/conf")
+      configuration_attributes = self.getConfig()['configurationAttributes']['core-site'],
+      only_if="ls /usr/hdp/2.3.0.0-1234/hadoop/conf")
 
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/kms/conf', '/etc/ranger/kms/conf.backup'),
-        not_if = 'test -e /etc/ranger/kms/conf.backup',
-        sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/ranger/kms/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/ranger/kms/conf',
-        to = '/usr/hdp/current/ranger-kms/conf',)
+    self.assertResourceCalled('Directory',
+                              '/usr/lib/ambari-logsearch-logfeeder/conf',
+                              mode = 0755,
+                              cd_access = 'a',
+                              create_parents = True)
 
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive2/conf', '/etc/hive2/conf.backup'),
-                              not_if = 'test -e /etc/hive2/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hive2/conf',
-                            action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hive2/conf',
-                            to = '/usr/hdp/current/hive-server2-hive2/conf')
+    package_dirs = conf_select.get_package_dirs();
+    for package, dir_defs in package_dirs.iteritems():
+      for dir_def in dir_defs:
+        conf_dir = dir_def['conf_dir']
+        conf_backup_dir = conf_dir + ".backup"
+        current_dir = dir_def['current_dir']
+        self.assertResourceCalled('Execute', ('cp', '-R', '-p', conf_dir, conf_backup_dir),
+            not_if = 'test -e ' + conf_backup_dir,
+            sudo = True,)
 
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/zookeeper/conf', '/etc/zookeeper/conf.backup'),
-                              not_if = 'test -e /etc/zookeeper/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/zookeeper/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/zookeeper/conf',
-                              to = '/usr/hdp/current/zookeeper-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/pig/conf', '/etc/pig/conf.backup'),
-                              not_if = 'test -e /etc/pig/conf.backup',
-                              sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/pig/conf',
-                            action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/pig/conf',
-                            to = '/usr/hdp/current/pig-client/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/tez/conf', '/etc/tez/conf.backup'),
-                              not_if = 'test -e /etc/tez/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/tez/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/tez/conf',
-                              to = '/usr/hdp/current/tez-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive-webhcat/conf', '/etc/hive-webhcat/conf.backup'),
-        not_if = 'test -e /etc/hive-webhcat/conf.backup',
-        sudo = True,)
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive-hcatalog/conf', '/etc/hive-hcatalog/conf.backup'),
-        not_if = 'test -e /etc/hive-hcatalog/conf.backup',
-        sudo = True,)
-
-    self.assertResourceCalled('Directory', '/etc/hive-webhcat/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/hive-webhcat/conf',
-        to = '/usr/hdp/current/hive-webhcat/etc/webhcat',)
-
-    self.assertResourceCalled('Directory', '/etc/hive-hcatalog/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/hive-hcatalog/conf',
-        to = '/usr/hdp/current/hive-webhcat/etc/hcatalog',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hbase/conf', '/etc/hbase/conf.backup'),
-        not_if = 'test -e /etc/hbase/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hbase/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hbase/conf',
-        to = '/usr/hdp/current/hbase-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/tagsync/conf', '/etc/ranger/tagsync/conf.backup'),
-                              not_if = 'test -e /etc/ranger/tagsync/conf.backup',
-                              sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/ranger/tagsync/conf',
-                              action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/ranger/tagsync/conf',
-                              to = '/usr/hdp/current/ranger-tagsync/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/usersync/conf', '/etc/ranger/usersync/conf.backup'),
-                              not_if = 'test -e /etc/ranger/usersync/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/ranger/usersync/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/ranger/usersync/conf',
-                              to = '/usr/hdp/current/ranger-usersync/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hadoop/conf', '/etc/hadoop/conf.backup'),
-                              not_if = 'test -e /etc/hadoop/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hadoop/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hadoop/conf',
-                              to = '/usr/hdp/current/hadoop-client/conf')
-
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/mahout/conf', '/etc/mahout/conf.backup'),
-        not_if = 'test -e /etc/mahout/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/mahout/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/mahout/conf',
-        to = '/usr/hdp/current/mahout-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/storm/conf', '/etc/storm/conf.backup'),
-        not_if = 'test -e /etc/storm/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/storm/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/storm/conf',
-        to = '/usr/hdp/current/storm-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/admin/conf', '/etc/ranger/admin/conf.backup'),
-        not_if = 'test -e /etc/ranger/admin/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/ranger/admin/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/ranger/admin/conf',
-        to = '/usr/hdp/current/ranger-admin/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/flume/conf', '/etc/flume/conf.backup'),
-        not_if = 'test -e /etc/flume/conf.backup',
-        sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/flume/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/flume/conf',
-        to = '/usr/hdp/current/flume-server/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/sqoop/conf', '/etc/sqoop/conf.backup'),
-                              not_if = 'test -e /etc/sqoop/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/sqoop/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/sqoop/conf',
-                              to = '/usr/hdp/current/sqoop-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/accumulo/conf', '/etc/accumulo/conf.backup'),
-        not_if = 'test -e /etc/accumulo/conf.backup',
-        sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/accumulo/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/accumulo/conf',
-        to = '/usr/hdp/current/accumulo-client/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/phoenix/conf', '/etc/phoenix/conf.backup'),
-        not_if = 'test -e /etc/phoenix/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/phoenix/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/phoenix/conf',
-        to = '/usr/hdp/current/phoenix-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/storm-slider-client/conf', '/etc/storm-slider-client/conf.backup'),
-        not_if = 'test -e /etc/storm-slider-client/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/storm-slider-client/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/storm-slider-client/conf',
-        to = '/usr/hdp/current/storm-slider-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/slider/conf', '/etc/slider/conf.backup'),
-        not_if = 'test -e /etc/slider/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/slider/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/slider/conf',
-        to = '/usr/hdp/current/slider-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/oozie/conf', '/etc/oozie/conf.backup'),
-        not_if = 'test -e /etc/oozie/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/oozie/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/oozie/conf',
-        to = '/usr/hdp/current/oozie-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/falcon/conf', '/etc/falcon/conf.backup'),
-        not_if = 'test -e /etc/falcon/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/falcon/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/falcon/conf',
-        to = '/usr/hdp/current/falcon-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/knox/conf', '/etc/knox/conf.backup'),
-                              not_if = 'test -e /etc/knox/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/knox/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/knox/conf',
-                              to = '/usr/hdp/current/knox-server/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/kafka/conf', '/etc/kafka/conf.backup'),
-                              not_if = 'test -e /etc/kafka/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/kafka/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/kafka/conf',
-                              to = '/usr/hdp/current/kafka-broker/conf') 
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive/conf', '/etc/hive/conf.backup'),
-        not_if = 'test -e /etc/hive/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hive/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hive/conf',
-        to = '/usr/hdp/current/hive-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/spark/conf', '/etc/spark/conf.backup'),
-        not_if = 'test -e /etc/spark/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/spark/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/spark/conf',
-        to = '/usr/hdp/current/spark-client/conf')
+        self.assertResourceCalled('Directory', conf_dir, action = ['delete'],)
+        self.assertResourceCalled('Link', conf_dir, to = current_dir,)
 
     self.assertNoMoreResources()
 
-  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1243"))
+  @patch("os.path.isdir", new = MagicMock(return_value = True))
+  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1234"))
   @patch("resource_management.libraries.functions.conf_select.create")
   @patch("resource_management.libraries.functions.conf_select.select")
   @patch("os.symlink")
@@ -316,282 +152,51 @@ class TestHookAfterInstall(RMFTestCase):
 
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
-    json_content['hostLevelParams']['stack_version'] = "2.3"
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
 
-    self.executeScript("2.0.6/hooks/after-INSTALL/scripts/hook.py",
+    self.executeScript("after-INSTALL/scripts/hook.py",
                        classname="AfterInstallHook",
                        command="hook",
-                       config_dict = json_content)
+                       stack_version = self.STACK_VERSION,
+                       target=RMFTestCase.TARGET_STACK_HOOKS,
+                       config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES)
 
 
-    self.assertResourceCalled('Execute', 'ambari-sudo.sh /usr/bin/hdp-select set all `ambari-python-wrap /usr/bin/hdp-select versions | grep ^2.3 | tail -1`',
-      only_if = 'ls -d /usr/hdp/2.3*')
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'hive-server2', '2.3.0.0-1234'),
+      sudo = True)
 
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
       owner = 'hdfs',
       group = 'hadoop',
-      conf_dir = "/usr/hdp/current/hadoop-client/conf",
+      conf_dir = "/usr/hdp/2.3.0.0-1234/hadoop/conf",
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['core-site'],
-      only_if="ls /usr/hdp/current/hadoop-client/conf")
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/kms/conf', '/etc/ranger/kms/conf.backup'),
-        not_if = 'test -e /etc/ranger/kms/conf.backup',
-        sudo = True,)
-
-    self.assertResourceCalled('Directory', '/etc/ranger/kms/conf',
-        action = ['delete'],)
-
-    self.assertResourceCalled('Link', '/etc/ranger/kms/conf',
-        to = '/usr/hdp/current/ranger-kms/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive2/conf', '/etc/hive2/conf.backup'),
-                              not_if = 'test -e /etc/hive2/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hive2/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hive2/conf',
-                              to = '/usr/hdp/current/hive-server2-hive2/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/zookeeper/conf', '/etc/zookeeper/conf.backup'),
-                              not_if = 'test -e /etc/zookeeper/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/zookeeper/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/zookeeper/conf',
-                              to = '/usr/hdp/current/zookeeper-client/conf')    
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/pig/conf', '/etc/pig/conf.backup'),
-        not_if = 'test -e /etc/pig/conf.backup',
-        sudo = True,)
-
-    self.assertResourceCalled('Directory', '/etc/pig/conf',
-                              action=['delete'])
-
-    self.assertResourceCalled("Link", "/etc/pig/conf",
-                              to="/usr/hdp/current/pig-client/conf")
-
-    # pig fails, so no Directory/Link combo
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/tez/conf', '/etc/tez/conf.backup'),
-        not_if = 'test -e /etc/tez/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/tez/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/tez/conf',
-        to = '/usr/hdp/current/tez-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive-webhcat/conf', '/etc/hive-webhcat/conf.backup'),
-        not_if = 'test -e /etc/hive-webhcat/conf.backup',
-        sudo = True,)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive-hcatalog/conf', '/etc/hive-hcatalog/conf.backup'),
-        not_if = 'test -e /etc/hive-hcatalog/conf.backup',
-        sudo = True,)
-
-    self.assertResourceCalled('Directory', '/etc/hive-webhcat/conf',
-        action = ['delete'],)
-
-    self.assertResourceCalled('Link', '/etc/hive-webhcat/conf',
-        to = '/usr/hdp/current/hive-webhcat/etc/webhcat',)
-
-    self.assertResourceCalled('Directory', '/etc/hive-hcatalog/conf',
-        action = ['delete'],)
-
-    self.assertResourceCalled('Link', '/etc/hive-hcatalog/conf',
-        to = '/usr/hdp/current/hive-webhcat/etc/hcatalog',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hbase/conf', '/etc/hbase/conf.backup'),
-        not_if = 'test -e /etc/hbase/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/hbase/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/hbase/conf',
-        to = '/usr/hdp/current/hbase-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/tagsync/conf', '/etc/ranger/tagsync/conf.backup'),
-                              not_if = 'test -e /etc/ranger/tagsync/conf.backup',
-                              sudo = True,)
-
-    self.assertResourceCalled('Directory', '/etc/ranger/tagsync/conf',
-                              action = ['delete'],)
-
-    self.assertResourceCalled('Link', '/etc/ranger/tagsync/conf',
-                              to = '/usr/hdp/current/ranger-tagsync/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/usersync/conf', '/etc/ranger/usersync/conf.backup'),
-                              not_if = 'test -e /etc/ranger/usersync/conf.backup',
-                              sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/ranger/usersync/conf',
-                              action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/ranger/usersync/conf',
-                              to = '/usr/hdp/current/ranger-usersync/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hadoop/conf', '/etc/hadoop/conf.backup'),
-        not_if = 'test -e /etc/hadoop/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/hadoop/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/hadoop/conf',
-        to = '/usr/hdp/current/hadoop-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/mahout/conf', '/etc/mahout/conf.backup'),
-        not_if = 'test -e /etc/mahout/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/mahout/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/mahout/conf',
-        to = '/usr/hdp/current/mahout-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/storm/conf', '/etc/storm/conf.backup'),
-        not_if = 'test -e /etc/storm/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/storm/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/storm/conf',
-        to = '/usr/hdp/current/storm-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/admin/conf', '/etc/ranger/admin/conf.backup'),
-        not_if = 'test -e /etc/ranger/admin/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/ranger/admin/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/ranger/admin/conf',
-        to = '/usr/hdp/current/ranger-admin/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/flume/conf', '/etc/flume/conf.backup'),
-        not_if = 'test -e /etc/flume/conf.backup',
-        sudo = True,)
-
-    self.assertResourceCalled('Directory', '/etc/flume/conf',
-        action = ['delete'],)
-
-    self.assertResourceCalled('Link', '/etc/flume/conf',
-        to = '/usr/hdp/current/flume-server/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/sqoop/conf', '/etc/sqoop/conf.backup'),
-                              not_if = 'test -e /etc/sqoop/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/sqoop/conf',
-                            action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/sqoop/conf',
-                            to = '/usr/hdp/current/sqoop-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/accumulo/conf', '/etc/accumulo/conf.backup'),
-        not_if = 'test -e /etc/accumulo/conf.backup',
-        sudo = True,)
-
-    self.assertResourceCalled('Directory', '/etc/accumulo/conf',
-        action = ['delete'],)
-
-    self.assertResourceCalled('Link', '/etc/accumulo/conf',
-        to = '/usr/hdp/current/accumulo-client/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/phoenix/conf', '/etc/phoenix/conf.backup'),
-        not_if = 'test -e /etc/phoenix/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/phoenix/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/phoenix/conf',
-        to = '/usr/hdp/current/phoenix-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/storm-slider-client/conf', '/etc/storm-slider-client/conf.backup'),
-        not_if = 'test -e /etc/storm-slider-client/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/storm-slider-client/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/storm-slider-client/conf',
-        to = '/usr/hdp/current/storm-slider-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/slider/conf', '/etc/slider/conf.backup'),
-        not_if = 'test -e /etc/slider/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/slider/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/slider/conf',
-        to = '/usr/hdp/current/slider-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/oozie/conf', '/etc/oozie/conf.backup'),
-        not_if = 'test -e /etc/oozie/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/oozie/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/oozie/conf',
-        to = '/usr/hdp/current/oozie-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/falcon/conf', '/etc/falcon/conf.backup'),
-        not_if = 'test -e /etc/falcon/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/falcon/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/falcon/conf',
-        to = '/usr/hdp/current/falcon-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/knox/conf', '/etc/knox/conf.backup'),
-                              not_if = 'test -e /etc/knox/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/knox/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/knox/conf',
-                              to = '/usr/hdp/current/knox-server/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/kafka/conf', '/etc/kafka/conf.backup'),
-                              not_if = 'test -e /etc/kafka/conf.backup',
-                              sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/kafka/conf',
-                              action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/kafka/conf',
-                              to = '/usr/hdp/current/kafka-broker/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive/conf', '/etc/hive/conf.backup'),
-        not_if = 'test -e /etc/hive/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/hive/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/hive/conf',
-        to = '/usr/hdp/current/hive-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/spark/conf', '/etc/spark/conf.backup'),
-        not_if = 'test -e /etc/spark/conf.backup',
-        sudo = True)
-
-    self.assertResourceCalled('Directory', '/etc/spark/conf',
-        action = ['delete'])
-
-    self.assertResourceCalled('Link', '/etc/spark/conf',
-        to = '/usr/hdp/current/spark-client/conf')
+      configuration_attributes = self.getConfig()['configurationAttributes']['core-site'],
+      only_if="ls /usr/hdp/2.3.0.0-1234/hadoop/conf")
+
+    self.assertResourceCalled('Directory',
+                              '/usr/lib/ambari-logsearch-logfeeder/conf',
+                              mode = 0755,
+                              cd_access = 'a',
+                              create_parents = True)
+
+    package_dirs = conf_select.get_package_dirs();
+    for package, dir_defs in package_dirs.iteritems():
+      for dir_def in dir_defs:
+        conf_dir = dir_def['conf_dir']
+        conf_backup_dir = conf_dir + ".backup"
+        current_dir = dir_def['current_dir']
+        self.assertResourceCalled('Execute', ('cp', '-R', '-p', conf_dir, conf_backup_dir),
+            not_if = 'test -e ' + conf_backup_dir,
+            sudo = True,)
+
+        self.assertResourceCalled('Directory', conf_dir, action = ['delete'],)
+        self.assertResourceCalled('Link', conf_dir, to = current_dir,)
 
     self.assertNoMoreResources()
 
 
-  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1243"))
+  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1234"))
   @patch("resource_management.libraries.functions.conf_select.create")
   @patch("resource_management.libraries.functions.conf_select.select")
   @patch("os.symlink")
@@ -619,18 +224,21 @@ class TestHookAfterInstall(RMFTestCase):
 
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
-    json_content['hostLevelParams']['stack_version'] = "2.3"
-    json_content['hostLevelParams']['current_version'] = "2.3.0.0-1234"
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
 
-    self.executeScript("2.0.6/hooks/after-INSTALL/scripts/hook.py",
+    self.executeScript("after-INSTALL/scripts/hook.py",
       classname="AfterInstallHook",
       command="hook",
-      config_dict = json_content)
+      stack_version = self.STACK_VERSION,
+      target=RMFTestCase.TARGET_STACK_HOOKS,
+      config_dict = json_content,
+      config_overrides = self.CONFIG_OVERRIDES)
 
-    self.assertResourceCalled('Execute', 'ambari-sudo.sh /usr/bin/hdp-select set all `ambari-python-wrap /usr/bin/hdp-select versions | grep ^2.3.0.0-1234 | tail -1`',
-      only_if = 'ls -d /usr/hdp/2.3.0.0-1234*')
+    self.assertResourceCalled('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'hive-server2', '2.3.0.0-1234'),
+      sudo = True)
 
-  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1243"))
+  @patch("os.path.isdir", new = MagicMock(return_value = True))
+  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1234"))
   @patch("resource_management.libraries.functions.conf_select.create")
   @patch("resource_management.libraries.functions.conf_select.select")
   @patch("os.symlink")
@@ -648,232 +256,81 @@ class TestHookAfterInstall(RMFTestCase):
 
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
-    json_content['hostLevelParams']['stack_version'] = "2.3"
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
     json_content['roleParams']['upgrade_suspended'] = "true"
 
-    self.executeScript("2.0.6/hooks/after-INSTALL/scripts/hook.py",
+    self.executeScript("after-INSTALL/scripts/hook.py",
                        classname="AfterInstallHook",
                        command="hook",
-                       config_dict = json_content)
+                       stack_version = self.STACK_VERSION,
+                       target=RMFTestCase.TARGET_STACK_HOOKS,
+                       config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES)
 
     # same assertions as test_hook_default_conf_select, but skip hdp-select set all
 
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
       owner = 'hdfs',
       group = 'hadoop',
-      conf_dir = "/usr/hdp/current/hadoop-client/conf",
+      conf_dir = "/usr/hdp/2.3.0.0-1234/hadoop/conf",
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['core-site'],
-      only_if="ls /usr/hdp/current/hadoop-client/conf")
+      configuration_attributes = self.getConfig()['configurationAttributes']['core-site'],
+      only_if="ls /usr/hdp/2.3.0.0-1234/hadoop/conf")
 
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/kms/conf', '/etc/ranger/kms/conf.backup'),
-        not_if = 'test -e /etc/ranger/kms/conf.backup',
-        sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/ranger/kms/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/ranger/kms/conf',
-        to = '/usr/hdp/current/ranger-kms/conf',)
+    self.assertResourceCalled('Directory',
+                              '/usr/lib/ambari-logsearch-logfeeder/conf',
+                              mode = 0755,
+                              cd_access = 'a',
+                              create_parents = True)
 
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive2/conf', '/etc/hive2/conf.backup'),
-                              not_if = 'test -e /etc/hive2/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hive2/conf',
-                            action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hive2/conf',
-                            to = '/usr/hdp/current/hive-server2-hive2/conf')
+    package_dirs = conf_select.get_package_dirs();
+    for package, dir_defs in package_dirs.iteritems():
+      for dir_def in dir_defs:
+        conf_dir = dir_def['conf_dir']
+        conf_backup_dir = conf_dir + ".backup"
+        current_dir = dir_def['current_dir']
+        self.assertResourceCalled('Execute', ('cp', '-R', '-p', conf_dir, conf_backup_dir),
+            not_if = 'test -e ' + conf_backup_dir,
+            sudo = True,)
 
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/zookeeper/conf', '/etc/zookeeper/conf.backup'),
-                              not_if = 'test -e /etc/zookeeper/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/zookeeper/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/zookeeper/conf',
-                              to = '/usr/hdp/current/zookeeper-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/pig/conf', '/etc/pig/conf.backup'),
-                              not_if = 'test -e /etc/pig/conf.backup',
-                              sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/pig/conf',
-                            action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/pig/conf',
-                            to = '/usr/hdp/current/pig-client/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/tez/conf', '/etc/tez/conf.backup'),
-                              not_if = 'test -e /etc/tez/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/tez/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/tez/conf',
-                              to = '/usr/hdp/current/tez-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive-webhcat/conf', '/etc/hive-webhcat/conf.backup'),
-        not_if = 'test -e /etc/hive-webhcat/conf.backup',
-        sudo = True,)
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive-hcatalog/conf', '/etc/hive-hcatalog/conf.backup'),
-        not_if = 'test -e /etc/hive-hcatalog/conf.backup',
-        sudo = True,)
-
-    self.assertResourceCalled('Directory', '/etc/hive-webhcat/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/hive-webhcat/conf',
-        to = '/usr/hdp/current/hive-webhcat/etc/webhcat',)
-
-    self.assertResourceCalled('Directory', '/etc/hive-hcatalog/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/hive-hcatalog/conf',
-        to = '/usr/hdp/current/hive-webhcat/etc/hcatalog',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hbase/conf', '/etc/hbase/conf.backup'),
-        not_if = 'test -e /etc/hbase/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hbase/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hbase/conf',
-        to = '/usr/hdp/current/hbase-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/tagsync/conf', '/etc/ranger/tagsync/conf.backup'),
-                              not_if = 'test -e /etc/ranger/tagsync/conf.backup',
-                              sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/ranger/tagsync/conf',
-                              action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/ranger/tagsync/conf',
-                              to = '/usr/hdp/current/ranger-tagsync/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/usersync/conf', '/etc/ranger/usersync/conf.backup'),
-                              not_if = 'test -e /etc/ranger/usersync/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/ranger/usersync/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/ranger/usersync/conf',
-                              to = '/usr/hdp/current/ranger-usersync/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hadoop/conf', '/etc/hadoop/conf.backup'),
-                              not_if = 'test -e /etc/hadoop/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hadoop/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hadoop/conf',
-                              to = '/usr/hdp/current/hadoop-client/conf')
-
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/mahout/conf', '/etc/mahout/conf.backup'),
-        not_if = 'test -e /etc/mahout/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/mahout/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/mahout/conf',
-        to = '/usr/hdp/current/mahout-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/storm/conf', '/etc/storm/conf.backup'),
-        not_if = 'test -e /etc/storm/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/storm/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/storm/conf',
-        to = '/usr/hdp/current/storm-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/ranger/admin/conf', '/etc/ranger/admin/conf.backup'),
-        not_if = 'test -e /etc/ranger/admin/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/ranger/admin/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/ranger/admin/conf',
-        to = '/usr/hdp/current/ranger-admin/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/flume/conf', '/etc/flume/conf.backup'),
-        not_if = 'test -e /etc/flume/conf.backup',
-        sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/flume/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/flume/conf',
-        to = '/usr/hdp/current/flume-server/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/sqoop/conf', '/etc/sqoop/conf.backup'),
-                              not_if = 'test -e /etc/sqoop/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/sqoop/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/sqoop/conf',
-                              to = '/usr/hdp/current/sqoop-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/accumulo/conf', '/etc/accumulo/conf.backup'),
-        not_if = 'test -e /etc/accumulo/conf.backup',
-        sudo = True,)
-    self.assertResourceCalled('Directory', '/etc/accumulo/conf',
-        action = ['delete'],)
-    self.assertResourceCalled('Link', '/etc/accumulo/conf',
-        to = '/usr/hdp/current/accumulo-client/conf',)
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/phoenix/conf', '/etc/phoenix/conf.backup'),
-        not_if = 'test -e /etc/phoenix/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/phoenix/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/phoenix/conf',
-        to = '/usr/hdp/current/phoenix-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/storm-slider-client/conf', '/etc/storm-slider-client/conf.backup'),
-        not_if = 'test -e /etc/storm-slider-client/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/storm-slider-client/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/storm-slider-client/conf',
-        to = '/usr/hdp/current/storm-slider-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/slider/conf', '/etc/slider/conf.backup'),
-        not_if = 'test -e /etc/slider/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/slider/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/slider/conf',
-        to = '/usr/hdp/current/slider-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/oozie/conf', '/etc/oozie/conf.backup'),
-        not_if = 'test -e /etc/oozie/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/oozie/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/oozie/conf',
-        to = '/usr/hdp/current/oozie-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/falcon/conf', '/etc/falcon/conf.backup'),
-        not_if = 'test -e /etc/falcon/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/falcon/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/falcon/conf',
-        to = '/usr/hdp/current/falcon-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/knox/conf', '/etc/knox/conf.backup'),
-                              not_if = 'test -e /etc/knox/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/knox/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/knox/conf',
-                              to = '/usr/hdp/current/knox-server/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/kafka/conf', '/etc/kafka/conf.backup'),
-                              not_if = 'test -e /etc/kafka/conf.backup',
-                              sudo = True)
-    self.assertResourceCalled('Directory', '/etc/kafka/conf',
-                              action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/kafka/conf',
-                              to = '/usr/hdp/current/kafka-broker/conf') 
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/hive/conf', '/etc/hive/conf.backup'),
-        not_if = 'test -e /etc/hive/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/hive/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/hive/conf',
-        to = '/usr/hdp/current/hive-client/conf')
-
-    self.assertResourceCalled('Execute', ('cp', '-R', '-p', '/etc/spark/conf', '/etc/spark/conf.backup'),
-        not_if = 'test -e /etc/spark/conf.backup',
-        sudo = True)
-    self.assertResourceCalled('Directory', '/etc/spark/conf',
-        action = ['delete'])
-    self.assertResourceCalled('Link', '/etc/spark/conf',
-        to = '/usr/hdp/current/spark-client/conf')
+        self.assertResourceCalled('Directory', conf_dir, action = ['delete'],)
+        self.assertResourceCalled('Link', conf_dir, to = current_dir,)
 
     self.assertNoMoreResources()
+
+
+  @patch("resource_management.core.Logger.warning")
+  @patch("shared_initialization.load_version", new = MagicMock(return_value="2.3.0.0-1234"))
+  @patch("resource_management.libraries.functions.conf_select.create")
+  @patch("resource_management.libraries.functions.conf_select.select")
+  @patch("os.symlink")
+  @patch("shutil.rmtree")
+  def test_hook_setup_stack_symlinks_skipped(self, rmtree_mock, symlink_mock, conf_select_select_mock, conf_select_create_mock, logger_warning_mock):
+    """
+    Tests that <stack-selector-tool> set all is not called on sys_prepped hosts
+    :return:
+    """
+
+    def mocked_conf_select(arg1, arg2, arg3, dry_run = False):
+      return "/etc/{0}/{1}/0".format(arg2, arg3)
+
+    conf_select_create_mock.side_effect = mocked_conf_select
+
+    config_file = self.get_src_folder() + "/test/python/stacks/2.0.6/configs/default.json"
+    with open(config_file, "r") as f:
+      json_content = json.load(f)
+
+    version = '2.3.0.0-1234'
+    json_content['commandParams']['version'] = version
+    json_content['clusterLevelParams']['stack_version'] = "2.3"
+    json_content['ambariLevelParams']['host_sys_prepped'] = "true"
+
+    self.executeScript("after-INSTALL/scripts/hook.py",
+                       classname="AfterInstallHook",
+                       command="hook",
+                       stack_version = self.STACK_VERSION,
+                       target=RMFTestCase.TARGET_STACK_HOOKS,
+                       config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES)
+
+    logger_warning_mock.assert_any_call('Skipping running stack-selector-tool because this is a sys_prepped host. This may cause symlink pointers not to be created for HDP components installed later on top of an already sys_prepped host')

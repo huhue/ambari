@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,14 +17,19 @@
  */
 package org.apache.ambari.server.alerts;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.RuntimeMXBean;
 import java.text.MessageFormat;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
+import org.apache.ambari.server.agent.stomp.AlertDefinitionsHolder;
 import org.apache.ambari.server.orm.dao.AlertsDAO;
 import org.apache.ambari.server.orm.entities.AlertCurrentEntity;
 import org.apache.ambari.server.orm.entities.AlertDefinitionEntity;
@@ -32,10 +37,16 @@ import org.apache.ambari.server.orm.entities.AlertHistoryEntity;
 import org.apache.ambari.server.state.Alert;
 import org.apache.ambari.server.state.AlertState;
 import org.apache.ambari.server.state.Cluster;
+import org.apache.ambari.server.state.Host;
+import org.apache.ambari.server.state.HostState;
 import org.apache.ambari.server.state.MaintenanceState;
+import org.apache.ambari.server.state.alert.AlertDefinition;
+import org.apache.ambari.server.state.alert.AlertDefinitionFactory;
 import org.apache.ambari.server.state.alert.SourceType;
 import org.apache.ambari.server.state.services.AmbariServerAlertService;
 import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.inject.Inject;
 
@@ -47,6 +58,11 @@ import com.google.inject.Inject;
  * description of the alerts that are stale.
  */
 public class StaleAlertRunnable extends AlertRunnable {
+  /**
+   * Logger.
+   */
+  private final static Logger LOG = LoggerFactory.getLogger(StaleAlertRunnable.class);
+
   /**
    * The message for the alert when all services have run in their designated
    * intervals.
@@ -71,11 +87,22 @@ public class StaleAlertRunnable extends AlertRunnable {
   private static final int MINUTES_PER_DAY = 24 * 60;
   private static final int MINUTES_PER_HOUR = 60;
 
+
   /**
    * Used to get the current alerts and the last time they ran.
    */
   @Inject
   private AlertsDAO m_alertsDao;
+
+  /**
+   * Used for converting {@link AlertDefinitionEntity} into
+   * {@link AlertDefinition} instances.
+   */
+  @Inject
+  private AlertDefinitionFactory m_definitionFactory;
+
+  @Inject
+  private AlertDefinitionsHolder alertDefinitionsHolder;
 
   /**
    * Constructor.
@@ -91,8 +118,18 @@ public class StaleAlertRunnable extends AlertRunnable {
    */
   @Override
   List<Alert> execute(Cluster cluster, AlertDefinitionEntity myDefinition) {
-    Set<String> staleAlerts = new TreeSet<String>();
-    Map<String, Set<String>> staleHostAlerts = new HashMap<>();
+    // get the multiplier
+    AlertDefinition alertDefinition = m_definitionFactory.coerce(myDefinition);
+    int waitFactor = alertHelper.getWaitFactorMultiplier(alertDefinition);
+
+    // use the uptime of the Ambari Server as a way to determine if we need to
+    // give the alert more time to report in
+    RuntimeMXBean rb = ManagementFactory.getRuntimeMXBean();
+    long uptime = rb.getUptime();
+
+    int totalStaleAlerts = 0;
+    Set<String> staleAlertGroupings = new TreeSet<>();
+    Map<String, Set<String>> staleAlertsByHost = new HashMap<>();
     Set<String> hostsWithStaleAlerts = new TreeSet<>();
 
     // get the cluster's current alerts
@@ -101,8 +138,11 @@ public class StaleAlertRunnable extends AlertRunnable {
 
     long now = System.currentTimeMillis();
 
+    Map<Long, List<Long>> alertDefinitionsToHosts = prepareHostDefinitions(cluster.getClusterId());
+
     // for each current alert, check to see if the last time it ran is
-    // more than 2x its interval value (indicating it hasn't run)
+    // more than INTERVAL_WAIT_FACTOR * its interval value (indicating it hasn't
+    // run)
     for (AlertCurrentEntity current : currentAlerts) {
       AlertHistoryEntity history = current.getAlertHistory();
       AlertDefinitionEntity currentDefinition = history.getAlertDefinition();
@@ -130,37 +170,88 @@ public class StaleAlertRunnable extends AlertRunnable {
       // convert minutes to milliseconds for the definition's interval
       long intervalInMillis = currentDefinition.getScheduleInterval() * MINUTE_TO_MS_CONVERSION;
 
-      // if the last time it was run is >= 2x the interval, it's stale
-      long timeDifference = now - current.getLatestTimestamp();
-      if (timeDifference >= 2 * intervalInMillis) {
+      // if the server hasn't been up long enough to consider this alert stale,
+      // then don't mark it stale - this is to protect against cases where
+      // Ambari was down for a while and after startup it hasn't received the
+      // alert because it has a longer interval than this stale alert check:
+      //
+      // Stale alert check - every 5 minutes
+      // Foo alert cehck - every 10 minutes
+      // Ambari down for 35 minutes for upgrade
+      if (uptime <= waitFactor * intervalInMillis) {
+        continue;
+      }
+
+      Boolean timedout;
+      Long lastCheckTimestamp = 0L;
+
+      // alert history for component or ambari agent should contains the hostname
+      // host/hosts for alerts for master component/with host ignoring can be retrieved from current agent's alert definitions
+
+      String currentHostName = history.getHostName();
+      List<Host> hosts = new ArrayList<>();
+      if (currentHostName != null) {
+        hosts.add(cluster.getHost(currentHostName));
+      } else if (alertDefinitionsToHosts.containsKey(current.getDefinitionId())) {
+        hosts = alertDefinitionsToHosts.get(current.getDefinitionId()).stream()
+            .map(i -> cluster.getHost(i)).collect(Collectors.toList());
+      }
+      if (!hosts.isEmpty()) {
+
+        // in case alert ignores host we should to check alert is stale on all hosts
+        timedout = true;
+        for (Host host : hosts) {
+          if (timedout) {
+            // check agent reported about stale alert
+            if (alertHelper.getStaleAlerts(host.getHostId()).containsKey(current.getDefinitionId())) {
+              lastCheckTimestamp = Math.max(lastCheckTimestamp,
+                  alertHelper.getStaleAlerts(host.getHostId()).get(current.getDefinitionId()));
+            // check host is in HEARTBEAT_LOST state
+            } else if (host.getState().equals(HostState.HEARTBEAT_LOST)) {
+              lastCheckTimestamp = Math.max(lastCheckTimestamp, host.getLastHeartbeatTime());
+            } else {
+              timedout = false;
+            }
+          }
+        }
+      } else {
+        // Server alerts will be checked by the old way
+        long timeDifference = now - current.getLatestTimestamp();
+        timedout = timeDifference >= waitFactor * intervalInMillis;
+        lastCheckTimestamp = current.getOriginalTimestamp();
+      }
+      if (timedout) {
+        // increase the count
+        totalStaleAlerts++;
 
         // it is technically possible to have a null/blank label; if so,
         // default to the name of the definition
         String label = currentDefinition.getLabel();
         if (StringUtils.isEmpty(label)) {
           label = currentDefinition.getDefinitionName();
-          }
+        }
 
         if (null != history.getHostName()) {
           // keep track of the host, if not null
           String hostName = history.getHostName();
           hostsWithStaleAlerts.add(hostName);
-          if (!staleHostAlerts.containsKey(hostName)) {
-            staleHostAlerts.put(hostName, new TreeSet<String>());
-            }
+          if (!staleAlertsByHost.containsKey(hostName)) {
+            staleAlertsByHost.put(hostName, new TreeSet<>());
+          }
 
-          staleHostAlerts.get(hostName).add(MessageFormat.format(TIMED_LABEL_MSG, label,
+          long timeDifference = now - lastCheckTimestamp;
+          staleAlertsByHost.get(hostName).add(MessageFormat.format(TIMED_LABEL_MSG, label,
               millisToHumanReadableStr(timeDifference)));
         } else {
           // non host alerts
-          staleAlerts.add(label);
-          }
+          staleAlertGroupings.add(label);
         }
+      }
     }
 
-    for (String host : staleHostAlerts.keySet()) {
-      staleAlerts.add(MessageFormat.format(HOST_LABEL_MSG, host,
-          StringUtils.join(staleHostAlerts.get(host), ",\n  ")));
+    for (String host : staleAlertsByHost.keySet()) {
+      staleAlertGroupings.add(MessageFormat.format(HOST_LABEL_MSG, host,
+          StringUtils.join(staleAlertsByHost.get(host), ",\n  ")));
     }
 
     AlertState alertState = AlertState.OK;
@@ -168,10 +259,10 @@ public class StaleAlertRunnable extends AlertRunnable {
 
     // if there are stale alerts, mark as CRITICAL with the list of
     // alerts
-    if (!staleAlerts.isEmpty()) {
+    if (!staleAlertGroupings.isEmpty()) {
       alertState = AlertState.CRITICAL;
-      alertText = MessageFormat.format(STALE_ALERTS_MSG, staleAlerts.size(),
-          hostsWithStaleAlerts.size(), StringUtils.join(staleAlerts, ",\n"));
+      alertText = MessageFormat.format(STALE_ALERTS_MSG, totalStaleAlerts,
+          hostsWithStaleAlerts.size(), StringUtils.join(staleAlertGroupings, ",\n"));
     }
 
     Alert alert = new Alert(myDefinition.getDefinitionName(), null, myDefinition.getServiceName(),
@@ -180,9 +271,28 @@ public class StaleAlertRunnable extends AlertRunnable {
     alert.setLabel(myDefinition.getLabel());
     alert.setText(alertText);
     alert.setTimestamp(now);
-    alert.setCluster(cluster.getClusterName());
+    alert.setClusterId(cluster.getClusterId());
 
     return Collections.singletonList(alert);
+  }
+
+  /**
+   * Retrieves alert definitions sent to agents.
+   * @param clusterId cluster id
+   * @return map definition id - host ids list
+   */
+  public Map<Long, List<Long>> prepareHostDefinitions(Long clusterId) {
+    Map<Long, List<Long>> alertDefinitionsToHosts = new HashMap<>();
+
+    alertDefinitionsHolder.getData().entrySet().stream()
+        .filter(e -> e.getValue().getClusters() != null)
+        .filter(e -> e.getValue().getClusters().get(clusterId) != null)
+        .forEach(e -> e.getValue().getClusters().get(clusterId).getAlertDefinitions().stream()
+            .forEach(l -> {
+              alertDefinitionsToHosts.putIfAbsent(l.getDefinitionId(), new ArrayList<>());
+              alertDefinitionsToHosts.get(l.getDefinitionId()).add(e.getKey());
+            }));
+    return alertDefinitionsToHosts;
   }
 
   /**

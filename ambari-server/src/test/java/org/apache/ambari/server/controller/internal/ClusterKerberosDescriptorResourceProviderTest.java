@@ -18,15 +18,27 @@
 
 package org.apache.ambari.server.controller.internal;
 
-import com.google.inject.AbstractModule;
-import com.google.inject.Guice;
-import com.google.inject.Injector;
-import junit.framework.Assert;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.capture;
+import static org.easymock.EasyMock.eq;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.newCapture;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.TreeMap;
+
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.controller.AmbariManagementController;
+import org.apache.ambari.server.controller.KerberosHelper;
 import org.apache.ambari.server.controller.predicate.AndPredicate;
-import org.apache.ambari.server.controller.spi.ClusterController;
 import org.apache.ambari.server.controller.spi.NoSuchResourceException;
 import org.apache.ambari.server.controller.spi.Predicate;
 import org.apache.ambari.server.controller.spi.Request;
@@ -34,21 +46,21 @@ import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.ResourceProvider;
 import org.apache.ambari.server.controller.spi.SystemException;
 import org.apache.ambari.server.controller.utilities.PredicateBuilder;
-import org.apache.ambari.server.controller.utilities.PropertyHelper;
 import org.apache.ambari.server.security.SecurePasswordHelper;
 import org.apache.ambari.server.security.TestAuthenticationFactory;
-import org.apache.ambari.server.security.authorization.AuthorizationException;
 import org.apache.ambari.server.security.encryption.CredentialStoreService;
 import org.apache.ambari.server.security.encryption.CredentialStoreServiceImpl;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.StackId;
+import org.apache.ambari.server.state.kerberos.AbstractKerberosDescriptor;
 import org.apache.ambari.server.state.kerberos.KerberosDescriptor;
 import org.apache.ambari.server.state.kerberos.KerberosDescriptorFactory;
-import org.apache.ambari.server.state.kerberos.KerberosDescriptorType;
 import org.apache.ambari.server.state.kerberos.KerberosPrincipalDescriptorTest;
 import org.apache.ambari.server.state.kerberos.KerberosServiceDescriptorTest;
 import org.apache.ambari.server.state.stack.OsFamily;
+import org.easymock.Capture;
+import org.easymock.CaptureType;
 import org.easymock.EasyMockSupport;
 import org.junit.After;
 import org.junit.Before;
@@ -56,15 +68,12 @@ import org.junit.Test;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import com.google.gson.Gson;
+import com.google.inject.AbstractModule;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
 
-import static org.easymock.EasyMock.*;
+import junit.framework.Assert;
 
 /**
  * ClusterKerberosDescriptorResourceProviderTest unit tests.
@@ -72,111 +81,105 @@ import static org.easymock.EasyMock.*;
 @SuppressWarnings("unchecked")
 public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSupport {
 
-  private static final Map<String, Object> STACK_MAP =
-      new HashMap<String, Object>() {
-        {
-          put("properties", new HashMap<String, Object>() {{
-            put("realm", "EXAMPLE.COM");
-            put("some.property", "Hello World");
-          }});
+  private static final Gson GSON = new Gson();
 
-          put(KerberosDescriptorType.AUTH_TO_LOCAL_PROPERTY.getDescriptorPluralName(), new ArrayList<String>() {{
-            add("global.name.rules");
-          }});
+  private static final Map<String, Object> STACK_MAP;
 
-          put(KerberosDescriptorType.SERVICE.getDescriptorPluralName(), new ArrayList<Object>() {{
-            add(KerberosServiceDescriptorTest.MAP_VALUE);
-          }});
-          put(KerberosDescriptorType.CONFIGURATION.getDescriptorPluralName(), new ArrayList<Map<String, Object>>() {{
-            add(new HashMap<String, Object>() {
-              {
-                put("cluster-conf", new HashMap<String, String>() {
-                  {
-                    put("property1", "red");
-                  }
-                });
-              }
-            });
-          }});
-          put(KerberosDescriptorType.IDENTITY.getDescriptorPluralName(), new ArrayList<Object>() {{
-            add(new HashMap<String, Object>() {
-              {
-                put("name", "shared");
-                put("principal", new HashMap<String, Object>(KerberosPrincipalDescriptorTest.MAP_VALUE));
-                put("keytab", new HashMap<String, Object>() {
-                  {
-                    put("file", "/etc/security/keytabs/subject.service.keytab");
+  private static final Map<String, Object> USER_MAP;
 
-                    put("owner", new HashMap<String, Object>() {{
-                      put("name", "root");
-                      put("access", "rw");
-                    }});
-
-                    put("group", new HashMap<String, Object>() {{
-                      put("name", "hadoop");
-                      put("access", "r");
-                    }});
-
-                    put("configuration", "service-site/service2.component.keytab.file");
-                  }
-                });
-              }
-            });
-          }});
-        }
-      };
-
-  private static final Map<String, Object> USER_MAP =
-      new HashMap<String, Object>() {
-        {
-          put("properties", new HashMap<String, Object>() {{
-            put("realm", "HWX.COM");
-            put("some.property", "Hello World");
-          }});
-
-          put(KerberosDescriptorType.CONFIGURATION.getDescriptorPluralName(), new ArrayList<Map<String, Object>>() {{
-            add(new HashMap<String, Object>() {
-              {
-                put("cluster-conf", new HashMap<String, String>() {
-                  {
-                    put("property1", "blue");
-                    put("property2", "orange");
-                  }
-                });
-              }
-            });
-          }});
-          put(KerberosDescriptorType.IDENTITY.getDescriptorPluralName(), new ArrayList<Object>() {{
-            add(new HashMap<String, Object>() {
-              {
-                put("name", "shared");
-                put("principal", new HashMap<String, Object>(KerberosPrincipalDescriptorTest.MAP_VALUE));
-                put("keytab", new HashMap<String, Object>() {
-                  {
-                    put("file", "/etc/security/keytabs/subject.service.keytab");
-
-                    put("owner", new HashMap<String, Object>() {{
-                      put("name", "root");
-                      put("access", "rw");
-                    }});
-
-                    put("group", new HashMap<String, Object>() {{
-                      put("name", "hadoop");
-                      put("access", "r");
-                    }});
-
-                    put("configuration", "service-site/service2.component.keytab.file");
-                  }
-                });
-              }
-            });
-          }});
-        }
-      };
-
-  private static final Map<String, Object> COMPOSITE_MAP = new HashMap<String, Object>();
+  private static final Map<String, Object> COMPOSITE_MAP;
 
   static {
+    TreeMap<String, Object> stackProperties = new TreeMap<>();
+    stackProperties.put("realm", "EXAMPLE.COM");
+    stackProperties.put("some.property", "Hello World");
+
+    Collection<String> authToLocalRules = new ArrayList<>();
+    authToLocalRules.add("global.name.rules");
+
+    TreeMap<String, Object> stackServices = new TreeMap<>();
+    stackServices.put((String) KerberosServiceDescriptorTest.MAP_VALUE.get("name"), KerberosServiceDescriptorTest.MAP_VALUE);
+
+    TreeMap<String, Object> stackClusterConfProperties = new TreeMap<>();
+    stackClusterConfProperties.put("property1", "red");
+
+    TreeMap<String, Object> stackClusterConf = new TreeMap<>();
+    stackClusterConf.put("cluster-conf", stackClusterConfProperties);
+
+    TreeMap<String, Object> stackConfigurations = new TreeMap<>();
+    stackConfigurations.put("cluster-conf", stackClusterConf);
+
+    TreeMap<String, Object> stackSharedIdentityKeytabOwner = new TreeMap<>();
+    stackSharedIdentityKeytabOwner.put("name", "root");
+    stackSharedIdentityKeytabOwner.put("access", "rw");
+
+    TreeMap<String, Object> sharedIdentityKeytabGroup = new TreeMap<>();
+    sharedIdentityKeytabGroup.put("name", "hadoop");
+    sharedIdentityKeytabGroup.put("access", "r");
+
+    TreeMap<String, Object> stackSharedIdentityKeytab = new TreeMap<>();
+    stackSharedIdentityKeytab.put("file", "/etc/security/keytabs/subject.service.keytab");
+    stackSharedIdentityKeytab.put("owner", stackSharedIdentityKeytabOwner);
+    stackSharedIdentityKeytab.put("group", sharedIdentityKeytabGroup);
+    stackSharedIdentityKeytab.put("configuration", "service-site/service2.component.keytab.file");
+
+    TreeMap<String, Object> stackSharedIdentity = new TreeMap<>();
+    stackSharedIdentity.put("name", "shared");
+    stackSharedIdentity.put("principal", new TreeMap<>(KerberosPrincipalDescriptorTest.MAP_VALUE));
+    stackSharedIdentity.put("keytab", stackSharedIdentityKeytab);
+
+    TreeMap<String, Object> stackIdentities = new TreeMap<>();
+    stackIdentities.put("shared", stackSharedIdentity);
+
+    STACK_MAP = new TreeMap<>();
+    STACK_MAP.put("properties", stackProperties);
+    STACK_MAP.put(AbstractKerberosDescriptor.Type.AUTH_TO_LOCAL_PROPERTY.getDescriptorPluralName(), authToLocalRules);
+    STACK_MAP.put(AbstractKerberosDescriptor.Type.SERVICE.getDescriptorPluralName(), stackServices.values());
+    STACK_MAP.put(AbstractKerberosDescriptor.Type.CONFIGURATION.getDescriptorPluralName(), stackConfigurations.values());
+    STACK_MAP.put(AbstractKerberosDescriptor.Type.IDENTITY.getDescriptorPluralName(), stackIdentities.values());
+
+    TreeMap<String, Object> userProperties = new TreeMap<>();
+    userProperties.put("realm", "HWX.COM");
+    userProperties.put("some.property", "Hello World");
+
+    TreeMap<String, Object> userClusterConfProperties = new TreeMap<>();
+    userClusterConfProperties.put("property1", "blue");
+    userClusterConfProperties.put("property2", "orange");
+
+    TreeMap<String, Object> userClusterConf = new TreeMap<>();
+    userClusterConf.put("cluster-conf", userClusterConfProperties);
+
+    TreeMap<String, Object> userConfigurations = new TreeMap<>();
+    userConfigurations.put("cluster-conf", userClusterConf);
+
+    TreeMap<String, Object> userSharedIdentityKeytabOwner = new TreeMap<>();
+    userSharedIdentityKeytabOwner.put("name", "root");
+    userSharedIdentityKeytabOwner.put("access", "rw");
+
+    TreeMap<String, Object> userSharedIdentityKeytabGroup = new TreeMap<>();
+    userSharedIdentityKeytabGroup.put("name", "hadoop");
+    userSharedIdentityKeytabGroup.put("access", "r");
+
+    TreeMap<String, Object> userSharedIdentityKeytab = new TreeMap<>();
+    userSharedIdentityKeytab.put("file", "/etc/security/keytabs/subject.service.keytab");
+    userSharedIdentityKeytab.put("owner", userSharedIdentityKeytabOwner);
+    userSharedIdentityKeytab.put("group", userSharedIdentityKeytabGroup);
+    userSharedIdentityKeytab.put("configuration", "service-site/service2.component.keytab.file");
+
+    TreeMap<String, Object> userSharedIdentity = new TreeMap<>();
+    userSharedIdentity.put("name", "shared");
+    userSharedIdentity.put("principal", new TreeMap<>(KerberosPrincipalDescriptorTest.MAP_VALUE));
+    userSharedIdentity.put("keytab", userSharedIdentityKeytab);
+
+    TreeMap<String, Object> userIdentities = new TreeMap<>();
+    userIdentities.put("shared", userSharedIdentity);
+
+    USER_MAP = new TreeMap<>();
+    USER_MAP.put("properties", userProperties);
+    USER_MAP.put(AbstractKerberosDescriptor.Type.CONFIGURATION.getDescriptorPluralName(), userConfigurations.values());
+    USER_MAP.put(AbstractKerberosDescriptor.Type.IDENTITY.getDescriptorPluralName(), userIdentities.values());
+
+    COMPOSITE_MAP = new TreeMap<>();
     COMPOSITE_MAP.putAll(STACK_MAP);
     COMPOSITE_MAP.putAll(USER_MAP);
   }
@@ -233,8 +236,6 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.ClusterKerberosDescriptor,
-        PropertyHelper.getPropertyIds(Resource.Type.ClusterKerberosDescriptor),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.ClusterKerberosDescriptor),
         managementController);
 
     AbstractResourceProviderTest.TestObserver observer = new AbstractResourceProviderTest.TestObserver();
@@ -255,9 +256,24 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
     testGetResources(TestAuthenticationFactory.createClusterAdministrator());
   }
 
-  @Test(expected = AuthorizationException.class)
+  @Test
+  public void testGetResourcesAsClusterOperator() throws Exception {
+    testGetResources(TestAuthenticationFactory.createClusterOperator());
+  }
+
+  @Test
   public void testGetResourcesAsServiceAdministrator() throws Exception {
     testGetResources(TestAuthenticationFactory.createServiceAdministrator());
+  }
+
+  @Test
+  public void testGetResourcesAsServiceOperator() throws Exception {
+    testGetResources(TestAuthenticationFactory.createServiceOperator());
+  }
+
+  @Test
+  public void testGetResourcesAsClusterUser() throws Exception {
+    testGetResources(TestAuthenticationFactory.createClusterUser());
   }
 
   private void testGetResources(Authentication authentication) throws Exception {
@@ -280,8 +296,6 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.ClusterKerberosDescriptor,
-        PropertyHelper.getPropertyIds(Resource.Type.ClusterKerberosDescriptor),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.ClusterKerberosDescriptor),
         managementController);
 
     Predicate predicate = new PredicateBuilder()
@@ -304,51 +318,55 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
     testGetResourcesWithPredicate(TestAuthenticationFactory.createClusterAdministrator());
   }
 
-  @Test(expected = AuthorizationException.class)
+  @Test
+  public void testGetResourcesWithPredicateAsClusterOperator() throws Exception {
+    testGetResourcesWithPredicate(TestAuthenticationFactory.createClusterOperator());
+  }
+
+  @Test
   public void testGetResourcesWithPredicateAsServiceAdministrator() throws Exception {
     testGetResourcesWithPredicate(TestAuthenticationFactory.createServiceAdministrator());
   }
 
-  private void testGetResourcesWithPredicate(Authentication authentication) throws Exception {
+  @Test
+  public void testGetResourcesWithPredicateAsServiceOperator() throws Exception {
+    testGetResourcesWithPredicate(TestAuthenticationFactory.createServiceOperator());
+  }
 
-    StackId stackVersion = createMock(StackId.class);
-    expect(stackVersion.getStackName()).andReturn("stackName").atLeastOnce();
-    expect(stackVersion.getStackVersion()).andReturn("stackVersion").atLeastOnce();
+  @Test
+  public void testGetResourcesWithPredicateAsClusterUser() throws Exception {
+    testGetResourcesWithPredicate(TestAuthenticationFactory.createClusterUser());
+  }
+
+  private void testGetResourcesWithPredicate(Authentication authentication) throws Exception {
 
     Cluster cluster = createMock(Cluster.class);
     expect(cluster.getResourceId()).andReturn(4L).atLeastOnce();
-    expect(cluster.getCurrentStackVersion()).andReturn(stackVersion).atLeastOnce();
-    expect(cluster.getClusterName()).andReturn("c1").anyTimes();
 
     Clusters clusters = createMock(Clusters.class);
     expect(clusters.getCluster("c1")).andReturn(cluster).atLeastOnce();
 
     KerberosDescriptorFactory kerberosDescriptorFactory = injector.getInstance(KerberosDescriptorFactory.class);
-    KerberosDescriptor kerberosDescriptor = kerberosDescriptorFactory.createInstance(STACK_MAP);
+    KerberosDescriptor stackKerberosDescriptor = kerberosDescriptorFactory.createInstance(STACK_MAP);
+    KerberosDescriptor userKerberosDescriptor = kerberosDescriptorFactory.createInstance(USER_MAP);
+    KerberosDescriptor compositeKerberosDescriptor = kerberosDescriptorFactory.createInstance(STACK_MAP);
+    compositeKerberosDescriptor.update(userKerberosDescriptor);
 
-    AmbariMetaInfo metaInfo = createMock(AmbariMetaInfo.class);
-    expect(metaInfo.getKerberosDescriptor("stackName", "stackVersion")).andReturn(kerberosDescriptor).atLeastOnce();
+    KerberosHelper kerberosHelper = createMock(KerberosHelper.class);
+    expect(kerberosHelper.getKerberosDescriptor(eq(KerberosHelper.KerberosDescriptorType.STACK), eq(cluster), eq(false), anyObject(Collection.class), eq(false)))
+        .andReturn(stackKerberosDescriptor).atLeastOnce();
+    expect(kerberosHelper.getKerberosDescriptor(eq(KerberosHelper.KerberosDescriptorType.USER), eq(cluster), eq(false), anyObject(Collection.class), eq(false)))
+        .andReturn(userKerberosDescriptor).atLeastOnce();
+    expect(kerberosHelper.getKerberosDescriptor(eq(KerberosHelper.KerberosDescriptorType.COMPOSITE), eq(cluster), eq(false), anyObject(Collection.class), eq(false)))
+        .andReturn(compositeKerberosDescriptor).atLeastOnce();
 
     AmbariManagementController managementController = createMock(AmbariManagementController.class);
     expect(managementController.getClusters()).andReturn(clusters).atLeastOnce();
-    expect(managementController.getAmbariMetaInfo()).andReturn(metaInfo).atLeastOnce();
+    expect(managementController.getKerberosHelper()).andReturn(kerberosHelper).atLeastOnce();
 
     Request request = createMock(Request.class);
     expect(request.getPropertyIds()).andReturn(null).atLeastOnce();
-
-    Map<String, Map<String, Object>> artifactPropertyMap = new HashMap<>();
-    artifactPropertyMap.put(ArtifactResourceProvider.ARTIFACT_DATA_PROPERTY, USER_MAP);
-    artifactPropertyMap.put(ArtifactResourceProvider.ARTIFACT_DATA_PROPERTY + "/properties", null);
-
-    Resource artifactResource = createMock(Resource.class);
-    expect(artifactResource.getPropertiesMap()).andReturn(artifactPropertyMap).atLeastOnce();
-
-    ResourceProvider artifactResourceProvider = createStrictMock(ArtifactResourceProvider.class);
-    expect(artifactResourceProvider.getResources(anyObject(Request.class), anyObject(Predicate.class)))
-        .andReturn(Collections.singleton(artifactResource)).atLeastOnce();
-
-    ClusterController clusterController = createStrictMock(ClusterController.class);
-    expect(clusterController.ensureResourceProvider(Resource.Type.Artifact)).andReturn(artifactResourceProvider).atLeastOnce();
+    expect(request.getRequestInfoProperties()).andReturn(Collections.emptyMap()).atLeastOnce();
 
     replayAll();
 
@@ -356,12 +374,123 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.ClusterKerberosDescriptor,
-        PropertyHelper.getPropertyIds(Resource.Type.ClusterKerberosDescriptor),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.ClusterKerberosDescriptor),
         managementController);
 
-    setClusterController(provider, clusterController);
-    setKerberosDescriptorFactory(provider, kerberosDescriptorFactory);
+    Predicate clusterPredicate = new PredicateBuilder()
+        .property(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_CLUSTER_NAME_PROPERTY_ID).equals("c1")
+        .toPredicate();
+    Predicate typePredicate;
+    Set<Resource> results;
+
+    // --------------
+    // Get the STACK Kerberos Descriptor
+    typePredicate = new PredicateBuilder()
+        .property(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_TYPE_PROPERTY_ID).equals("STACK")
+        .toPredicate();
+
+    results = provider.getResources(request, new AndPredicate(clusterPredicate, typePredicate));
+    Assert.assertEquals(1, results.size());
+
+    testResults("STACK", STACK_MAP, results);
+
+    // --------------
+    // Get the USER Kerberos Descriptor
+    typePredicate = new PredicateBuilder()
+        .property(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_TYPE_PROPERTY_ID).equals("USER")
+        .toPredicate();
+
+    results = provider.getResources(request, new AndPredicate(clusterPredicate, typePredicate));
+    Assert.assertEquals(1, results.size());
+
+    testResults("USER", USER_MAP, results);
+
+    // --------------
+    // Get the COMPOSITE Kerberos Descriptor
+    typePredicate = new PredicateBuilder()
+        .property(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_TYPE_PROPERTY_ID).equals("COMPOSITE")
+        .toPredicate();
+
+    results = provider.getResources(request, new AndPredicate(clusterPredicate, typePredicate));
+    Assert.assertEquals(1, results.size());
+
+    testResults("COMPOSITE", COMPOSITE_MAP, results);
+
+    verifyAll();
+  }
+
+  @Test
+  public void testGetResourcesWithPredicateAndDirectivesAsAdministrator() throws Exception {
+    testGetResourcesWithPredicateAndDirectives(TestAuthenticationFactory.createAdministrator("admin"));
+  }
+
+  @Test
+  public void testGetResourcesWithPredicateAndDirectivesAsClusterAdministrator() throws Exception {
+    testGetResourcesWithPredicateAndDirectives(TestAuthenticationFactory.createClusterAdministrator());
+  }
+
+  @Test
+  public void testGetResourcesWithPredicateAndDirectivesAsClusterOperator() throws Exception {
+    testGetResourcesWithPredicateAndDirectives(TestAuthenticationFactory.createClusterOperator());
+  }
+
+  @Test
+  public void testGetResourcesWithPredicateAndDirectivesAsServiceAdministrator() throws Exception {
+    testGetResourcesWithPredicateAndDirectives(TestAuthenticationFactory.createServiceAdministrator());
+  }
+
+  @Test
+  public void testGetResourcesWithPredicateAndDirectivesAsServiceOperator() throws Exception {
+    testGetResourcesWithPredicateAndDirectives(TestAuthenticationFactory.createServiceOperator());
+  }
+
+  @Test
+  public void testGetResourcesWithPredicateAndDirectivesAsClusterUser() throws Exception {
+    testGetResourcesWithPredicateAndDirectives(TestAuthenticationFactory.createClusterUser());
+  }
+
+  private void testGetResourcesWithPredicateAndDirectives(Authentication authentication) throws Exception {
+
+    Cluster cluster = createMock(Cluster.class);
+    expect(cluster.getResourceId()).andReturn(4L).atLeastOnce();
+
+    Clusters clusters = createMock(Clusters.class);
+    expect(clusters.getCluster("c1")).andReturn(cluster).atLeastOnce();
+
+    KerberosDescriptorFactory kerberosDescriptorFactory = injector.getInstance(KerberosDescriptorFactory.class);
+    KerberosDescriptor stackKerberosDescriptor = kerberosDescriptorFactory.createInstance(STACK_MAP);
+    KerberosDescriptor userKerberosDescriptor = kerberosDescriptorFactory.createInstance(USER_MAP);
+    KerberosDescriptor compositeKerberosDescriptor = kerberosDescriptorFactory.createInstance(STACK_MAP);
+    compositeKerberosDescriptor.update(userKerberosDescriptor);
+
+    Capture<? extends Collection<String>> captureAdditionalServices = newCapture(CaptureType.ALL);
+
+    KerberosHelper kerberosHelper = createMock(KerberosHelper.class);
+    expect(kerberosHelper.getKerberosDescriptor(eq(KerberosHelper.KerberosDescriptorType.STACK), eq(cluster), eq(true), capture(captureAdditionalServices), eq(false)))
+        .andReturn(stackKerberosDescriptor).atLeastOnce();
+    expect(kerberosHelper.getKerberosDescriptor(eq(KerberosHelper.KerberosDescriptorType.USER), eq(cluster), eq(true), capture(captureAdditionalServices), eq(false)))
+        .andReturn(userKerberosDescriptor).atLeastOnce();
+    expect(kerberosHelper.getKerberosDescriptor(eq(KerberosHelper.KerberosDescriptorType.COMPOSITE), eq(cluster), eq(true), capture(captureAdditionalServices), eq(false)))
+        .andReturn(compositeKerberosDescriptor).atLeastOnce();
+
+    AmbariManagementController managementController = createMock(AmbariManagementController.class);
+    expect(managementController.getClusters()).andReturn(clusters).atLeastOnce();
+    expect(managementController.getKerberosHelper()).andReturn(kerberosHelper).atLeastOnce();
+
+    Map<String, String> requestInfoProperties = new HashMap<>();
+    requestInfoProperties.put(ClusterKerberosDescriptorResourceProvider.DIRECTIVE_EVALUATE_WHEN_CLAUSE, "true");
+    requestInfoProperties.put(ClusterKerberosDescriptorResourceProvider.DIRECTIVE_ADDITIONAL_SERVICES, "HIVE, TEZ,PIG");
+
+    Request request = createMock(Request.class);
+    expect(request.getPropertyIds()).andReturn(null).atLeastOnce();
+    expect(request.getRequestInfoProperties()).andReturn(requestInfoProperties).atLeastOnce();
+
+    replayAll();
+
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+
+    ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
+        Resource.Type.ClusterKerberosDescriptor,
+        managementController);
 
     Predicate clusterPredicate = new PredicateBuilder()
         .property(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_CLUSTER_NAME_PROPERTY_ID).equals("c1")
@@ -387,7 +516,7 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
       Map partial2 = result.getPropertiesMap().get("KerberosDescriptor/kerberos_descriptor/properties");
       partial1.put("properties", partial2);
 
-      Assert.assertEquals(STACK_MAP, partial1);
+      Assert.assertEquals(GSON.toJson(STACK_MAP), GSON.toJson(partial1));
     }
 
     // --------------
@@ -408,7 +537,7 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
       Map partial2 = result.getPropertiesMap().get("KerberosDescriptor/kerberos_descriptor/properties");
       partial1.put("properties", partial2);
 
-      Assert.assertEquals(USER_MAP, partial1);
+      Assert.assertEquals(GSON.toJson(USER_MAP), GSON.toJson(partial1));
     }
 
     // --------------
@@ -420,19 +549,19 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
     results = provider.getResources(request, new AndPredicate(clusterPredicate, typePredicate));
     Assert.assertEquals(1, results.size());
 
-    for (Resource result : results) {
-      Assert.assertEquals("c1", result.getPropertyValue(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_CLUSTER_NAME_PROPERTY_ID));
-      Assert.assertEquals("COMPOSITE", result.getPropertyValue(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_TYPE_PROPERTY_ID));
-
-      // Reconstruct the deconstructed Kerberos Descriptor
-      Map partial1 = result.getPropertiesMap().get(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_DESCRIPTOR_PROPERTY_ID);
-      Map partial2 = result.getPropertiesMap().get("KerberosDescriptor/kerberos_descriptor/properties");
-      partial1.put("properties", partial2);
-
-      Assert.assertEquals(COMPOSITE_MAP, partial1);
-    }
+    testResults("COMPOSITE", COMPOSITE_MAP, results);
 
     verifyAll();
+
+    List<? extends Collection<String>> capturedValues = captureAdditionalServices.getValues();
+    Assert.assertEquals(3, capturedValues.size());
+
+    for (Collection<String> capturedValue : capturedValues) {
+      Assert.assertEquals(3, capturedValue.size());
+      Assert.assertTrue(capturedValue.contains("HIVE"));
+      Assert.assertTrue(capturedValue.contains("PIG"));
+      Assert.assertTrue(capturedValue.contains("TEZ"));
+    }
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -445,7 +574,7 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
     testGetResourcesWithInvalidKerberosDescriptorType(TestAuthenticationFactory.createClusterAdministrator());
   }
 
-  @Test(expected = AuthorizationException.class)
+  @Test(expected = IllegalArgumentException.class)
   public void testGetResourcesWithInvalidKerberosDescriptorTypeAsServiceAdministrator() throws Exception {
     testGetResourcesWithInvalidKerberosDescriptorType(TestAuthenticationFactory.createServiceAdministrator());
   }
@@ -467,7 +596,7 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
     expect(kerberosDescriptor.toMap()).andReturn(STACK_MAP).atLeastOnce();
 
     AmbariMetaInfo metaInfo = createMock(AmbariMetaInfo.class);
-    expect(metaInfo.getKerberosDescriptor("stackName", "stackVersion")).andReturn(kerberosDescriptor).atLeastOnce();
+    expect(metaInfo.getKerberosDescriptor("stackName", "stackVersion", false)).andReturn(kerberosDescriptor).atLeastOnce();
 
     AmbariManagementController managementController = createMock(AmbariManagementController.class);
     expect(managementController.getClusters()).andReturn(clusters).atLeastOnce();
@@ -482,8 +611,6 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.ClusterKerberosDescriptor,
-        PropertyHelper.getPropertyIds(Resource.Type.ClusterKerberosDescriptor),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.ClusterKerberosDescriptor),
         managementController);
 
     Predicate predicate1 = new PredicateBuilder()
@@ -514,9 +641,24 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
     testGetResourcesWithoutPredicate(TestAuthenticationFactory.createClusterAdministrator());
   }
 
-  @Test(expected = AuthorizationException.class)
+  @Test
+  public void testGetResourcesWithoutPredicateAsClusterOperator() throws Exception {
+    testGetResourcesWithoutPredicate(TestAuthenticationFactory.createClusterOperator());
+  }
+
+  @Test
   public void testGetResourcesWithoutPredicateAsServiceAdministrator() throws Exception {
     testGetResourcesWithoutPredicate(TestAuthenticationFactory.createServiceAdministrator());
+  }
+
+  @Test
+  public void testGetResourcesWithoutPredicateAsServiceOperator() throws Exception {
+    testGetResourcesWithoutPredicate(TestAuthenticationFactory.createServiceOperator());
+  }
+
+  @Test
+  public void testGetResourcesWithoutPredicateAsClusterUser() throws Exception {
+    testGetResourcesWithoutPredicate(TestAuthenticationFactory.createClusterUser());
   }
 
   private void testGetResourcesWithoutPredicate(Authentication authentication) throws Exception {
@@ -535,8 +677,6 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.ClusterKerberosDescriptor,
-        PropertyHelper.getPropertyIds(Resource.Type.ClusterKerberosDescriptor),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.ClusterKerberosDescriptor),
         managementController);
 
 
@@ -576,8 +716,6 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.ClusterKerberosDescriptor,
-        PropertyHelper.getPropertyIds(Resource.Type.ClusterKerberosDescriptor),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.ClusterKerberosDescriptor),
         managementController);
 
     provider.createResources(request);
@@ -614,8 +752,6 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.ClusterKerberosDescriptor,
-        PropertyHelper.getPropertyIds(Resource.Type.ClusterKerberosDescriptor),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.ClusterKerberosDescriptor),
         managementController);
 
     Predicate predicate1 = new PredicateBuilder()
@@ -631,21 +767,18 @@ public class ClusterKerberosDescriptorResourceProviderTest extends EasyMockSuppo
     verifyAll();
   }
 
-  private void setClusterController(ResourceProvider provider, ClusterController clusterController) throws Exception {
-    Class<?> c = provider.getClass();
+  private void testResults(String type, Map<String, Object> expectedData, Set<Resource> results) {
+    for (Resource result : results) {
+      Assert.assertEquals("c1", result.getPropertyValue(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_CLUSTER_NAME_PROPERTY_ID));
+      Assert.assertEquals(type, result.getPropertyValue(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_TYPE_PROPERTY_ID));
 
-    Field f = c.getDeclaredField("clusterController");
-    f.setAccessible(true);
-    f.set(provider, clusterController);
+      // Reconstruct the deconstructed Kerberos Descriptor
+      Map partial1 = result.getPropertiesMap().get(ClusterKerberosDescriptorResourceProvider.CLUSTER_KERBEROS_DESCRIPTOR_DESCRIPTOR_PROPERTY_ID);
+      Map partial2 = result.getPropertiesMap().get("KerberosDescriptor/kerberos_descriptor/properties");
+      partial1.put("properties", partial2);
+
+      Assert.assertEquals(GSON.toJson(expectedData), GSON.toJson(partial1));
+    }
   }
-
-  private void setKerberosDescriptorFactory(ResourceProvider provider, KerberosDescriptorFactory factory) throws Exception {
-    Class<?> c = provider.getClass();
-
-    Field f = c.getDeclaredField("kerberosDescriptorFactory");
-    f.setAccessible(true);
-    f.set(provider, factory);
-  }
-
 }
 

@@ -857,14 +857,14 @@ describe('App.WizardController', function () {
 
   describe('#loadConfirmedHosts', function () {
     beforeEach(function(){
-      sinon.stub(App.db, 'getHosts').returns(Em.A([
+      sinon.stub(wizardController, 'getDBProperty').returns(Em.A([
         Em.Object.create({
           name: 'h1'
         })
       ]));
     });
     afterEach(function(){
-      App.db.getHosts.restore();
+      wizardController.getDBProperty.restore();
     });
     it('should load hosts from db', function () {
       wizardController.loadConfirmedHosts();
@@ -1052,12 +1052,14 @@ describe('App.WizardController', function () {
 
     beforeEach(function () {
       c.set('content', {});
+      sinon.stub(c, 'setDBProperty', Em.K);
       sinon.stub(c, 'setDBProperties', Em.K);
       sinon.stub(c, 'getDBProperty').withArgs('fileNamesToUpdate').returns([]);
       sinon.stub(App.config, 'shouldSupportFinal').returns(true);
     });
 
     afterEach(function () {
+      c.setDBProperty.restore();
       c.setDBProperties.restore();
       c.getDBProperty.restore();
       App.config.shouldSupportFinal.restore();
@@ -1138,11 +1140,34 @@ describe('App.WizardController', function () {
             isFinal: true,
             defaultIsFinal: true,
             supportsFinal: true,
-            filename: 'filename',
+            filename: 'hdfs-site',
             displayType: 'string',
             isRequiredByAgent: true,
             hasInitialValue: true,
             isRequired: true,
+            isUserProperty: true,
+            showLabel: true,
+            category: 'some_category'
+          }),
+          Em.Object.create({
+            id: 'id',
+            name: 'name2',
+            value: 'value',
+            defaultValue: 'defaultValue',
+            description: 'description',
+            serviceName: 'serviceName',
+            domain: 'domain',
+            isVisible: true,
+            isNotDefaultValue: true,
+            isFinal: true,
+            defaultIsFinal: true,
+            supportsFinal: true,
+            filename: 'hdfs-site',
+            displayType: 'string',
+            isRequiredByAgent: true,
+            hasInitialValue: true,
+            isRequired: false,
+            isUserProperty: false,
             showLabel: true,
             category: 'some_category'
           })
@@ -1168,6 +1193,7 @@ describe('App.WizardController', function () {
             isRequiredByAgent: true,
             hasInitialValue: true,
             isRequired: true,
+            isUserProperty: false,
             group: {name: 'group'},
             showLabel: true,
             category: 'some_category'
@@ -1179,7 +1205,7 @@ describe('App.WizardController', function () {
     it('should save configs from default config group to content.serviceConfigProperties', function () {
       c.saveServiceConfigProperties(stepController);
       var saved = c.get('content.serviceConfigProperties');
-      expect(saved.length).to.equal(1);
+      expect(saved.length).to.equal(2);
       expect(saved[0].category).to.equal('some_category');
     });
 
@@ -1187,6 +1213,17 @@ describe('App.WizardController', function () {
       c.saveServiceConfigProperties(kerberosStepController);
       var saved = c.get('content.serviceConfigProperties');
       expect(saved.everyProperty('value', '')).to.be.true;
+    });
+
+    it('should save `isUserProperty` and `isRequired` attributes correctly', function() {
+      c.saveServiceConfigProperties(stepController);
+      var saved = c.get('content.serviceConfigProperties'),
+          nameProp = saved.filterProperty('filename', 'hdfs-site.xml').findProperty('name', 'name'),
+          name2Prop = saved.filterProperty('filename', 'hdfs-site.xml').findProperty('name', 'name2');
+      assert.isTrue(Em.get(nameProp, 'isRequired'), 'hdfs-site.xml:name isRequired validation');
+      assert.isTrue(Em.get(nameProp, 'isUserProperty'), 'hdfs-site.xml:name isUserProperty validation');
+      assert.isFalse(Em.get(name2Prop, 'isRequired'), 'hdfs-site.xml:name2 isRequired validation');
+      assert.isFalse(Em.get(name2Prop, 'isUserProperty'), 'hdfs-site.xml:name2 isUserProperty validation');
     });
   });
 
@@ -1220,8 +1257,8 @@ describe('App.WizardController', function () {
 
     it('should return all hosts', function () {
       var hosts = {
-        'h1': {hostComponents: ['c1', 'c2'], disk_info: [{size: 2, available: 1}]},
-        'h2': {hostComponents: ['c3', 'c4'], disk_info: [{size: 2, available: 1}]}
+        'h1': {hostComponents: ['c1', 'c2']},
+        'h2': {hostComponents: ['c3', 'c4']}
       };
 
       var content = Em.Object.create({
@@ -1234,19 +1271,6 @@ describe('App.WizardController', function () {
         {
           "id": "h1",
           "hostName": "h1",
-          "publicHostName": "h1",
-          "diskInfo": [
-            {
-              "size": 2,
-              "available": 1
-            }
-          ],
-          "diskTotal": 0.0000019073486328125,
-          "diskFree": 9.5367431640625e-7,
-          "disksMounted": 1,
-          "osType": 0,
-          "osArch": 0,
-          "ip": 0,
           "hostComponents": [
             {
               "componentName": "c1",
@@ -1261,19 +1285,6 @@ describe('App.WizardController', function () {
         {
           "id": "h2",
           "hostName": "h2",
-          "publicHostName": "h2",
-          "diskInfo": [
-            {
-              "size": 2,
-              "available": 1
-            }
-          ],
-          "diskTotal": 0.0000019073486328125,
-          "diskFree": 9.5367431640625e-7,
-          "disksMounted": 1,
-          "osType": 0,
-          "osArch": 0,
-          "ip": 0,
           "hostComponents": [
             {
               "componentName": "c3",
@@ -1683,10 +1694,6 @@ describe('App.WizardController', function () {
       expect(ctrl.finish.calledOnce).to.be.true;
     });
 
-    it("isWorking should be true", function () {
-      expect(mock.get('isWorking')).to.be.true;
-    });
-
     it("App.clusterStatus.setClusterStatus should be called", function () {
       expect(App.clusterStatus.setClusterStatus.calledOnce).to.be.true;
     });
@@ -1703,5 +1710,50 @@ describe('App.WizardController', function () {
       expect(Em.run.next.calledOnce).to.be.true;
     });
   });
+
+  describe('#applyStoredConfigs', function() {
+
+    it('should return null when storedConfigs null', function() {
+      expect(c.applyStoredConfigs([], null)).to.be.null;
+    });
+
+    it('should merged configs when storedConfigs has items', function() {
+      var storedConfigs = [
+        {
+          id: 1,
+          value: 'foo',
+          isFinal: false
+        },
+        {
+          id: 2,
+          value: 'foo2',
+          isFinal: true,
+          isUserProperty: true
+        }
+      ];
+      var configs = [
+        {
+          id: 1,
+          value: '',
+          isFinal: true
+        }
+      ];
+      expect(c.applyStoredConfigs(configs, storedConfigs)).to.be.eql([
+        {
+          id: 1,
+          value: 'foo',
+          isFinal: false,
+          savedValue: null
+        },
+        {
+          id: 2,
+          value: 'foo2',
+          isFinal: true,
+          isUserProperty: true
+        }
+      ]);
+    });
+  });
+
 
 });

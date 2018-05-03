@@ -48,15 +48,17 @@ import org.apache.ambari.server.notifications.TargetConfigurationResult;
 import org.apache.ambari.server.orm.dao.AlertDispatchDAO;
 import org.apache.ambari.server.orm.entities.AlertGroupEntity;
 import org.apache.ambari.server.orm.entities.AlertTargetEntity;
-import org.apache.ambari.server.security.authorization.ResourceType;
 import org.apache.ambari.server.security.authorization.RoleAuthorization;
 import org.apache.ambari.server.state.AlertState;
 import org.apache.ambari.server.state.alert.AlertGroup;
 import org.apache.ambari.server.state.alert.AlertTarget;
 import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.gson.Gson;
 import com.google.inject.Inject;
+import com.google.inject.persist.Transactional;
 
 /**
  * The {@link AlertTargetResourceProvider} class deals with managing the CRUD
@@ -67,29 +69,42 @@ import com.google.inject.Inject;
 public class AlertTargetResourceProvider extends
  AbstractAuthorizedResourceProvider {
 
+  private static final Logger LOG = LoggerFactory.getLogger(AlertTargetResourceProvider.class);
+    
   public static final String ALERT_TARGET = "AlertTarget";
-  public static final String ALERT_TARGET_ID = "AlertTarget/id";
-  public static final String ALERT_TARGET_NAME = "AlertTarget/name";
-  public static final String ALERT_TARGET_DESCRIPTION = "AlertTarget/description";
-  public static final String ALERT_TARGET_NOTIFICATION_TYPE = "AlertTarget/notification_type";
-  public static final String ALERT_TARGET_PROPERTIES = "AlertTarget/properties";
-  public static final String ALERT_TARGET_GROUPS = "AlertTarget/groups";
-  public static final String ALERT_TARGET_STATES = "AlertTarget/alert_states";
-  public static final String ALERT_TARGET_GLOBAL = "AlertTarget/global";
-  public static final String ALERT_TARGET_ENABLED = "AlertTarget/enabled";
 
-  private static final Set<String> PK_PROPERTY_IDS = new HashSet<String>(
+  public static final String ID_PROPERTY_ID = "id";
+  public static final String NAME_PROPERTY_ID = "name";
+  public static final String DESCRIPTION_PROPERTY_ID = "description";
+  public static final String NOTIFICATION_TYPE_PROPERTY_ID = "notification_type";
+  public static final String PROPERTIES_PROPERTY_ID = "properties";
+  public static final String GROUPS_PROPERTY_ID = "groups";
+  public static final String STATES_PROPERTY_ID = "alert_states";
+  public static final String GLOBAL_PROPERTY_ID = "global";
+  public static final String ENABLED_PROPERTY_ID = "enabled";
+
+  public static final String ALERT_TARGET_ID = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + ID_PROPERTY_ID;
+  public static final String ALERT_TARGET_NAME = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + NAME_PROPERTY_ID;
+  public static final String ALERT_TARGET_DESCRIPTION = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + DESCRIPTION_PROPERTY_ID;
+  public static final String ALERT_TARGET_NOTIFICATION_TYPE = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + NOTIFICATION_TYPE_PROPERTY_ID;
+  public static final String ALERT_TARGET_PROPERTIES = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + PROPERTIES_PROPERTY_ID;
+  public static final String ALERT_TARGET_GROUPS = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + GROUPS_PROPERTY_ID;
+  public static final String ALERT_TARGET_STATES = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + STATES_PROPERTY_ID;
+  public static final String ALERT_TARGET_GLOBAL = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + GLOBAL_PROPERTY_ID;
+  public static final String ALERT_TARGET_ENABLED = ALERT_TARGET + PropertyHelper.EXTERNAL_PATH_SEP + ENABLED_PROPERTY_ID;
+
+  private static final Set<String> PK_PROPERTY_IDS = new HashSet<>(
       Arrays.asList(ALERT_TARGET_ID, ALERT_TARGET_NAME));
 
   /**
    * The property ids for an alert target resource.
    */
-  private static final Set<String> PROPERTY_IDS = new HashSet<String>();
+  private static final Set<String> PROPERTY_IDS = new HashSet<>();
 
   /**
    * The key property ids for an alert target resource.
    */
-  private static final Map<Resource.Type, String> KEY_PROPERTY_IDS = new HashMap<Resource.Type, String>();
+  private static final Map<Resource.Type, String> KEY_PROPERTY_IDS = new HashMap<>();
 
   static {
     // properties
@@ -124,13 +139,11 @@ public class AlertTargetResourceProvider extends
   /**
    * Constructor.
    */
+  @Inject
   AlertTargetResourceProvider() {
-    super(PROPERTY_IDS, KEY_PROPERTY_IDS);
+    super(Resource.Type.AlertTarget, PROPERTY_IDS, KEY_PROPERTY_IDS);
 
-    // For now only allow an Ambari administrator to create, update, and manage Alert Targets.
-    // If an alert target can associated with a particular cluster, than a cluster administrator
-    // should be able to do this as well.
-    EnumSet<RoleAuthorization> requiredAuthorizations = EnumSet.of(RoleAuthorization.CLUSTER_MANAGE_ALERTS);
+    EnumSet<RoleAuthorization> requiredAuthorizations = EnumSet.of(RoleAuthorization.CLUSTER_MANAGE_ALERT_NOTIFICATIONS);
     setRequiredCreateAuthorizations(requiredAuthorizations);
     setRequiredUpdateAuthorizations(requiredAuthorizations);
     setRequiredDeleteAuthorizations(requiredAuthorizations);
@@ -159,7 +172,7 @@ public class AlertTargetResourceProvider extends
       throws SystemException, UnsupportedPropertyException,
       NoSuchResourceException, NoSuchParentResourceException {
 
-    Set<Resource> results = new HashSet<Resource>();
+    Set<Resource> results = new HashSet<>();
     Set<String> requestPropertyIds = getRequestPropertyIds(request, predicate);
 
     if( null == predicate ){
@@ -221,7 +234,7 @@ public class AlertTargetResourceProvider extends
     Set<Resource> resources = getResources(new RequestImpl(null, null, null,
         null), predicate);
 
-    Set<Long> targetIds = new HashSet<Long>();
+    Set<Long> targetIds = new HashSet<>();
 
     for (final Resource resource : resources) {
       Long id = (Long) resource.getPropertyValue(ALERT_TARGET_ID);
@@ -249,11 +262,6 @@ public class AlertTargetResourceProvider extends
   @Override
   protected Set<String> getPKPropertyIds() {
     return PK_PROPERTY_IDS;
-  }
-
-  @Override
-  protected ResourceType getResourceType(Request request, Predicate predicate) {
-    return ResourceType.AMBARI;
   }
 
   /**
@@ -318,7 +326,7 @@ public class AlertTargetResourceProvider extends
       // set the states that this alert target cares about
       final Set<AlertState> alertStateSet;
       if (null != alertStates) {
-        alertStateSet = new HashSet<AlertState>(alertStates.size());
+        alertStateSet = new HashSet<>(alertStates.size());
         for (String state : alertStates) {
           alertStateSet.add(AlertState.valueOf(state));
         }
@@ -340,8 +348,8 @@ public class AlertTargetResourceProvider extends
       if (requestMap.containsKey(ALERT_TARGET_GROUPS)) {
         Collection<Long> groupIds = (Collection<Long>) requestMap.get(ALERT_TARGET_GROUPS);
         if( !groupIds.isEmpty() ){
-          Set<AlertGroupEntity> groups = new HashSet<AlertGroupEntity>();
-          List<Long> ids = new ArrayList<Long>(groupIds);
+          Set<AlertGroupEntity> groups = new HashSet<>();
+          List<Long> ids = new ArrayList<>(groupIds);
           groups.addAll(s_dao.findGroupsById(ids));
           entity.setAlertGroups(groups);
         }
@@ -371,8 +379,9 @@ public class AlertTargetResourceProvider extends
    * @throws AmbariException
    *           if the entity could not be found.
    */
+  @Transactional
   @SuppressWarnings("unchecked")
-  private void updateAlertTargets(long alertTargetId,
+  void updateAlertTargets(long alertTargetId,
       Map<String, Object> requestMap)
       throws AmbariException {
 
@@ -426,7 +435,7 @@ public class AlertTargetResourceProvider extends
       if (alertStates.isEmpty()) {
         alertStateSet = EnumSet.allOf(AlertState.class);
       } else {
-        alertStateSet = new HashSet<AlertState>(alertStates.size());
+        alertStateSet = new HashSet<>(alertStates.size());
         for (String state : alertStates) {
           alertStateSet.add(AlertState.valueOf(state));
         }
@@ -437,8 +446,8 @@ public class AlertTargetResourceProvider extends
 
     // if groups were supplied, replace existing
     if (null != groupIds) {
-      Set<AlertGroupEntity> groups = new HashSet<AlertGroupEntity>();
-      List<Long> ids = new ArrayList<Long>(groupIds);
+      Set<AlertGroupEntity> groups = new HashSet<>();
+      List<Long> ids = new ArrayList<>(groupIds);
 
       if (ids.size() > 0) {
         groups.addAll(s_dao.findGroupsById(ids));
@@ -446,14 +455,11 @@ public class AlertTargetResourceProvider extends
 
       entity.setAlertGroups(groups);
     } else if (entity.isGlobal()){
-      Set<AlertGroupEntity> groups = new HashSet<AlertGroupEntity>(s_dao.findAllGroups());
-      for (AlertGroupEntity group : groups) {
-        group.addAlertTarget(entity);
-        s_dao.merge(group);
-      }
+      Set<AlertGroupEntity> groups = new HashSet<>(s_dao.findAllGroups());
       entity.setAlertGroups(groups);
     }
 
+    // merge the entity, cascading the merge to other entities, like groups
     s_dao.merge(entity);
   }
 
@@ -496,8 +502,8 @@ public class AlertTargetResourceProvider extends
 
     if (BaseProvider.isPropertyRequested(ALERT_TARGET_GROUPS, requestedIds)) {
       Set<AlertGroupEntity> groupEntities = entity.getAlertGroups();
-      List<AlertGroup> groups = new ArrayList<AlertGroup>(
-          groupEntities.size());
+      List<AlertGroup> groups = new ArrayList<>(
+        groupEntities.size());
 
       for (AlertGroupEntity groupEntity : groupEntities) {
         AlertGroup group = new AlertGroup();
@@ -525,8 +531,8 @@ public class AlertTargetResourceProvider extends
    *         {@code null} if none.
    */
   private Map<String, Object> extractProperties(Map<String, Object> requestMap) {
-    Map<String, Object> normalizedMap = new HashMap<String, Object>(
-        requestMap.size());
+    Map<String, Object> normalizedMap = new HashMap<>(
+      requestMap.size());
 
     for (Entry<String, Object> entry : requestMap.entrySet()) {
       String key = entry.getKey();

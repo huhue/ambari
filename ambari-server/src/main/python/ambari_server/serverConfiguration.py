@@ -38,8 +38,9 @@ from ambari_commons.logging_utils import get_debug_mode, print_info_msg, print_w
   set_debug_mode
 from ambari_server.properties import Properties
 from ambari_server.userInput import get_validated_string_input
-from ambari_server.utils import compare_versions, locate_file
+from ambari_server.utils import compare_versions, locate_file, on_powerpc
 from ambari_server.ambariPath import AmbariPath
+from ambari_server.userInput import get_YN_input
 
 
 OS_VERSION = OSCheck().get_os_major_version()
@@ -87,6 +88,12 @@ JCE_NAME_PROPERTY = "jce.name"
 JDK_DOWNLOAD_SUPPORTED_PROPERTY = "jdk.download.supported"
 JCE_DOWNLOAD_SUPPORTED_PROPERTY = "jce.download.supported"
 
+# Stack JDK
+STACK_JAVA_HOME_PROPERTY = "stack.java.home"
+STACK_JDK_NAME_PROPERTY = "stack.jdk.name"
+STACK_JCE_NAME_PROPERTY = "stack.jce.name"
+STACK_JAVA_VERSION = "stack.java.version"
+
 
 #TODO property used incorrectly in local case, it was meant to be dbms name, not postgres database name,
 # has workaround for now, as we don't need dbms name if persistence_type=local
@@ -104,6 +111,7 @@ JDBC_RCA_PASSWORD_FILENAME = "rca_password.dat"
 
 CLIENT_API_PORT_PROPERTY = "client.api.port"
 CLIENT_API_PORT = "8080"
+CLIENT_SECURITY = "client.security"
 
 SERVER_VERSION_FILE_PATH = "server.version.file"
 
@@ -140,6 +148,8 @@ JDBC_USE_INTEGRATED_AUTH_PROPERTY = "server.jdbc.use.integrated.auth"
 JDBC_RCA_USE_INTEGRATED_AUTH_PROPERTY = "server.jdbc.rca.use.integrated.auth"
 
 ### # End Windows-specific # ###
+# The user which will bootstrap embedded postgres database setup by creating the default schema and ambari user.
+LOCAL_DATABASE_ADMIN_PROPERTY = "local.database.user"
 
 # resources repo configuration
 RESOURCES_DIR_PROPERTY = "resources.dir"
@@ -148,12 +158,8 @@ RESOURCES_DIR_PROPERTY = "resources.dir"
 STACK_LOCATION_KEY = 'metadata.path'
 
 # LDAP security
-IS_LDAP_CONFIGURED = "ambari.ldap.isConfigured"
 LDAP_MGR_PASSWORD_ALIAS = "ambari.ldap.manager.password"
-LDAP_MGR_PASSWORD_PROPERTY = "authentication.ldap.managerPassword"
-LDAP_MGR_PASSWORD_FILENAME = "ldap-password.dat"
-LDAP_MGR_USERNAME_PROPERTY = "authentication.ldap.managerDn"
-LDAP_PRIMARY_URL_PROPERTY = "authentication.ldap.primaryUrl"
+LDAP_MGR_PASSWORD_PROPERTY = "ambari.ldap.connectivity.bind_password"
 
 # SSL truststore
 SSL_TRUSTSTORE_PASSWORD_ALIAS = "ambari.ssl.trustStore.password"
@@ -172,18 +178,28 @@ CHECK_AMBARI_KRB_JAAS_CONFIGURATION_PROPERTY = "kerberos.check.jaas.configuratio
 # JDK
 JDK_RELEASES="java.releases"
 
+if on_powerpc():
+  JDK_RELEASES += ".ppc64le"
+
 VIEWS_DIR_PROPERTY = "views.dir"
 
 ACTIVE_INSTANCE_PROPERTY = "active.instance"
+
+# web server startup timeout
+WEB_SERVER_STARTUP_TIMEOUT = "server.startup.web.timeout"
 
 #Common setup or upgrade message
 SETUP_OR_UPGRADE_MSG = "- If this is a new setup, then run the \"ambari-server setup\" command to create the user\n" \
                        "- If this is an upgrade of an existing setup, run the \"ambari-server upgrade\" command.\n" \
                        "Refer to the Ambari documentation for more information on setup and upgrade."
 
+GPL_LICENSE_PROMPT_TEXT = """GPL License for LZO: https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html
+Enable Ambari Server to download and install GPL Licensed LZO packages [y/n] (n)? """
+
 DEFAULT_DB_NAME = "ambari"
 
 SECURITY_KEYS_DIR = "security.server.keys_dir"
+EXTENSION_PATH_PROPERTY = 'extensions.path'
 COMMON_SERVICES_PATH_PROPERTY = 'common.services.path'
 MPACKS_STAGING_PATH_PROPERTY = 'mpacks.staging.path'
 WEBAPP_DIR_PROPERTY = 'webapp.dir'
@@ -193,6 +209,9 @@ CUSTOM_ACTION_DEFINITIONS = 'custom.action.definitions'
 BOOTSTRAP_SETUP_AGENT_SCRIPT = 'bootstrap.setup_agent.script'
 STACKADVISOR_SCRIPT = 'stackadvisor.script'
 PID_DIR_PROPERTY = 'pid.dir'
+SERVER_TMP_DIR_PROPERTY = "server.tmp.dir"
+GPL_LICENSE_ACCEPTED_PROPERTY = 'gpl.license.accepted'
+
 REQUIRED_PROPERTIES = [OS_FAMILY_PROPERTY, OS_TYPE_PROPERTY, COMMON_SERVICES_PATH_PROPERTY, SERVER_VERSION_FILE_PATH,
                        WEBAPP_DIR_PROPERTY, STACK_LOCATION_KEY, SECURITY_KEYS_DIR, JDBC_DATABASE_NAME_PROPERTY,
                        NR_USER_PROPERTY, JAVA_HOME_PROPERTY, JDBC_PASSWORD_PROPERTY, SHARED_RESOURCES_DIR,
@@ -200,13 +219,21 @@ REQUIRED_PROPERTIES = [OS_FAMILY_PROPERTY, OS_TYPE_PROPERTY, COMMON_SERVICES_PAT
                        BOOTSTRAP_SETUP_AGENT_SCRIPT, STACKADVISOR_SCRIPT, BOOTSTRAP_DIR_PROPERTY, PID_DIR_PROPERTY,
                        MPACKS_STAGING_PATH_PROPERTY]
 
+# if these properties are available 'ambari-server setup -s' is not triggered again.
+SETUP_DONE_PROPERTIES = [OS_FAMILY_PROPERTY, OS_TYPE_PROPERTY, JDK_NAME_PROPERTY, JDBC_DATABASE_PROPERTY,
+                         NR_USER_PROPERTY, PERSISTENCE_TYPE_PROPERTY
+]
+
+def get_default_views_dir():
+  return AmbariPath.get("/var/lib/ambari-server/resources/views")
+
 def get_conf_dir():
   try:
     conf_dir = os.environ[AMBARI_CONF_VAR]
     return conf_dir
   except KeyError:
     default_conf_dir = AmbariPath.get("/etc/ambari-server/conf")
-    print_info_msg(AMBARI_CONF_VAR + " is not set, using default " + default_conf_dir)
+    print_info_msg("{0} is not set, using default {1}".format(AMBARI_CONF_VAR, default_conf_dir))
     return default_conf_dir
 
 def find_properties_file():
@@ -214,30 +241,42 @@ def find_properties_file():
   if conf_file is None:
     err = 'File %s not found in search path $%s: %s' % (AMBARI_PROPERTIES_FILE,
           AMBARI_CONF_VAR, get_conf_dir())
-    print err
+    print_error_msg (err)
     raise FatalException(1, err)
   else:
-    print_info_msg('Loading properties from ' + conf_file)
+    print_info_msg('Loading properties from {0}'.format(conf_file))
   return conf_file
 
 # Load ambari properties and return dict with values
 def get_ambari_properties():
   conf_file = find_properties_file()
 
+  # Try to read ambari properties file. It is OK to fail.
+  # Return -1 on failure.
   properties = None
   try:
     properties = Properties()
     with open(conf_file) as hfR:
       properties.load(hfR)
+  except (Exception), e:
+    print_error_msg ('Could not read "%s": %s' % (conf_file, str(e)))
+    return -1
 
-    root = os.environ["ROOT"].rstrip("/")
+  # Try to replace $ROOT with the value from the OS environment.
+  # OK to fail. Just print the exception and return the properties
+  # dictionary read above
+  try:
+    root_env = 'ROOT'
+    if root_env in os.environ:
+      root = os.environ["ROOT"].rstrip("/")
+    else:
+      root = ''
 
     for k,v in properties.iteritems():
       properties.__dict__[k] = v.replace("$ROOT", root)
       properties._props[k] = v.replace("$ROOT", root)
   except (Exception), e:
-    print 'Could not read "%s": %s' % (conf_file, e)
-    return -1
+    print_error_msg ('Could not replace %s in "%s": %s' %(conf_file, root_env, str(e)))
   return properties
 
 class ServerDatabaseType(object):
@@ -344,9 +383,14 @@ class ServerConfigDefaults(object):
 
     # Configuration defaults
     self.DEFAULT_CONF_DIR = ""
-    self.PID_DIR = properties.get_property(PID_DIR_PROPERTY)
-    self.BOOTSTRAP_DIR = properties.get_property(BOOTSTRAP_DIR_PROPERTY)
-    self.RECOMMENDATIONS_DIR = properties.get_property(RECOMMENDATIONS_DIR_PROPERTY)
+    if properties == -1:
+      self.PID_DIR = AmbariPath.get(os.sep + os.path.join("var", "run", "ambari-server"))
+      self.BOOTSTRAP_DIR = AmbariPath.get(os.sep + os.path.join("var", "run", "ambari-server", "bootstrap"))
+      self.RECOMMENDATIONS_DIR = AmbariPath.get(os.sep + os.path.join("var", "run", "ambari-server", "stack-recommendations"))
+    else:
+      self.PID_DIR = properties.get_property(PID_DIR_PROPERTY)
+      self.BOOTSTRAP_DIR = properties.get_property(BOOTSTRAP_DIR_PROPERTY)
+      self.RECOMMENDATIONS_DIR = properties.get_property(RECOMMENDATIONS_DIR_PROPERTY)
     
     # this directories should be pre-created by user and be writable.
     self.check_if_directories_writable([self.OUT_DIR, self.PID_DIR])
@@ -373,8 +417,11 @@ class ServerConfigDefaults(object):
     self.DEFAULT_DB_NAME = "ambari"
 
     self.STACK_LOCATION_DEFAULT = ""
+    self.EXTENSION_LOCATION_DEFAULT = ""
     self.COMMON_SERVICES_LOCATION_DEFAULT = ""
     self.MPACKS_STAGING_LOCATION_DEFAULT = ""
+    self.SERVER_TMP_DIR_DEFAULT = ""
+    self.DASHBOARD_DIRNAME = "dashboards"
 
     self.DEFAULT_VIEWS_DIR = ""
 
@@ -390,8 +437,15 @@ class ServerConfigDefaults(object):
     
   def check_if_directories_writable(self, directories):
     for directory in directories:
+      if not os.path.isdir(directory):
+        try:
+          os.makedirs(directory, 0755)
+        except Exception as ex:
+          # permission denied here is expected when ambari runs as non-root
+          print_error_msg("Could not create {0}. Reason: {1}".format(directory, str(ex)))
+      
       if not os.path.isdir(directory) or not os.access(directory, os.W_OK):
-        raise FatalException(-1, "Unable to access {0} directory. Confirm the directory is created and is writable by the Ambari Server user account '{1}'".format(directory, getpass.getuser()))
+        raise FatalException(-1, "Unable to access {0} directory. Confirm the directory is created and is writable by Ambari Server user account '{1}'".format(directory, getpass.getuser()))
 
 @OsFamilyImpl(os_family=OSConst.WINSRV_FAMILY)
 class ServerConfigDefaultsWindows(ServerConfigDefaults):
@@ -435,8 +489,10 @@ class ServerConfigDefaultsWindows(ServerConfigDefaults):
 
     self.SERVER_RESOURCES_DIR = "resources"
     self.STACK_LOCATION_DEFAULT = "resources\\stacks"
+    self.EXTENSION_LOCATION_DEFAULT = "resources\\extensions"
     self.COMMON_SERVICES_LOCATION_DEFAULT = "resources\\common-services"
     self.MPACKS_STAGING_LOCATION_DEFAULT = "resources\\mpacks"
+    self.SERVER_TMP_DIR_DEFAULT = "data\\tmp"
 
     self.DEFAULT_VIEWS_DIR = "resources\\views"
 
@@ -486,6 +542,9 @@ class ServerConfigDefaultsLinux(ServerConfigDefaults):
       (AmbariPath.get("/var/lib/ambari-server/keys/.ssh"), "700", "{0}", False),
       (AmbariPath.get("/var/lib/ambari-server/resources/common-services/"), "755", "{0}", True),
       (AmbariPath.get("/var/lib/ambari-server/resources/stacks/"), "755", "{0}", True),
+      (AmbariPath.get("/var/lib/ambari-server/resources/extensions/"), "755", "{0}", True),
+      (AmbariPath.get("/var/lib/ambari-server/resources/dashboards/"), "755", "{0}", True),
+      (AmbariPath.get("/var/lib/ambari-server/resources/mpacks/"), "755", "{0}", True),
       (AmbariPath.get("/var/lib/ambari-server/resources/custom_actions/"), "755", "{0}", True),
       (AmbariPath.get("/var/lib/ambari-server/resources/host_scripts/"), "755", "{0}", True),
       (AmbariPath.get("/var/lib/ambari-server/resources/views/*"), "644", "{0}", True),
@@ -504,6 +563,11 @@ class ServerConfigDefaultsLinux(ServerConfigDefaults):
       (AmbariPath.get("/var/lib/ambari-server/data/tmp/"), "755", "{0}", False),
       (AmbariPath.get("/var/lib/ambari-server/data/cache/"), "600", "{0}", True),
       (AmbariPath.get("/var/lib/ambari-server/data/cache/"), "700", "{0}", False),
+      (AmbariPath.get("/var/lib/ambari-server/resources/common-services/STORM/0.9.1/package/files/wordCount.jar"), "644", "{0}", False),
+      (AmbariPath.get("/var/lib/ambari-server/resources/stacks/HDP/2.1.GlusterFS/services/STORM/package/files/wordCount.jar"), "644", "{0}", False),
+      (AmbariPath.get("/var/lib/ambari-server/resources/stack-hooks/before-START/files/fast-hdfs-resource.jar"), "644", "{0}", False),
+      (AmbariPath.get("/var/lib/ambari-server/resources/stacks/HDP/2.1/services/SMARTSENSE/package/files/view/smartsense-ambari-view-1.4.0.0.60.jar"), "644", "{0}", False),
+      (AmbariPath.get("/var/lib/ambari-server/resources/stacks/HDP/3.0/hooks/before-START/files/fast-hdfs-resource.jar"), "644", "{0}", False),
       # Also, /etc/ambari-server/conf/password.dat
       # is generated later at store_password_file
     ]
@@ -519,8 +583,10 @@ class ServerConfigDefaultsLinux(ServerConfigDefaults):
 
     self.SERVER_RESOURCES_DIR = AmbariPath.get("/var/lib/ambari-server/resources")
     self.STACK_LOCATION_DEFAULT = AmbariPath.get("/var/lib/ambari-server/resources/stacks")
+    self.EXTENSION_LOCATION_DEFAULT = AmbariPath.get("/var/lib/ambari-server/resources/extensions")
     self.COMMON_SERVICES_LOCATION_DEFAULT = AmbariPath.get("/var/lib/ambari-server/resources/common-services")
     self.MPACKS_STAGING_LOCATION_DEFAULT = AmbariPath.get("/var/lib/ambari-server/resources/mpacks")
+    self.SERVER_TMP_DIR_DEFAULT = AmbariPath.get("/var/lib/ambari-server/data/tmp")
 
     self.DEFAULT_VIEWS_DIR = AmbariPath.get("/var/lib/ambari-server/resources/views")
 
@@ -617,6 +683,14 @@ def get_admin_views_dir(properties):
     views_dirs = glob.glob(views_dir + "/work/ADMIN_VIEW*")
   return views_dirs
 
+def get_views_jars(properties):
+  views_dir = properties.get_property(VIEWS_DIR_PROPERTY)
+  if views_dir is None or views_dir == "":
+    views_jars = glob.glob(AmbariPath.get("/var/lib/ambari-server/resources/views/*.jar"))
+  else:
+    views_jars = glob.glob(views_dir + "/*.jar")
+  return views_jars
+
 def get_is_secure(properties):
   isSecure = properties.get_property(SECURITY_IS_ENCRYPTION_ENABLED)
   isSecure = True if isSecure and isSecure.lower() == 'true' else False
@@ -642,6 +716,19 @@ def get_master_key_location(properties):
   if keyLocation is None or keyLocation == "":
     keyLocation = properties[SECURITY_KEYS_DIR]
   return keyLocation
+
+def get_ambari_server_ui_port(properties):
+  ambari_server_ui_port = CLIENT_API_PORT
+  client_api_port = properties.get_property(CLIENT_API_PORT_PROPERTY)
+  if client_api_port:
+    ambari_server_ui_port = client_api_port
+  api_ssl = properties.get_property(SSL_API)
+  if api_ssl and str(api_ssl).lower() == "true":
+    ambari_server_ui_port = DEFAULT_SSL_API_PORT
+    ssl_api_port = properties.get_property(SSL_API_PORT)
+    if ssl_api_port:
+      ambari_server_ui_port = ssl_api_port
+  return ambari_server_ui_port
 
 # Copy file to /tmp and save with file.# (largest # is latest file)
 def backup_file_in_temp(filePath):
@@ -753,8 +840,7 @@ def update_database_name_property(upgrade=False):
     if properties == -1:
       err = "Error getting ambari properties"
       raise FatalException(-1, err)
-    print_warning_msg(JDBC_DATABASE_NAME_PROPERTY + " property isn't set in " +
-                      AMBARI_PROPERTIES_FILE + ". Setting it to default value - " + configDefaults.DEFAULT_DB_NAME)
+    print_warning_msg("{0} property isn't set in {1} . Setting it to default value - {3}".format(JDBC_DATABASE_NAME_PROPERTY, AMBARI_PROPERTIES_FILE, configDefaults.DEFAULT_DB_NAME))
     properties.process_pair(JDBC_DATABASE_NAME_PROPERTY, configDefaults.DEFAULT_DB_NAME)
     conf_file = find_properties_file()
     try:
@@ -782,7 +868,7 @@ def get_encrypted_password(alias, password, properties, options):
 
     retCode = save_passwd_for_alias(alias, password, masterKey)
     if retCode != 0:
-      print 'Failed to save secure password!'
+      print_error_msg ('Failed to save secure password!')
       return password
     else:
       return get_alias_string(alias)
@@ -811,7 +897,7 @@ def read_passwd_for_alias(alias, masterKey="", options=None):
     if jdk_path is None:
       print_error_msg("No JDK found, please run the \"setup\" "
                       "command to install a JDK automatically or install any "
-                      "JDK manually to " + configDefaults.JDK_INSTALL_DIR)
+                      "JDK manually to {0}".format(configDefaults.JDK_INSTALL_DIR))
       return 1
 
     tempFileName = "ambari.passwd"
@@ -831,10 +917,9 @@ def read_passwd_for_alias(alias, masterKey="", options=None):
     command = SECURITY_PROVIDER_GET_CMD.format(get_java_exe_path(),
                                                serverClassPath.get_full_ambari_classpath_escaped_for_shell(), alias, tempFilePath, masterKey)
     (retcode, stdout, stderr) = run_os_command(command)
-    print_info_msg("Return code from credential provider get passwd: " +
-                   str(retcode))
+    print_info_msg("Return code from credential provider get passwd: {0}".format(str(retcode)))
     if retcode != 0:
-      print 'ERROR: Unable to read password from store. alias = ' + alias
+      print_error_msg ('ERROR: Unable to read password from store. alias = {0}'.format(alias))
     else:
       with open(tempFilePath, 'r') as hfRTemp:
         passwd = hfRTemp.read()
@@ -862,7 +947,7 @@ def save_passwd_for_alias(alias, passwd, masterKey=""):
     if jdk_path is None:
       print_error_msg("No JDK found, please run the \"setup\" "
                       "command to install a JDK automatically or install any "
-                      "JDK manually to " + configDefaults.JDK_INSTALL_DIR)
+                      "JDK manually to {0}".format(configDefaults.JDK_INSTALL_DIR))
       return 1
 
     if masterKey is None or masterKey == "":
@@ -872,8 +957,7 @@ def save_passwd_for_alias(alias, passwd, masterKey=""):
     command = SECURITY_PROVIDER_PUT_CMD.format(get_java_exe_path(),
                                                serverClassPath.get_full_ambari_classpath_escaped_for_shell(), alias, passwd, masterKey)
     (retcode, stdout, stderr) = run_os_command(command)
-    print_info_msg("Return code from credential provider save passwd: " +
-                   str(retcode))
+    print_info_msg("Return code from credential provider save passwd: {0}".format(str(retcode)))
     return retcode
   else:
     print_error_msg("Alias or password is unreadable.")
@@ -905,10 +989,29 @@ def remove_password_file(filename):
     try:
       os.remove(passFilePath)
     except Exception, e:
-      print_warning_msg('Unable to remove password file: ' + str(e))
+      print_warning_msg('Unable to remove password file: {0}'.format(str(e)))
       return 1
   pass
   return 0
+
+
+def get_web_server_startup_timeout(properties):
+  """
+  Gets the time, in seconds, that the startup script should wait for the web server to bind to
+  the configured port. If this value is too low, then the startup script will return an
+  error code even though Ambari is actually starting up.
+  :param properties:
+  :return: The timeout value, in seconds. The default is 90.
+  """
+  # get the timeout property and strip it if it exists
+  timeout = properties[WEB_SERVER_STARTUP_TIMEOUT]
+  timeout = None if timeout is None else timeout.strip()
+
+  if timeout is None or timeout == "":
+    timeout = 90
+  else:
+    timeout = int(timeout)
+  return timeout
 
 
 def get_original_master_key(properties, options = None):
@@ -922,7 +1025,7 @@ def get_original_master_key(properties, options = None):
         masterKey = get_validated_string_input('Enter current Master Key: ',
                                                "", ".*", "", True, False)
     except KeyboardInterrupt:
-      print 'Exiting...'
+      print_warning_msg('Exiting...')
       sys.exit(1)
 
     # Find an alias that exists
@@ -945,7 +1048,7 @@ def get_original_master_key(properties, options = None):
     if alias and masterKey:
       password = read_passwd_for_alias(alias, masterKey, options)
       if not password:
-        print "ERROR: Master key does not match."
+        print_error_msg ("ERROR: Master key does not match.")
         continue
 
     input = False
@@ -1014,7 +1117,7 @@ def update_krb_jaas_login_properties():
     os.rename(prev_conf_file, conf_file)
     print_warning_msg("Original file %s kept" % AMBARI_KRB_JAAS_LOGIN_FILE)
   except OSError as e:
-    print "Couldn't move %s file: %s" % (prev_conf_file, e)
+    print_error_msg ("Couldn't move %s file: %s" % (prev_conf_file, str(e)))
     return -1
 
   return 0
@@ -1033,12 +1136,41 @@ def update_ambari_env():
     if env_file is not None:
       os.remove(env_file)
       os.rename(prev_env_file, env_file)
-      print_warning_msg("Original file %s kept" % AMBARI_ENV_FILE)
+      print ("INFO: Original file %s kept") % (AMBARI_ENV_FILE)
   except OSError as e:
-    print "Couldn't move %s file: %s" % (prev_env_file, e)
+    print_error_msg ( "Couldn't move %s file: %s" % (prev_env_file, str(e)))
     return -1
 
   return 0
+
+def set_property(key, value, rewrite=True):
+  properties = get_ambari_properties()
+  if properties == -1:
+    err = "Error getting ambari properties"
+    raise FatalException(-1, err)
+
+  if not rewrite and key in properties.keys():
+    return
+
+  properties.process_pair(key, value)
+  update_properties(properties)
+
+ 
+# default should be false / not accepted 
+def write_gpl_license_accepted(default_prompt_value = False, text = GPL_LICENSE_PROMPT_TEXT):
+  properties = get_ambari_properties()
+  if properties == -1:
+    err = "Error getting ambari properties"
+    raise FatalException(-1, err)
+
+
+  if GPL_LICENSE_ACCEPTED_PROPERTY in properties.keys() and properties.get_property(GPL_LICENSE_ACCEPTED_PROPERTY).lower() == "true":
+    return True
+
+  result = get_YN_input(text, default_prompt_value)
+  set_property(GPL_LICENSE_ACCEPTED_PROPERTY, str(result).lower())
+
+  return result
 
 def update_ambari_properties():
   prev_conf_file = search_file(configDefaults.AMBARI_PROPERTIES_BACKUP_FILE, get_conf_dir())
@@ -1059,7 +1191,7 @@ def update_ambari_properties():
       old_properties = Properties()
       old_properties.load(hfOld)
     except Exception, e:
-      print 'Could not read "%s": %s' % (prev_conf_file, e)
+      print_error_msg ('Could not read "%s": %s' % (prev_conf_file, str(e)))
       return -1
 
   try:
@@ -1068,6 +1200,7 @@ def update_ambari_properties():
       new_properties.load(hfNew)
 
     for prop_key, prop_value in old_properties.getPropertyDict().items():
+      prop_value = prop_value.replace("/usr/lib/python2.6/site-packages", "/usr/lib/ambari-server/lib")
       if "agent.fqdn.service.url" == prop_key:
         # what is agent.fqdn property in ambari.props?
         new_properties.process_pair(GET_FQDN_SERVICE_URL, prop_value)
@@ -1085,14 +1218,14 @@ def update_ambari_properties():
     if NR_USER_PROPERTY not in new_properties.keys():
       new_properties.process_pair(NR_USER_PROPERTY, "root")
 
-    if OS_FAMILY_PROPERTY not in new_properties.keys():
-      new_properties.process_pair(OS_FAMILY_PROPERTY, OS_FAMILY + OS_VERSION)
+    # update the os. In case os detection routine changed
+    new_properties.process_pair(OS_FAMILY_PROPERTY, OS_FAMILY + OS_VERSION)
 
     with open(conf_file, 'w') as hfW:
       new_properties.store(hfW)
 
   except Exception, e:
-    print 'Could not write "%s": %s' % (conf_file, e)
+    print_error_msg ('Could not write "%s": %s' % (conf_file, str(e)))
     return -1
 
   timestamp = datetime.datetime.now()
@@ -1101,7 +1234,7 @@ def update_ambari_properties():
   try:
     os.rename(prev_conf_file, new_conf_file)
   except Exception, e:
-    print 'Could not rename "%s" to "%s": %s' % (prev_conf_file, new_conf_file, e)
+    print_error_msg ('Could not rename "%s" to "%s": %s' % (prev_conf_file, new_conf_file, str(e)))
     #Not critical, move on
 
   return 0
@@ -1308,20 +1441,20 @@ def find_jdk():
   if jdkPath:
     if validate_jdk(jdkPath):
       return jdkPath
-  print "Looking for available JDKs at " + configDefaults.JDK_INSTALL_DIR
+  print("INFO: Looking for available JDKs at {0}".format(configDefaults.JDK_INSTALL_DIR))
   jdks = glob.glob(os.path.join(configDefaults.JDK_INSTALL_DIR, configDefaults.JDK_SEARCH_PATTERN))
   #[fbarca] Use the newest JDK
   jdks.sort(None, None, True)
-  print "Found: " + str(jdks)
+  print_info_msg("Found: {0}".format(str(jdks)))
   if len(jdks) == 0:
     return
   for jdkPath in jdks:
-    print "Trying to use JDK {0}".format(jdkPath)
+    print "INFO: Trying to use JDK {0}".format(jdkPath)
     if validate_jdk(jdkPath):
-      print "Selected JDK {0}".format(jdkPath)
+      print "INFO: Selected JDK {0}".format(jdkPath)
       return jdkPath
     else:
-      print "JDK {0} is invalid".format(jdkPath)
+      print_error_msg ("JDK {0} is invalid".format(jdkPath))
   return
 
 def get_java_exe_path():
@@ -1361,6 +1494,15 @@ def get_stack_location(properties):
   return stack_location
 
 #
+# Extension location
+#
+def get_extension_location(properties):
+  extension_location = properties[EXTENSION_PATH_PROPERTY]
+  if not extension_location:
+    extension_location = configDefaults.EXTENSION_LOCATION_DEFAULT
+  return extension_location
+
+#
 # Common services location
 #
 def get_common_services_location(properties):
@@ -1378,9 +1520,27 @@ def get_mpacks_staging_location(properties):
     mpacks_staging_location = configDefaults.MPACKS_STAGING_LOCATION_DEFAULT
   return mpacks_staging_location
 
-def get_missing_properties(properties):
+
+#
+# Dashboard location
+#
+def get_dashboard_location(properties):
+  resources_dir = get_resources_location(properties)
+  dashboard_location = os.path.join(resources_dir, configDefaults.DASHBOARD_DIRNAME)
+  return dashboard_location
+
+#
+# Server temp location
+#
+def get_server_temp_location(properties):
+  server_tmp_dir = properties[SERVER_TMP_DIR_PROPERTY]
+  if not server_tmp_dir:
+    server_tmp_dir = configDefaults.SERVER_TMP_DIR_DEFAULT
+  return server_tmp_dir
+
+def get_missing_properties(properties, property_set=REQUIRED_PROPERTIES):
   missing_propertiers = []
-  for property in REQUIRED_PROPERTIES:
+  for property in property_set:
     value = properties[property]
     if not value:
       missing_propertiers.append(property)

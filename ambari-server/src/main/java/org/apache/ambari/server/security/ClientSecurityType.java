@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,7 +19,8 @@ package org.apache.ambari.server.security;
 
 public enum ClientSecurityType {
   LOCAL("local"),
-  LDAP("ldap");
+  LDAP("ldap"),
+  PAM("pam");
 
   private String value;
   ClientSecurityType(String value) {

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -356,7 +356,7 @@ public class AlertTargetResourceProviderTest {
    */
   private void testCreateResourcesWithGroups(Authentication authentication) throws Exception {
     List<Long> groupIds = Arrays.asList(1L, 2L, 3L);
-    List<AlertGroupEntity> groups = new ArrayList<AlertGroupEntity>();
+    List<AlertGroupEntity> groups = new ArrayList<>();
     AlertGroupEntity group1 = new AlertGroupEntity();
     AlertGroupEntity group2 = new AlertGroupEntity();
     AlertGroupEntity group3 = new AlertGroupEntity();
@@ -573,8 +573,8 @@ public class AlertTargetResourceProviderTest {
     Map<String, Object> requestProps = getCreationProperties();
     requestProps.put(
         AlertTargetResourceProvider.ALERT_TARGET_STATES,
-        new ArrayList<String>(Arrays.asList(AlertState.OK.name(),
-            AlertState.UNKNOWN.name())));
+      new ArrayList<>(Arrays.asList(AlertState.OK.name(),
+        AlertState.UNKNOWN.name())));
 
     Request request = PropertyHelper.getCreateRequest(Collections.singleton(requestProps), null);
 
@@ -649,7 +649,7 @@ public class AlertTargetResourceProviderTest {
 
     // create new properties, and include the ID since we're not going through
     // a service layer which would add it for us automatically
-    requestProps = new HashMap<String, Object>();
+    requestProps = new HashMap<>();
     requestProps.put(AlertTargetResourceProvider.ALERT_TARGET_ID,
         ALERT_TARGET_ID.toString());
 
@@ -711,7 +711,7 @@ public class AlertTargetResourceProviderTest {
     expect(m_dao.findTargetById(ALERT_TARGET_ID)).andReturn(target).times(1);
 
     List<Long> groupIds = Arrays.asList(1L, 2L, 3L);
-    List<AlertGroupEntity> groups = new ArrayList<AlertGroupEntity>();
+    List<AlertGroupEntity> groups = new ArrayList<>();
     AlertGroupEntity group1 = new AlertGroupEntity();
     AlertGroupEntity group2 = new AlertGroupEntity();
     AlertGroupEntity group3 = new AlertGroupEntity();
@@ -735,7 +735,7 @@ public class AlertTargetResourceProviderTest {
 
     // create new properties, and include the ID since we're not going through
     // a service layer which would add it for us automatically
-    requestProps = new HashMap<String, Object>();
+    requestProps = new HashMap<>();
     requestProps.put(AlertTargetResourceProvider.ALERT_TARGET_ID,
         ALERT_TARGET_ID.toString());
 
@@ -864,7 +864,7 @@ public class AlertTargetResourceProviderTest {
     Map<String, Object> requestProps = getCreationProperties();
 
     // mock out the directive
-    Map<String, String> requestInfoProperties = new HashMap<String, String>();
+    Map<String, String> requestInfoProperties = new HashMap<>();
     requestInfoProperties.put(
         AlertTargetResourceDefinition.OVERWRITE_DIRECTIVE, "true");
 
@@ -926,7 +926,7 @@ public class AlertTargetResourceProviderTest {
       Collections.singleton(requestProps), null);
     provider.createResources(request);
 
-    requestProps = new HashMap<String, Object>();
+    requestProps = new HashMap<>();
     requestProps.put(AlertTargetResourceProvider.ALERT_TARGET_ID, ALERT_TARGET_ID.toString());
 
     //selecting CUSTOM option for Groups, 2 group ids selected from the available options
@@ -961,8 +961,6 @@ public class AlertTargetResourceProviderTest {
     AlertTargetEntity target = new AlertTargetEntity();
     expect(m_dao.findTargetById(ALERT_TARGET_ID)).andReturn(target).once();
 
-    Capture<AlertGroupEntity> groupEntityCapture = EasyMock.newCapture();
-
     //All Groups in the Database with CLuster ID = 1L
     List<AlertGroupEntity> groups = getMockGroupEntities();
 
@@ -971,9 +969,6 @@ public class AlertTargetResourceProviderTest {
 
     expect(m_dao.findGroupsById(EasyMock.eq(groupIds))).andReturn(groups).anyTimes();
     expect(m_dao.findAllGroups()).andReturn(groups).once();
-    for(AlertGroupEntity group: groups){
-      expect(m_dao.merge(capture(groupEntityCapture))).andReturn(group).once();
-    }
     expect(m_dao.merge(capture(entityCapture))).andReturn(target).anyTimes();
 
     //start execution with these Expectation setters
@@ -987,7 +982,7 @@ public class AlertTargetResourceProviderTest {
       Collections.singleton(requestProps), null);
     provider.createResources(request);
 
-    requestProps = new HashMap<String, Object>();
+    requestProps = new HashMap<>();
     requestProps.put(AlertTargetResourceProvider.ALERT_TARGET_ID, ALERT_TARGET_ID.toString());
 
     //selecting ALL option for Groups
@@ -1047,7 +1042,7 @@ public class AlertTargetResourceProviderTest {
    * @throws Exception
    */
   private Map<String, Object> getCreationProperties() throws Exception {
-    Map<String, Object> requestProps = new HashMap<String, Object>();
+    Map<String, Object> requestProps = new HashMap<>();
     requestProps.put(AlertTargetResourceProvider.ALERT_TARGET_NAME,
             ALERT_TARGET_NAME);
 
@@ -1075,7 +1070,7 @@ public class AlertTargetResourceProviderTest {
    * @throws Exception
    */
   private Map<String, Object> getRecipientCreationProperties() throws Exception {
-    Map<String, Object> requestProps = new HashMap<String, Object>();
+    Map<String, Object> requestProps = new HashMap<>();
     requestProps.put(AlertTargetResourceProvider.ALERT_TARGET_NAME,
         ALERT_TARGET_NAME);
 

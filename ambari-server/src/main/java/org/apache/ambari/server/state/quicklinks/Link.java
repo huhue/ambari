@@ -18,6 +18,10 @@
 
 package org.apache.ambari.server.state.quicklinks;
 
+import java.util.List;
+
+import javax.annotation.Nullable;
+
 import org.codehaus.jackson.annotate.JsonIgnoreProperties;
 import org.codehaus.jackson.annotate.JsonProperty;
 import org.codehaus.jackson.map.annotate.JsonSerialize;
@@ -43,8 +47,17 @@ public class Link{
   @JsonProperty("port")
   private Port port;
 
+  @JsonProperty("host")
+  private Host host;
+
   @JsonProperty("protocol")
   private Protocol protocol;
+
+  @JsonProperty("attributes")
+  private List<String> attributes;
+
+  @JsonProperty("visible")
+  private boolean visible = true;
 
   public String getName() {
     return name;
@@ -90,6 +103,10 @@ public class Link{
     return port;
   }
 
+  public Host getHost() {
+    return host;
+  }
+
   public void setPort(Port port) {
     this.port = port;
   }
@@ -102,6 +119,22 @@ public class Link{
     this.protocol = protocol;
   }
 
+  public boolean isVisible() {
+    return visible;
+  }
+
+  public void setVisible(boolean visible) {
+    this.visible = visible;
+  }
+
+  @Nullable
+  public List<String> getAttributes() {
+    return attributes;
+  }
+
+  public void setAttributes(List<String> attributes) {
+    this.attributes = attributes;
+  }
 
   public boolean isRemoved(){
     //treat a link as removed if the section only contains a name
@@ -132,5 +165,16 @@ public class Link{
     } else {
       port.mergetWithParent(parentLink.getPort());
     }
+
+    if(null == host){
+      host = parentLink.getHost();
+    } else {
+      host.mergeWithParent(parentLink.getHost());
+    }
+
+    if (null == attributes && null != parentLink.attributes) {
+      attributes = parentLink.attributes;
+    }
   }
+
 }

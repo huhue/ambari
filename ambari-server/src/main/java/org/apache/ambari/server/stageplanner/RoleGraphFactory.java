@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -24,12 +24,12 @@ public interface RoleGraphFactory {
    *
    * @return
    */
-  public RoleGraph createNew();
+  RoleGraph createNew();
 
   /**
    *
    * @param rd
    * @return
    */
-  public RoleGraph createNew(RoleCommandOrder rd);
+  RoleGraph createNew(RoleCommandOrder rd);
 }

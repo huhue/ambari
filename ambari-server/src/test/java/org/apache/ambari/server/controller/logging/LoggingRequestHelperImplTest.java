@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,30 +17,30 @@
  */
 package org.apache.ambari.server.controller.logging;
 
-import org.apache.ambari.server.security.credential.PrincipalKeyCredential;
-import org.apache.ambari.server.security.encryption.CredentialStoreService;
-import org.apache.ambari.server.state.Cluster;
-import org.apache.ambari.server.state.Config;
-import org.apache.commons.codec.binary.Base64;
-import org.easymock.Capture;
-import org.easymock.EasyMockSupport;
-import org.junit.Test;
+import static org.easymock.EasyMock.capture;
+import static org.easymock.EasyMock.eq;
+import static org.easymock.EasyMock.expect;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 import java.net.HttpURLConnection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
-import static org.easymock.EasyMock.capture;
-import static org.easymock.EasyMock.eq;
-import static org.easymock.EasyMock.expect;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import org.apache.ambari.server.security.credential.PrincipalKeyCredential;
+import org.apache.ambari.server.security.encryption.CredentialStoreService;
+import org.apache.ambari.server.state.Cluster;
+import org.apache.ambari.server.state.Config;
+import org.apache.commons.codec.binary.Base64;
+import org.easymock.Capture;
+import org.easymock.EasyMock;
+import org.easymock.EasyMockSupport;
+import org.junit.Test;
 
 
 public class LoggingRequestHelperImplTest {
@@ -100,11 +100,24 @@ public class LoggingRequestHelperImplTest {
       "]" +
       "}";
 
+  private static final String TEST_JSON_INPUT_LOG_FILES_MAP =
+    "{" +
+    "\"hostLogFiles\":{" +
+    "\"hdfs_namenode\": [" +
+    "\"/var/log/hadoop/hdfs/hadoop-hdfs-namenode-c6401.ambari.apache.org.log\"" +
+    "],\"logsearch_app\": [" +
+    "\"/var/log/ambari-logsearch-portal/logsearch.json\"" +
+    "]" +
+    "}}";
+
   private static final String TEST_JSON_INPUT_LOG_LEVEL_QUERY =
     "{\"pageSize\":\"0\",\"queryTimeMS\":\"1459970731998\",\"resultSize\":\"6\",\"startIndex\":\"0\",\"totalCount\":\"0\"," +
       "\"vNameValues\":[{\"name\":\"FATAL\",\"value\":\"0\"},{\"name\":\"ERROR\",\"value\":\"0\"}," +
       "{\"name\":\"WARN\",\"value\":\"41\"},{\"name\":\"INFO\",\"value\":\"186\"},{\"name\":\"DEBUG\",\"value\":\"0\"}," +
       "{\"name\":\"TRACE\",\"value\":\"0\"}]}";
+
+  private static final String TEST_JSON_INPUT_NULL_LOG_LIST =
+    "{\"startIndex\":0,\"pageSize\":0,\"totalCount\":0,\"resultSize\":0,\"sortType\":null,\"sortBy\":null,\"queryTimeMS\":1479850014987,\"logList\":null,\"listSize\":0}";
 
 
   private final String EXPECTED_HOST_NAME = "c6401.ambari.apache.org";
@@ -115,6 +128,8 @@ public class LoggingRequestHelperImplTest {
 
   private static final String EXPECTED_ADMIN_PASSWORD = "admin-pwd";
 
+  private static final String EXPECTED_PROTOCOL = "http";
+
   private static final String EXPECTED_ENCODED_CREDENTIALS =
     Base64.encodeBase64String((EXPECTED_USER_NAME + ":" + EXPECTED_ADMIN_PASSWORD).getBytes());
 
@@ -122,6 +137,7 @@ public class LoggingRequestHelperImplTest {
 
   @Test
   public void testLogQueryRequestBasic() throws Exception {
+    LoggingCookieStore.INSTANCE.getCookiesMap().clear();
     EasyMockSupport mockSupport =
       new EasyMockSupport();
 
@@ -138,16 +154,17 @@ public class LoggingRequestHelperImplTest {
       mockSupport.createMock(Config.class);
 
     Map<String, String> testConfigProperties =
-      new HashMap<String, String>();
+      new HashMap<>();
 
     testConfigProperties.put("logsearch_admin_username", EXPECTED_USER_NAME);
     testConfigProperties.put("logsearch_admin_password", EXPECTED_ADMIN_PASSWORD);
     testConfigProperties = Collections.unmodifiableMap(testConfigProperties);
 
-    Capture<HttpURLConnection> captureURLConnection = new Capture<HttpURLConnection>();
-    Capture<HttpURLConnection> captureURLConnectionForAuthentication = new Capture<HttpURLConnection>();
+    Capture<HttpURLConnection> captureURLConnection = EasyMock.newCapture();
+    Capture<HttpURLConnection> captureURLConnectionForAuthentication = EasyMock.newCapture();
 
     expect(clusterMock.getDesiredConfigByType("logsearch-admin-json")).andReturn(adminPropertiesConfigMock).atLeastOnce();
+    expect(clusterMock.getClusterName()).andReturn("clusterone").atLeastOnce();
     expect(adminPropertiesConfigMock.getProperties()).andReturn(testConfigProperties).atLeastOnce();
     expect(networkConnectionMock.readQueryResponseFromServer(capture(captureURLConnection))).andReturn(new StringBuffer(TEST_JSON_INPUT_TWO_LIST_ENTRIES)).atLeastOnce();
 
@@ -157,11 +174,11 @@ public class LoggingRequestHelperImplTest {
     mockSupport.replayAll();
 
     LoggingRequestHelper helper =
-      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, credentialStoreServiceMock, clusterMock, networkConnectionMock);
+      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, EXPECTED_PROTOCOL, credentialStoreServiceMock, clusterMock, null, networkConnectionMock);
 
     // invoke query request
     LogQueryResponse result =
-      helper.sendQueryRequest(Collections.<String,String>emptyMap());
+      helper.sendQueryRequest(Collections.emptyMap());
 
     // verify that the HttpURLConnection was created with the proper values
     HttpURLConnection httpURLConnection =
@@ -175,6 +192,8 @@ public class LoggingRequestHelperImplTest {
       "http", httpURLConnection.getURL().getProtocol());
     assertEquals("URLConnection did not have the expected method set",
       "GET", httpURLConnection.getRequestMethod());
+    assertTrue("URLConnection's URL did not have the expected query parameter string",
+      httpURLConnection.getURL().getQuery().contains("clusters=clusterone"));
 
     assertSame("HttpUrlConnection instances passed into NetworkConnection mock should have been the same instance",
       httpURLConnection, captureURLConnectionForAuthentication.getValue());
@@ -202,105 +221,15 @@ public class LoggingRequestHelperImplTest {
     List<LogLineResult> listOfLineResults =
       result.getListOfResults();
 
-    {
-      LogLineResult resultOne = listOfLineResults.get(0);
-      // verify that all fields in this class are parsed as expected
-      assertEquals("Cluster name not parsed properly",
-        "clusterone", resultOne.getClusterName());
-      assertEquals("Method Name not parsed properly",
-        "chooseUnderReplicatedBlocks", resultOne.getLogMethod());
-      assertEquals("Log Level not parsed properly",
-        "INFO", resultOne.getLogLevel());
-      assertEquals("event_count not parsed properly",
-        "1", resultOne.getEventCount());
-      assertEquals("ip address not parsed properly",
-        "192.168.1.1", resultOne.getIpAddress());
-      assertEquals("component type not parsed properly",
-        "hdfs_namenode", resultOne.getComponentType());
-      assertEquals("sequence number not parsed properly",
-        "10584", resultOne.getSequenceNumber());
-      assertEquals("log file path not parsed properly",
-        "/var/log/hadoop/hdfs/hadoop-hdfs-namenode-c6401.ambari.apache.org.log", resultOne.getLogFilePath());
-      assertEquals("log src file name not parsed properly",
-        "UnderReplicatedBlocks.java", resultOne.getSourceFile());
-      assertEquals("log src line number not parsed properly",
-        "394", resultOne.getSourceFileLineNumber());
-      assertEquals("host name not parsed properly",
-        "c6401.ambari.apache.org", resultOne.getHostName());
-      assertEquals("log message not parsed properly",
-        "chooseUnderReplicatedBlocks selected 2 blocks at priority level 0;  Total=2 Reset bookmarks? false", resultOne.getLogMessage());
-      assertEquals("logger name not parsed properly",
-        "BlockStateChange", resultOne.getLoggerName());
-      assertEquals("id not parsed properly",
-        "9c5562fb-123f-47c8-aaf5-b5e407326c08", resultOne.getId());
-      assertEquals("message MD5 not parsed properly",
-        "-3892769501348410581", resultOne.getMessageMD5());
-      assertEquals("log time not parsed properly",
-        "1458148749036", resultOne.getLogTime());
-      assertEquals("event MD5 not parsed properly",
-        "1458148749036-2417481968206345035", resultOne.getEventMD5());
-      assertEquals("logfile line number not parsed properly",
-        "2084", resultOne.getLogFileLineNumber());
-      assertEquals("ttl not parsed properly",
-        "+7DAYS", resultOne.getTtl());
-      assertEquals("expire at not parsed properly",
-        "1458753550322", resultOne.getExpirationTime());
-      assertEquals("version not parsed properly",
-        "1528979784023932928", resultOne.getVersion());
-    }
-
-    {
-      LogLineResult resultTwo = listOfLineResults.get(1);
-      // verify second log line record's data is parsed correctly
-      assertEquals("Cluster name not parsed properly",
-        "clusterone", resultTwo.getClusterName());
-      assertEquals("Method Name not parsed properly",
-        "putMetrics", resultTwo.getLogMethod());
-      assertEquals("Log Level not parsed properly",
-        "WARN", resultTwo.getLogLevel());
-      assertEquals("event_count not parsed properly",
-        "1", resultTwo.getEventCount());
-      assertEquals("ip address not parsed properly",
-        "192.168.1.1", resultTwo.getIpAddress());
-      assertEquals("component type not parsed properly",
-        "yarn_resourcemanager", resultTwo.getComponentType());
-      assertEquals("sequence number not parsed properly",
-        "10583", resultTwo.getSequenceNumber());
-      assertEquals("log file path not parsed properly",
-        "/var/log/hadoop-yarn/yarn/yarn-yarn-resourcemanager-c6401.ambari.apache.org.log", resultTwo.getLogFilePath());
-      assertEquals("log src file name not parsed properly",
-        "HadoopTimelineMetricsSink.java", resultTwo.getSourceFile());
-      assertEquals("log src line number not parsed properly",
-        "262", resultTwo.getSourceFileLineNumber());
-      assertEquals("host name not parsed properly",
-        "c6401.ambari.apache.org", resultTwo.getHostName());
-      assertEquals("log message not parsed properly",
-        "Unable to send metrics to collector by address:http://c6401.ambari.apache.org:6188/ws/v1/timeline/metrics", resultTwo.getLogMessage());
-      assertEquals("logger name not parsed properly",
-        "timeline.HadoopTimelineMetricsSink", resultTwo.getLoggerName());
-      assertEquals("id not parsed properly",
-        "8361c5a9-5b1c-4f44-bc8f-4c6f07d94228", resultTwo.getId());
-      assertEquals("message MD5 not parsed properly",
-        "5942185045779825717", resultTwo.getMessageMD5());
-      assertEquals("log time not parsed properly",
-        "1458148746937", resultTwo.getLogTime());
-      assertEquals("event MD5 not parsed properly",
-        "14581487469371427138486123628676", resultTwo.getEventMD5());
-      assertEquals("logfile line number not parsed properly",
-        "549", resultTwo.getLogFileLineNumber());
-      assertEquals("ttl not parsed properly",
-        "+7DAYS", resultTwo.getTtl());
-      assertEquals("expire at not parsed properly",
-        "1458753550322", resultTwo.getExpirationTime());
-      assertEquals("version not parsed properly",
-        "1528979784022884357", resultTwo.getVersion());
-    }
+    verifyFirstLine(listOfLineResults);
+    verifySecondLine(listOfLineResults);
 
     mockSupport.verifyAll();
   }
 
   @Test
   public void testLogLevelRequestBasic() throws Exception {
+    LoggingCookieStore.INSTANCE.getCookiesMap().clear();
     EasyMockSupport mockSupport =
       new EasyMockSupport();
 
@@ -317,13 +246,13 @@ public class LoggingRequestHelperImplTest {
       mockSupport.createMock(Config.class);
 
     Map<String, String> testConfigProperties =
-      new HashMap<String, String>();
+      new HashMap<>();
     testConfigProperties.put("logsearch_admin_username", "admin-user");
     testConfigProperties.put("logsearch_admin_password", "admin-pwd");
     testConfigProperties = Collections.unmodifiableMap(testConfigProperties);
 
-    Capture<HttpURLConnection> captureURLConnection = new Capture<HttpURLConnection>();
-    Capture<HttpURLConnection> captureURLConnectionForAuthentication = new Capture<HttpURLConnection>();
+    Capture<HttpURLConnection> captureURLConnection = EasyMock.newCapture();
+    Capture<HttpURLConnection> captureURLConnectionForAuthentication = EasyMock.newCapture();
 
     expect(clusterMock.getDesiredConfigByType("logsearch-admin-json")).andReturn(adminPropertiesConfigMock).atLeastOnce();
     expect(adminPropertiesConfigMock.getProperties()).andReturn(testConfigProperties).atLeastOnce();
@@ -337,7 +266,7 @@ public class LoggingRequestHelperImplTest {
 
 
     LoggingRequestHelper helper =
-      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, credentialStoreServiceMock, clusterMock, networkConnectionMock);
+      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, EXPECTED_PROTOCOL, credentialStoreServiceMock, clusterMock, null, networkConnectionMock);
 
     // invoke query request
     LogLevelQueryResponse result =
@@ -391,6 +320,7 @@ public class LoggingRequestHelperImplTest {
 
   @Test
   public void testLogFileNameRequestBasic() throws Exception {
+    LoggingCookieStore.INSTANCE.getCookiesMap().clear();
     final String expectedComponentName = "hdfs_namenode";
 
     EasyMockSupport mockSupport =
@@ -409,17 +339,18 @@ public class LoggingRequestHelperImplTest {
       mockSupport.createMock(Config.class);
 
     Map<String, String> testConfigProperties =
-      new HashMap<String, String>();
+      new HashMap<>();
     testConfigProperties.put("logsearch_admin_username", "admin-user");
     testConfigProperties.put("logsearch_admin_password", "admin-pwd");
     testConfigProperties = Collections.unmodifiableMap(testConfigProperties);
 
-    Capture<HttpURLConnection> captureURLConnection = new Capture<HttpURLConnection>();
-    Capture<HttpURLConnection> captureURLConnectionForAuthentication = new Capture<HttpURLConnection>();
+    Capture<HttpURLConnection> captureURLConnection = EasyMock.newCapture();
+    Capture<HttpURLConnection> captureURLConnectionForAuthentication = EasyMock.newCapture();
 
     expect(clusterMock.getDesiredConfigByType("logsearch-admin-json")).andReturn(adminPropertiesConfigMock).atLeastOnce();
+    expect(clusterMock.getClusterName()).andReturn("clusterone").atLeastOnce();
     expect(adminPropertiesConfigMock.getProperties()).andReturn(testConfigProperties).atLeastOnce();
-    expect(networkConnectionMock.readQueryResponseFromServer(capture(captureURLConnection))).andReturn(new StringBuffer(TEST_JSON_INPUT_TWO_LIST_ENTRIES)).atLeastOnce();
+    expect(networkConnectionMock.readQueryResponseFromServer(capture(captureURLConnection))).andReturn(new StringBuffer(TEST_JSON_INPUT_LOG_FILES_MAP)).atLeastOnce();
 
     // expect that basic authentication is setup, with the expected encoded credentials
     networkConnectionMock.setupBasicAuthentication(capture(captureURLConnectionForAuthentication), eq(EXPECTED_ENCODED_CREDENTIALS));
@@ -427,11 +358,11 @@ public class LoggingRequestHelperImplTest {
     mockSupport.replayAll();
 
     LoggingRequestHelper helper =
-      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, credentialStoreServiceMock, clusterMock, networkConnectionMock);
+      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, EXPECTED_PROTOCOL, credentialStoreServiceMock, clusterMock, null, networkConnectionMock);
 
     // invoke query request
-    Set<String> result =
-      helper.sendGetLogFileNamesRequest(expectedComponentName, EXPECTED_HOST_NAME);
+    HostLogFilesResponse result =
+      helper.sendGetLogFileNamesRequest(EXPECTED_HOST_NAME);
 
     // verify that the HttpURLConnection was created with the propert values
     HttpURLConnection httpURLConnection =
@@ -445,6 +376,8 @@ public class LoggingRequestHelperImplTest {
       "http", httpURLConnection.getURL().getProtocol());
     assertEquals("URLConnection did not have the expected method set",
       "GET", httpURLConnection.getRequestMethod());
+    assertTrue("URLConnection's URL did not have the expected query parameter string",
+      httpURLConnection.getURL().getQuery().contains("clusters=clusterone"));
 
     assertSame("HttpUrlConnection instances passed into NetworkConnection mock should have been the same instance",
       httpURLConnection, captureURLConnectionForAuthentication.getValue());
@@ -455,18 +388,93 @@ public class LoggingRequestHelperImplTest {
     // verify that the query contains the three required parameters
     assertTrue("host_name parameter was not included in query",
       resultQuery.contains("host_name=c6401.ambari.apache.org"));
-    assertTrue("component_name parameter was not included in the query",
-      resultQuery.contains("component_name=" + expectedComponentName));
-    assertTrue("pageSize parameter was not included in query",
-      resultQuery.contains("pageSize=1"));
 
     assertNotNull("Response object should not be null",
       result);
     assertEquals("Response Set was not of the expected size",
-      1, result.size());
+      2, result.getHostLogFiles().size());
     assertEquals("Response did not include the expected file name",
       "/var/log/hadoop/hdfs/hadoop-hdfs-namenode-c6401.ambari.apache.org.log",
-      result.iterator().next());
+      result.getHostLogFiles().get(expectedComponentName).get(0));
+
+    mockSupport.verifyAll();
+  }
+
+  @Test
+  public void testLogFileNameRequestWithNullLogList() throws Exception {
+    final String expectedComponentName = "hdfs_namenode";
+
+    EasyMockSupport mockSupport =
+      new EasyMockSupport();
+
+    CredentialStoreService credentialStoreServiceMock =
+      mockSupport.createMock(CredentialStoreService.class);
+
+    Cluster clusterMock =
+      mockSupport.createMock(Cluster.class);
+
+    LoggingRequestHelperImpl.NetworkConnection networkConnectionMock =
+      mockSupport.createMock(LoggingRequestHelperImpl.NetworkConnection.class);
+
+    Config adminPropertiesConfigMock =
+      mockSupport.createMock(Config.class);
+
+    Map<String, String> testConfigProperties =
+      new HashMap<>();
+    testConfigProperties.put("logsearch_admin_username", "admin-user");
+    testConfigProperties.put("logsearch_admin_password", "admin-pwd");
+    testConfigProperties = Collections.unmodifiableMap(testConfigProperties);
+
+    Capture<HttpURLConnection> captureURLConnection = new Capture<>();
+    Capture<HttpURLConnection> captureURLConnectionForAuthentication = new Capture<>();
+
+    expect(clusterMock.getDesiredConfigByType("logsearch-admin-json")).andReturn(adminPropertiesConfigMock).atLeastOnce();
+    expect(clusterMock.getClusterName()).andReturn("clusterone").atLeastOnce();
+    expect(adminPropertiesConfigMock.getProperties()).andReturn(testConfigProperties).atLeastOnce();
+    expect(networkConnectionMock.readQueryResponseFromServer(capture(captureURLConnection))).andReturn(new StringBuffer(TEST_JSON_INPUT_NULL_LOG_LIST)).atLeastOnce();
+
+    // expect that basic authentication is setup, with the expected encoded credentials
+    networkConnectionMock.setupBasicAuthentication(capture(captureURLConnectionForAuthentication), eq(EXPECTED_ENCODED_CREDENTIALS));
+
+    mockSupport.replayAll();
+
+    LoggingRequestHelper helper =
+      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, EXPECTED_PROTOCOL, credentialStoreServiceMock, clusterMock, null, networkConnectionMock);
+
+    // invoke query request
+    HostLogFilesResponse result =
+      helper.sendGetLogFileNamesRequest(EXPECTED_HOST_NAME);
+
+    // verify that the HttpURLConnection was created with the propert values
+    HttpURLConnection httpURLConnection =
+      captureURLConnection.getValue();
+
+    assertEquals("URLConnection did not have the correct hostname information",
+      EXPECTED_HOST_NAME, httpURLConnection.getURL().getHost());
+    assertEquals("URLConnection did not have the correct port information",
+      EXPECTED_PORT_NUMBER, httpURLConnection.getURL().getPort() + "");
+    assertEquals("URLConnection did not have the expected http protocol scheme",
+      "http", httpURLConnection.getURL().getProtocol());
+    assertEquals("URLConnection did not have the expected method set",
+      "GET", httpURLConnection.getRequestMethod());
+    assertTrue("URLConnection's URL did not have the expected query parameter string",
+      httpURLConnection.getURL().getQuery().contains("clusters=clusterone"));
+
+    assertSame("HttpUrlConnection instances passed into NetworkConnection mock should have been the same instance",
+      httpURLConnection, captureURLConnectionForAuthentication.getValue());
+
+    final String resultQuery =
+      httpURLConnection.getURL().getQuery();
+
+    // verify that the query contains the three required parameters
+    assertTrue("host_name parameter was not included in query",
+      resultQuery.contains("host_name=c6401.ambari.apache.org"));
+
+    assertNotNull("Response object should not be null",
+      result);
+    assertNull("Response Map should be null", result.getHostLogFiles());
+
+    mockSupport.verifyAll();
   }
 
   /**
@@ -478,6 +486,7 @@ public class LoggingRequestHelperImplTest {
    */
   @Test
   public void testLogQueryRequestBasicCredentialsNotInConfig() throws Exception {
+    LoggingCookieStore.INSTANCE.getCookiesMap().clear();
     final String expectedClusterName = "my-test-cluster";
 
     EasyMockSupport mockSupport =
@@ -495,12 +504,12 @@ public class LoggingRequestHelperImplTest {
     Config adminPropertiesConfigMock =
       mockSupport.createMock(Config.class);
 
-    Capture<HttpURLConnection> captureURLConnection = new Capture<HttpURLConnection>();
-    Capture<HttpURLConnection> captureURLConnectionForAuthentication = new Capture<HttpURLConnection>();
+    Capture<HttpURLConnection> captureURLConnection = EasyMock.newCapture();
+    Capture<HttpURLConnection> captureURLConnectionForAuthentication = EasyMock.newCapture();
 
     expect(clusterMock.getDesiredConfigByType("logsearch-admin-json")).andReturn(adminPropertiesConfigMock).atLeastOnce();
     expect(clusterMock.getClusterName()).andReturn(expectedClusterName).atLeastOnce();
-    expect(adminPropertiesConfigMock.getProperties()).andReturn(Collections.<String, String>emptyMap()).atLeastOnce();
+    expect(adminPropertiesConfigMock.getProperties()).andReturn(Collections.emptyMap()).atLeastOnce();
     expect(networkConnectionMock.readQueryResponseFromServer(capture(captureURLConnection))).andReturn(new StringBuffer(TEST_JSON_INPUT_TWO_LIST_ENTRIES)).atLeastOnce();
     // the credential store service should be consulted in this case, in order
     // to attempt to obtain the LogSearch credential from the store
@@ -512,11 +521,11 @@ public class LoggingRequestHelperImplTest {
     mockSupport.replayAll();
 
     LoggingRequestHelper helper =
-      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, credentialStoreServiceMock, clusterMock, networkConnectionMock);
+      new LoggingRequestHelperImpl(EXPECTED_HOST_NAME, EXPECTED_PORT_NUMBER, EXPECTED_PROTOCOL, credentialStoreServiceMock, clusterMock, null, networkConnectionMock);
 
     // invoke query request
     LogQueryResponse result =
-      helper.sendQueryRequest(Collections.<String,String>emptyMap());
+      helper.sendQueryRequest(Collections.emptyMap());
 
     // verify that the HttpURLConnection was created with the proper values
     HttpURLConnection httpURLConnection =
@@ -557,105 +566,109 @@ public class LoggingRequestHelperImplTest {
     List<LogLineResult> listOfLineResults =
       result.getListOfResults();
 
-    {
-      LogLineResult resultOne = listOfLineResults.get(0);
-      // verify that all fields in this class are parsed as expected
-      assertEquals("Cluster name not parsed properly",
-        "clusterone", resultOne.getClusterName());
-      assertEquals("Method Name not parsed properly",
-        "chooseUnderReplicatedBlocks", resultOne.getLogMethod());
-      assertEquals("Log Level not parsed properly",
-        "INFO", resultOne.getLogLevel());
-      assertEquals("event_count not parsed properly",
-        "1", resultOne.getEventCount());
-      assertEquals("ip address not parsed properly",
-        "192.168.1.1", resultOne.getIpAddress());
-      assertEquals("component type not parsed properly",
-        "hdfs_namenode", resultOne.getComponentType());
-      assertEquals("sequence number not parsed properly",
-        "10584", resultOne.getSequenceNumber());
-      assertEquals("log file path not parsed properly",
-        "/var/log/hadoop/hdfs/hadoop-hdfs-namenode-c6401.ambari.apache.org.log", resultOne.getLogFilePath());
-      assertEquals("log src file name not parsed properly",
-        "UnderReplicatedBlocks.java", resultOne.getSourceFile());
-      assertEquals("log src line number not parsed properly",
-        "394", resultOne.getSourceFileLineNumber());
-      assertEquals("host name not parsed properly",
-        "c6401.ambari.apache.org", resultOne.getHostName());
-      assertEquals("log message not parsed properly",
-        "chooseUnderReplicatedBlocks selected 2 blocks at priority level 0;  Total=2 Reset bookmarks? false", resultOne.getLogMessage());
-      assertEquals("logger name not parsed properly",
-        "BlockStateChange", resultOne.getLoggerName());
-      assertEquals("id not parsed properly",
-        "9c5562fb-123f-47c8-aaf5-b5e407326c08", resultOne.getId());
-      assertEquals("message MD5 not parsed properly",
-        "-3892769501348410581", resultOne.getMessageMD5());
-      assertEquals("log time not parsed properly",
-        "1458148749036", resultOne.getLogTime());
-      assertEquals("event MD5 not parsed properly",
-        "1458148749036-2417481968206345035", resultOne.getEventMD5());
-      assertEquals("logfile line number not parsed properly",
-        "2084", resultOne.getLogFileLineNumber());
-      assertEquals("ttl not parsed properly",
-        "+7DAYS", resultOne.getTtl());
-      assertEquals("expire at not parsed properly",
-        "1458753550322", resultOne.getExpirationTime());
-      assertEquals("version not parsed properly",
-        "1528979784023932928", resultOne.getVersion());
-    }
-
-    {
-      LogLineResult resultTwo = listOfLineResults.get(1);
-      // verify second log line record's data is parsed correctly
-      assertEquals("Cluster name not parsed properly",
-        "clusterone", resultTwo.getClusterName());
-      assertEquals("Method Name not parsed properly",
-        "putMetrics", resultTwo.getLogMethod());
-      assertEquals("Log Level not parsed properly",
-        "WARN", resultTwo.getLogLevel());
-      assertEquals("event_count not parsed properly",
-        "1", resultTwo.getEventCount());
-      assertEquals("ip address not parsed properly",
-        "192.168.1.1", resultTwo.getIpAddress());
-      assertEquals("component type not parsed properly",
-        "yarn_resourcemanager", resultTwo.getComponentType());
-      assertEquals("sequence number not parsed properly",
-        "10583", resultTwo.getSequenceNumber());
-      assertEquals("log file path not parsed properly",
-        "/var/log/hadoop-yarn/yarn/yarn-yarn-resourcemanager-c6401.ambari.apache.org.log", resultTwo.getLogFilePath());
-      assertEquals("log src file name not parsed properly",
-        "HadoopTimelineMetricsSink.java", resultTwo.getSourceFile());
-      assertEquals("log src line number not parsed properly",
-        "262", resultTwo.getSourceFileLineNumber());
-      assertEquals("host name not parsed properly",
-        "c6401.ambari.apache.org", resultTwo.getHostName());
-      assertEquals("log message not parsed properly",
-        "Unable to send metrics to collector by address:http://c6401.ambari.apache.org:6188/ws/v1/timeline/metrics", resultTwo.getLogMessage());
-      assertEquals("logger name not parsed properly",
-        "timeline.HadoopTimelineMetricsSink", resultTwo.getLoggerName());
-      assertEquals("id not parsed properly",
-        "8361c5a9-5b1c-4f44-bc8f-4c6f07d94228", resultTwo.getId());
-      assertEquals("message MD5 not parsed properly",
-        "5942185045779825717", resultTwo.getMessageMD5());
-      assertEquals("log time not parsed properly",
-        "1458148746937", resultTwo.getLogTime());
-      assertEquals("event MD5 not parsed properly",
-        "14581487469371427138486123628676", resultTwo.getEventMD5());
-      assertEquals("logfile line number not parsed properly",
-        "549", resultTwo.getLogFileLineNumber());
-      assertEquals("ttl not parsed properly",
-        "+7DAYS", resultTwo.getTtl());
-      assertEquals("expire at not parsed properly",
-        "1458753550322", resultTwo.getExpirationTime());
-      assertEquals("version not parsed properly",
-        "1528979784022884357", resultTwo.getVersion());
-    }
+    verifyFirstLine(listOfLineResults);
+    verifySecondLine(listOfLineResults);
 
     mockSupport.verifyAll();
   }
 
+  private static void verifyFirstLine(List<LogLineResult> listOfLineResults) {
+    LogLineResult resultOne = listOfLineResults.get(0);
+    // verify that all fields in this class are parsed as expected
+    assertEquals("Cluster name not parsed properly",
+      "clusterone", resultOne.getClusterName());
+    assertEquals("Method Name not parsed properly",
+      "chooseUnderReplicatedBlocks", resultOne.getLogMethod());
+    assertEquals("Log Level not parsed properly",
+      "INFO", resultOne.getLogLevel());
+    assertEquals("event_count not parsed properly",
+      "1", resultOne.getEventCount());
+    assertEquals("ip address not parsed properly",
+      "192.168.1.1", resultOne.getIpAddress());
+    assertEquals("component type not parsed properly",
+      "hdfs_namenode", resultOne.getComponentType());
+    assertEquals("sequence number not parsed properly",
+      "10584", resultOne.getSequenceNumber());
+    assertEquals("log file path not parsed properly",
+      "/var/log/hadoop/hdfs/hadoop-hdfs-namenode-c6401.ambari.apache.org.log", resultOne.getLogFilePath());
+    assertEquals("log src file name not parsed properly",
+      "UnderReplicatedBlocks.java", resultOne.getSourceFile());
+    assertEquals("log src line number not parsed properly",
+      "394", resultOne.getSourceFileLineNumber());
+    assertEquals("host name not parsed properly",
+      "c6401.ambari.apache.org", resultOne.getHostName());
+    assertEquals("log message not parsed properly",
+      "chooseUnderReplicatedBlocks selected 2 blocks at priority level 0;  Total=2 Reset bookmarks? false", resultOne.getLogMessage());
+    assertEquals("logger name not parsed properly",
+      "BlockStateChange", resultOne.getLoggerName());
+    assertEquals("id not parsed properly",
+      "9c5562fb-123f-47c8-aaf5-b5e407326c08", resultOne.getId());
+    assertEquals("message MD5 not parsed properly",
+      "-3892769501348410581", resultOne.getMessageMD5());
+    assertEquals("log time not parsed properly",
+      "1458148749036", resultOne.getLogTime());
+    assertEquals("event MD5 not parsed properly",
+      "1458148749036-2417481968206345035", resultOne.getEventMD5());
+    assertEquals("logfile line number not parsed properly",
+      "2084", resultOne.getLogFileLineNumber());
+    assertEquals("ttl not parsed properly",
+      "+7DAYS", resultOne.getTtl());
+    assertEquals("expire at not parsed properly",
+      "1458753550322", resultOne.getExpirationTime());
+    assertEquals("version not parsed properly",
+      "1528979784023932928", resultOne.getVersion());
+  }
+
+  private static void verifySecondLine(List<LogLineResult> listOfLineResults) {
+    LogLineResult resultTwo = listOfLineResults.get(1);
+    // verify second log line record's data is parsed correctly
+    assertEquals("Cluster name not parsed properly",
+      "clusterone", resultTwo.getClusterName());
+    assertEquals("Method Name not parsed properly",
+      "putMetrics", resultTwo.getLogMethod());
+    assertEquals("Log Level not parsed properly",
+      "WARN", resultTwo.getLogLevel());
+    assertEquals("event_count not parsed properly",
+      "1", resultTwo.getEventCount());
+    assertEquals("ip address not parsed properly",
+      "192.168.1.1", resultTwo.getIpAddress());
+    assertEquals("component type not parsed properly",
+      "yarn_resourcemanager", resultTwo.getComponentType());
+    assertEquals("sequence number not parsed properly",
+      "10583", resultTwo.getSequenceNumber());
+    assertEquals("log file path not parsed properly",
+      "/var/log/hadoop-yarn/yarn/yarn-yarn-resourcemanager-c6401.ambari.apache.org.log", resultTwo.getLogFilePath());
+    assertEquals("log src file name not parsed properly",
+      "HadoopTimelineMetricsSink.java", resultTwo.getSourceFile());
+    assertEquals("log src line number not parsed properly",
+      "262", resultTwo.getSourceFileLineNumber());
+    assertEquals("host name not parsed properly",
+      "c6401.ambari.apache.org", resultTwo.getHostName());
+    assertEquals("log message not parsed properly",
+      "Unable to send metrics to collector by address:http://c6401.ambari.apache.org:6188/ws/v1/timeline/metrics", resultTwo.getLogMessage());
+    assertEquals("logger name not parsed properly",
+      "timeline.HadoopTimelineMetricsSink", resultTwo.getLoggerName());
+    assertEquals("id not parsed properly",
+      "8361c5a9-5b1c-4f44-bc8f-4c6f07d94228", resultTwo.getId());
+    assertEquals("message MD5 not parsed properly",
+      "5942185045779825717", resultTwo.getMessageMD5());
+    assertEquals("log time not parsed properly",
+      "1458148746937", resultTwo.getLogTime());
+    assertEquals("event MD5 not parsed properly",
+      "14581487469371427138486123628676", resultTwo.getEventMD5());
+    assertEquals("logfile line number not parsed properly",
+      "549", resultTwo.getLogFileLineNumber());
+    assertEquals("ttl not parsed properly",
+      "+7DAYS", resultTwo.getTtl());
+    assertEquals("expire at not parsed properly",
+      "1458753550322", resultTwo.getExpirationTime());
+    assertEquals("version not parsed properly",
+      "1528979784022884357", resultTwo.getVersion());
+  }
+
   @Test
   public void testCreateLogFileTailURI() throws Exception {
+    LoggingCookieStore.INSTANCE.getCookiesMap().clear();
     final String expectedHostName = "c6401.ambari.apache.org";
     final String expectedPort = "61888";
     final String expectedComponentName = "hdfs_namenode";
@@ -680,7 +693,7 @@ public class LoggingRequestHelperImplTest {
     mockSupport.replayAll();
 
     LoggingRequestHelper helper =
-      new LoggingRequestHelperImpl("c6401.ambari.apache.org", "61888", credentialStoreServiceMock, clusterMock, networkConnectionMock);
+      new LoggingRequestHelperImpl("c6401.ambari.apache.org", "61888", "http", credentialStoreServiceMock, clusterMock, null, networkConnectionMock);
 
     String result = helper.createLogFileTailURI(expectedBaseURI, expectedComponentName, expectedHostName);
 

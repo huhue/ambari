@@ -18,24 +18,10 @@
 
 package org.apache.ambari.server.security.authorization;
 
-import com.google.inject.Inject;
-import org.apache.ambari.server.audit.event.AccessUnauthorizedAuditEvent;
-import org.apache.ambari.server.audit.event.AuditEvent;
-import org.apache.ambari.server.audit.AuditLogger;
-import org.apache.ambari.server.audit.event.LoginAuditEvent;
-import org.apache.ambari.server.configuration.Configuration;
-import org.apache.ambari.server.orm.entities.PermissionEntity;
-import org.apache.ambari.server.orm.entities.PrivilegeEntity;
-import org.apache.ambari.server.security.authorization.internal.InternalAuthenticationToken;
-import org.apache.ambari.server.utils.RequestUtils;
-import org.apache.ambari.server.view.ViewRegistry;
-import org.apache.commons.lang.StringUtils;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
+import java.io.IOException;
+import java.security.Principal;
+import java.util.EnumSet;
+import java.util.regex.Pattern;
 
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
@@ -45,10 +31,29 @@ import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.security.Principal;
-import java.util.regex.Pattern;
 
+import org.apache.ambari.server.audit.AuditLogger;
+import org.apache.ambari.server.audit.event.AccessUnauthorizedAuditEvent;
+import org.apache.ambari.server.audit.event.AuditEvent;
+import org.apache.ambari.server.audit.event.LoginAuditEvent;
+import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.orm.entities.PermissionEntity;
+import org.apache.ambari.server.orm.entities.PrivilegeEntity;
+import org.apache.ambari.server.security.AmbariEntryPoint;
+import org.apache.ambari.server.security.authorization.internal.InternalAuthenticationToken;
+import org.apache.ambari.server.utils.RequestUtils;
+import org.apache.ambari.server.view.ViewRegistry;
+import org.apache.commons.lang.StringUtils;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Component;
+
+@Component
 public class AmbariAuthorizationFilter implements Filter {
   private static final String REALM_PARAM = "realm";
   private static final String DEFAULT_REALM = "AuthFilter";
@@ -65,7 +70,7 @@ public class AmbariAuthorizationFilter implements Filter {
   private static final String API_USERS_ALL_PATTERN = API_VERSION_PREFIX + "/users.*";
   private static final String API_PRIVILEGES_ALL_PATTERN = API_VERSION_PREFIX + "/privileges.*";
   private static final String API_GROUPS_ALL_PATTERN = API_VERSION_PREFIX + "/groups.*";
-  private static final String API_CLUSTERS_PATTERN = API_VERSION_PREFIX + "/clusters/(\\w+)?";
+  private static final String API_CLUSTERS_PATTERN = API_VERSION_PREFIX + "/clusters/(\\w+/?)?";
   private static final String API_WIDGET_LAYOUTS_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/widget_layouts.*?";
   private static final String API_CLUSTERS_ALL_PATTERN = API_VERSION_PREFIX + "/clusters.*";
   private static final String API_VIEWS_ALL_PATTERN = API_VERSION_PREFIX + "/views.*";
@@ -77,33 +82,69 @@ public class AmbariAuthorizationFilter implements Filter {
   private static final String API_CLUSTER_SERVICES_ALL_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/services.*";
   private static final String API_CLUSTER_ALERT_ALL_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/alert.*";
   private static final String API_CLUSTER_HOSTS_ALL_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/hosts.*";
+  private static final String API_CLUSTER_CONFIGURATIONS_ALL_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/configurations.*";
+  private static final String API_CLUSTER_COMPONENTS_ALL_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/components.*";
+  private static final String API_CLUSTER_HOST_COMPONENTS_ALL_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/host_components.*";
+  private static final String API_CLUSTER_CONFIG_GROUPS_ALL_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/config_groups.*";
   private static final String API_STACK_VERSIONS_PATTERN = API_VERSION_PREFIX + "/stacks/.*?/versions/.*";
   private static final String API_HOSTS_ALL_PATTERN = API_VERSION_PREFIX + "/hosts.*";
   private static final String API_ALERT_TARGETS_ALL_PATTERN = API_VERSION_PREFIX + "/alert_targets.*";
+  private static final String API_BOOTSTRAP_PATTERN_ALL = API_VERSION_PREFIX + "/bootstrap.*";
+  private static final String API_REQUESTS_ALL_PATTERN = API_VERSION_PREFIX + "/requests.*";
+  private static final String API_CLUSTERS_UPGRADES_PATTERN = API_VERSION_PREFIX + "/clusters/.*?/upgrades.*";
 
   protected static final String LOGIN_REDIRECT_BASE = "/#/login?targetURI=";
 
   /**
+   * The Ambari authentication entry point
+   */
+  private final AmbariEntryPoint entryPoint;
+
+  /**
    * Access to Ambari configuration data
    */
-  @Inject
-  private Configuration configuration;
+  private final Configuration configuration;
 
   /**
    * Access to user information
    */
-  @Inject
-  private Users users;
+  private final Users users;
 
-  @Inject
-  private AuditLogger auditLogger;
+  /**
+   * The audit logger
+   */
+  private final AuditLogger auditLogger;
 
-  @Inject PermissionHelper permissionHelper;
+  /**
+   * A Permission Helper used to provided inforamtion for the Audit Logger
+   */
+  private final PermissionHelper permissionHelper;
 
   /**
    * The realm to use for the basic http auth
    */
   private String realm;
+
+  /**
+   * Constructor.
+   *
+   * @param entryPoint       the authentication entrypoint
+   * @param configuration    the Ambari configuration
+   * @param users            Ambari user access
+   * @param auditLogger      the Audit logger
+   * @param permissionHelper the permission helper
+   */
+  public AmbariAuthorizationFilter(AmbariEntryPoint entryPoint,
+                                   Configuration configuration,
+                                   Users users,
+                                   AuditLogger auditLogger,
+                                   PermissionHelper permissionHelper) {
+    this.entryPoint = entryPoint;
+    this.configuration = configuration;
+    this.users = users;
+    this.auditLogger = auditLogger;
+    this.permissionHelper = permissionHelper;
+  }
 
   @Override
   public void init(FilterConfig filterConfig) throws ServletException {
@@ -153,63 +194,69 @@ public class AmbariAuthorizationFilter implements Filter {
           String redirectURL = httpResponse.encodeRedirectURL(LOGIN_REDIRECT_BASE + requestedURL);
           httpResponse.sendRedirect(redirectURL);
         } else {
-          httpResponse.sendError(HttpServletResponse.SC_FORBIDDEN, "Authentication required");
-          httpResponse.flushBuffer();
+          entryPoint.commence(httpRequest, httpResponse, new AuthenticationCredentialsNotFoundException("Missing authentication token"));
         }
         return;
       }
     } else if (!authorizationPerformedInternally(requestURI)) {
       boolean authorized = false;
 
-      for (GrantedAuthority grantedAuthority : authentication.getAuthorities()) {
-        if (grantedAuthority instanceof AmbariGrantedAuthority) {
+      if (requestURI.matches(API_BOOTSTRAP_PATTERN_ALL)) {
+        authorized = AuthorizationHelper.isAuthorized(authentication,
+            ResourceType.CLUSTER,
+            null,
+            EnumSet.of(RoleAuthorization.HOST_ADD_DELETE_HOSTS));
+      }
+      else {
+        for (GrantedAuthority grantedAuthority : authentication.getAuthorities()) {
+          if (grantedAuthority instanceof AmbariGrantedAuthority) {
 
-          AmbariGrantedAuthority ambariGrantedAuthority = (AmbariGrantedAuthority) grantedAuthority;
+            AmbariGrantedAuthority ambariGrantedAuthority = (AmbariGrantedAuthority) grantedAuthority;
 
-          PrivilegeEntity privilegeEntity = ambariGrantedAuthority.getPrivilegeEntity();
-          Integer permissionId = privilegeEntity.getPermission().getId();
+            PrivilegeEntity privilegeEntity = ambariGrantedAuthority.getPrivilegeEntity();
+            Integer permissionId = privilegeEntity.getPermission().getId();
 
-          // admin has full access
-          if (permissionId.equals(PermissionEntity.AMBARI_ADMINISTRATOR_PERMISSION)) {
-            authorized = true;
-            break;
-          }
-
-          // clusters require permission
-          if (!"GET".equalsIgnoreCase(httpRequest.getMethod()) && requestURI.matches(API_CREDENTIALS_AMBARI_PATTERN)) {
-            // Only the administrator can operate on credentials where the alias starts with "ambari."
+            // admin has full access
             if (permissionId.equals(PermissionEntity.AMBARI_ADMINISTRATOR_PERMISSION)) {
               authorized = true;
               break;
             }
-          } else if (requestURI.matches(API_CLUSTERS_ALL_PATTERN)) {
-            if (permissionId.equals(PermissionEntity.CLUSTER_USER_PERMISSION) ||
-                permissionId.equals(PermissionEntity.CLUSTER_ADMINISTRATOR_PERMISSION)) {
-              authorized = true;
-              break;
-            }
-          } else if (STACK_ADVISOR_REGEX.matcher(requestURI).matches()) {
-            //TODO permissions model doesn't manage stacks api, but we need access to stack advisor to save configs
-            if (permissionId.equals(PermissionEntity.CLUSTER_USER_PERMISSION) ||
-                permissionId.equals(PermissionEntity.CLUSTER_ADMINISTRATOR_PERMISSION)) {
-              authorized = true;
-              break;
-            }
-          } else if (requestURI.matches(API_VIEWS_ALL_PATTERN)) {
-            // views require permission
-            if (permissionId.equals(PermissionEntity.VIEW_USER_PERMISSION)) {
-              authorized = true;
-              break;
+
+            // clusters require permission
+            if (!"GET".equalsIgnoreCase(httpRequest.getMethod()) && requestURI.matches(API_CREDENTIALS_AMBARI_PATTERN)) {
+              // Only the administrator can operate on credentials where the alias starts with "ambari."
+              if (permissionId.equals(PermissionEntity.AMBARI_ADMINISTRATOR_PERMISSION)) {
+                authorized = true;
+                break;
+              }
+            } else if (requestURI.matches(API_CLUSTERS_ALL_PATTERN)) {
+              if (permissionId.equals(PermissionEntity.CLUSTER_USER_PERMISSION) ||
+                  permissionId.equals(PermissionEntity.CLUSTER_ADMINISTRATOR_PERMISSION)) {
+                authorized = true;
+                break;
+              }
+            } else if (STACK_ADVISOR_REGEX.matcher(requestURI).matches()) {
+              //TODO permissions model doesn't manage stacks api, but we need access to stack advisor to save configs
+              if (permissionId.equals(PermissionEntity.CLUSTER_USER_PERMISSION) ||
+                  permissionId.equals(PermissionEntity.CLUSTER_ADMINISTRATOR_PERMISSION)) {
+                authorized = true;
+                break;
+              }
+            } else if (requestURI.matches(API_VIEWS_ALL_PATTERN)) {
+              // views require permission
+              if (permissionId.equals(PermissionEntity.VIEW_USER_PERMISSION)) {
+                authorized = true;
+                break;
+              }
             }
           }
         }
+
+        // Allow all GETs that are not LDAP sync events...
+        authorized = authorized || (httpRequest.getMethod().equals("GET") && !requestURI.matches(API_LDAP_SYNC_EVENTS_ALL_PATTERN));
       }
 
-      // allow GET for everything except /views, /api/v1/users, /api/v1/groups, /api/v1/ldap_sync_events
-      if (!authorized &&
-          (!httpRequest.getMethod().equals("GET")
-              || requestURI.matches(API_LDAP_SYNC_EVENTS_ALL_PATTERN))) {
-
+      if (!authorized) {
         if(auditLogger.isEnabled()) {
           auditEvent = AccessUnauthorizedAuditEvent.builder()
             .withHttpMethodName(httpRequest.getMethod())
@@ -255,7 +302,7 @@ public class AmbariAuthorizationFilter implements Filter {
       String username = configuration.getDefaultApiAuthenticatedUser();
 
       if (!StringUtils.isEmpty(username)) {
-        final User user = users.getUser(username, UserType.LOCAL);
+        final User user = users.getUser(username);
 
         if (user != null) {
           Principal principal = new Principal() {
@@ -266,7 +313,7 @@ public class AmbariAuthorizationFilter implements Filter {
           };
 
           defaultUser = new UsernamePasswordAuthenticationToken(principal, null,
-              users.getUserAuthorities(user.getUserName(), user.getUserType()));
+              users.getUserAuthorities(user.getUserName()));
         }
       }
     }
@@ -283,6 +330,7 @@ public class AmbariAuthorizationFilter implements Filter {
    */
   private boolean authorizationPerformedInternally(String requestURI) {
     return requestURI.matches(API_USERS_ALL_PATTERN) ||
+        requestURI.matches(API_REQUESTS_ALL_PATTERN) ||
         requestURI.matches(API_GROUPS_ALL_PATTERN) ||
         requestURI.matches(API_CREDENTIALS_ALL_PATTERN) ||
         requestURI.matches(API_PRIVILEGES_ALL_PATTERN) ||
@@ -295,10 +343,15 @@ public class AmbariAuthorizationFilter implements Filter {
         requestURI.matches(VIEWS_CONTEXT_PATH_PATTERN) ||
         requestURI.matches(API_WIDGET_LAYOUTS_PATTERN) ||
         requestURI.matches(API_CLUSTER_HOSTS_ALL_PATTERN) ||
+        requestURI.matches(API_CLUSTER_CONFIGURATIONS_ALL_PATTERN) ||
+        requestURI.matches(API_CLUSTER_COMPONENTS_ALL_PATTERN) ||
+        requestURI.matches(API_CLUSTER_HOST_COMPONENTS_ALL_PATTERN) ||
+        requestURI.matches(API_CLUSTER_CONFIG_GROUPS_ALL_PATTERN) ||
         requestURI.matches(API_HOSTS_ALL_PATTERN) ||
         requestURI.matches(API_ALERT_TARGETS_ALL_PATTERN) ||
         requestURI.matches(API_PRIVILEGES_ALL_PATTERN) ||
-        requestURI.matches(API_PERSIST_ALL_PATTERN);
+        requestURI.matches(API_PERSIST_ALL_PATTERN) ||
+        requestURI.matches(API_CLUSTERS_UPGRADES_PATTERN);
   }
 
   @Override

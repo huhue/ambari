@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,11 +18,13 @@
 
 package org.apache.ambari.server.topology;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.ambari.server.controller.internal.Stack;
 import org.apache.ambari.server.orm.entities.BlueprintEntity;
-
-import java.util.Collection;
-import java.util.Map;
+import org.apache.ambari.server.state.ServiceInfo;
 
 /**
  * Blueprint representation.
@@ -34,13 +36,13 @@ public interface Blueprint {
    *
    * @return blueprint name
    */
-  public String getName();
+  String getName();
 
   /**
    * Get the hot groups contained in the blueprint.
    * @return map of host group name to host group
    */
-  public Map<String, HostGroup> getHostGroups();
+  Map<String, HostGroup> getHostGroups();
 
   /**
    * Get a hostgroup specified by name.
@@ -49,7 +51,7 @@ public interface Blueprint {
    *
    * @return the host group with the given name or null
    */
-  public HostGroup getHostGroup(String name);
+  HostGroup getHostGroup(String name);
 
   /**
    * Get the Blueprint cluster scoped configuration.
@@ -59,7 +61,7 @@ public interface Blueprint {
    *
    * @return blueprint cluster scoped configuration
    */
-  public Configuration getConfiguration();
+  Configuration getConfiguration();
 
   /**
    * Get the Blueprint cluster scoped setting.
@@ -68,14 +70,19 @@ public interface Blueprint {
    *
    * @return blueprint cluster scoped setting
    */
-  public Setting getSetting();
+  Setting getSetting();
 
   /**
    * Get all of the services represented in the blueprint.
    *
    * @return collection of all represented service names
    */
-  public Collection<String> getServices();
+  Collection<String> getServices();
+
+  /**
+  * @return collection of all service infos
+   */
+  Collection<ServiceInfo> getServiceInfos();
 
   /**
    * Get the components that are included in the blueprint for the specified service.
@@ -84,7 +91,7 @@ public interface Blueprint {
    *
    * @return collection of component names for the service.  Will not return null.
    */
-  public Collection<String> getComponents(String service);
+  Collection<String> getComponents(String service);
 
   /**
    * Get whether a component is enabled for auto start.
@@ -92,17 +99,31 @@ public interface Blueprint {
    * @param serviceName - Service name.
    * @param componentName - Component name.
    *
-   * @return True or false.
+   * @return null if value is not specified; true or false if specified.
    */
-  public boolean isRecoveryEnabled(String serviceName, String componentName);
+  String getRecoveryEnabled(String serviceName, String componentName);
 
+  /**
+   * Get whether a service is enabled for credential store use.
+   *
+   * @param serviceName - Service name.
+   *
+   * @return null if value is not specified; true or false if specified.
+   */
+  String getCredentialStoreEnabled(String serviceName);
+
+  /**
+   * Check if auto skip failure is enabled.
+   * @return true if enabled, otherwise false.
+   */
+  boolean shouldSkipFailure();
 
   /**
    * Get the stack associated with the blueprint.
    *
    * @return associated stack
    */
-  public Stack getStack();
+  Stack getStack();
 
   /**
    * Get the host groups which contain components for the specified service.
@@ -112,7 +133,7 @@ public interface Blueprint {
    * @return collection of host groups containing components for the specified service;
    *         will not return null
    */
-  public Collection<HostGroup> getHostGroupsForService(String service);
+  Collection<HostGroup> getHostGroupsForService(String service);
 
   /**
    * Get the host groups which contain the give component.
@@ -121,28 +142,38 @@ public interface Blueprint {
    *
    * @return collection of host groups containing the specified component; will not return null
    */
-  public Collection<HostGroup> getHostGroupsForComponent(String component);
+  Collection<HostGroup> getHostGroupsForComponent(String component);
 
-  public SecurityConfiguration getSecurity();
+  SecurityConfiguration getSecurity();
 
   /**
    * Validate the blueprint topology.
    *
    * @throws InvalidTopologyException if the topology is invalid
    */
-  public void validateTopology() throws InvalidTopologyException;
+  void validateTopology() throws InvalidTopologyException;
 
   /**
    * Validate that the blueprint contains all of the required properties.
    *
    * @throws InvalidTopologyException if the blueprint doesn't contain all required properties
    */
-  public void validateRequiredProperties() throws InvalidTopologyException;
+  void validateRequiredProperties() throws InvalidTopologyException, GPLLicenseNotAcceptedException;
+
+  /**
+   *
+   * A config type is valid if there are services related to except cluster-env and global.
+   * @param configType
+   * @return
+   */
+  boolean isValidConfigType(String configType);
 
   /**
    * Obtain the blueprint as an entity.
    *
    * @return entity representation of the blueprint
    */
-  public BlueprintEntity toEntity();
+  BlueprintEntity toEntity();
+
+  List<RepositorySetting> getRepositorySettings();
 }

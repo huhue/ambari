@@ -30,22 +30,13 @@ App.MainHostController = Em.ArrayController.extend(App.TableServerMixin, {
    * total number of installed hosts
    * @type {number}
    */
-  totalCount: function () {
-    return this.get('hostsCountMap')['TOTAL'] || 0;
-  }.property('hostsCountMap'),
+  totalCount: Em.computed.alias('App.allHostNames.length'),
 
   /**
    * @type {boolean}
    * @default false
    */
   resetStartIndex: false,
-
-  /**
-   * flag responsible for updating status counters of hosts
-   */
-  isCountersUpdating: false,
-
-  hostsCountMap: {},
 
   startIndex: 1,
 
@@ -58,6 +49,8 @@ App.MainHostController = Em.ArrayController.extend(App.TableServerMixin, {
    * if true, do not clean stored filter before hosts page rendering.
    */
   showFilterConditionsFirstLoad: false,
+
+  saveSelection: false,
 
   content: App.Host.find(),
 
@@ -105,17 +98,20 @@ App.MainHostController = Em.ArrayController.extend(App.TableServerMixin, {
     {
       name: 'hostComponents',
       key: 'host_components/HostRoles/component_name',
-      type: 'EQUAL'
+      type: 'EQUAL',
+      isComponentRelatedFilter: true
     },
     {
       name: 'services',
       key: 'host_components/HostRoles/service_name',
-      type: 'MATCH'
+      type: 'MATCH',
+      isComponentRelatedFilter: true
     },
     {
       name: 'state',
       key: 'host_components/HostRoles/state',
-      type: 'MATCH'
+      type: 'MATCH',
+      isComponentRelatedFilter: true
     },
     {
       name: 'healthClass',
@@ -130,12 +126,14 @@ App.MainHostController = Em.ArrayController.extend(App.TableServerMixin, {
     {
       name: 'componentsWithStaleConfigsCount',
       key: 'host_components/HostRoles/stale_configs',
-      type: 'EQUAL'
+      type: 'EQUAL',
+      isComponentRelatedFilter: true
     },
     {
       name: 'componentsInPassiveStateCount',
       key: 'host_components/HostRoles/maintenance_state',
-      type: 'MULTIPLE'
+      type: 'MULTIPLE',
+      isComponentRelatedFilter: true
     },
     {
       name: 'selected',
@@ -165,7 +163,8 @@ App.MainHostController = Em.ArrayController.extend(App.TableServerMixin, {
         '(host_components/HostRoles/component_name={0}&host_components/HostRoles/desired_admin_state={1})',
         '(host_components/HostRoles/component_name={0}&host_components/HostRoles/maintenance_state={1})'
       ],
-      type: 'COMBO'
+      type: 'COMBO',
+      isComponentRelatedFilter: true
     }
   ],
 
@@ -258,7 +257,8 @@ App.MainHostController = Em.ArrayController.extend(App.TableServerMixin, {
           key: property.key,
           value: filter.value,
           type: property.type,
-          isFilter: true
+          isFilter: true,
+          isComponentRelatedFilter: property.isComponentRelatedFilter
         };
         if (filter.type === 'string' && sortProperties.someProperty('name', colPropAssoc[filter.iColumn])) {
           if (Em.isArray(filter.value)) {
@@ -305,17 +305,20 @@ App.MainHostController = Em.ArrayController.extend(App.TableServerMixin, {
       }
     }, this);
 
-    if (queryParams.filterProperty('isFilter').length !== oldProperties.filterProperty('isFilter').length) {
-      queryParams.findProperty('key', 'from').value = 0;
-      this.set('resetStartIndex', true);
-    } else {
-      queryParams.filterProperty('isFilter').forEach(function (queryParam) {
-        var oldProperty = oldProperties.filterProperty('isFilter').findProperty('key', queryParam.key);
-        if (!oldProperty || JSON.stringify(oldProperty.value) !== JSON.stringify(queryParam.value)) {
-          queryParams.findProperty('key', 'from').value = 0;
-          this.set('resetStartIndex', true);
-        }
-      }, this);
+    if (!oldProperties.findProperty('isHostDetails')) {
+      // shouldn't reset start index after coming back from Host Details page
+      if (queryParams.filterProperty('isFilter').length !== oldProperties.filterProperty('isFilter').length) {
+        queryParams.findProperty('key', 'from').value = 0;
+        this.set('resetStartIndex', true);
+      } else {
+        queryParams.filterProperty('isFilter').forEach(function (queryParam) {
+          var oldProperty = oldProperties.filterProperty('isFilter').findProperty('key', queryParam.key);
+          if (!oldProperty || JSON.stringify(oldProperty.value) !== JSON.stringify(queryParam.value)) {
+            queryParams.findProperty('key', 'from').value = 0;
+            this.set('resetStartIndex', true);
+          }
+        }, this);
+      }
     }
 
     if (!skipNonFilterProperties) {
@@ -325,51 +328,6 @@ App.MainHostController = Em.ArrayController.extend(App.TableServerMixin, {
     return queryParams;
   },
 
-  /**
-   * update status counters of hosts
-   */
-  updateStatusCounters: function () {
-    var self = this;
-
-    if (this.get('isCountersUpdating')) {
-      App.ajax.send({
-        name: 'host.status.counters',
-        sender: this,
-        data: {},
-        success: 'updateStatusCountersSuccessCallback',
-        error: 'updateStatusCountersErrorCallback',
-        callback: function() {
-          setTimeout(function () {
-            self.updateStatusCounters();
-          }, App.get('hostStatusCountersUpdateInterval'));
-        }
-      });
-    }
-  },
-
-  /**
-   * success callback on <code>updateStatusCounters()</code>
-   * map counters' value to categories
-   * @param data
-   */
-  updateStatusCountersSuccessCallback: function (data) {
-    var hostsCountMap = {
-      'HEALTHY': data.Clusters.health_report['Host/host_status/HEALTHY'],
-      'UNHEALTHY': data.Clusters.health_report['Host/host_status/UNHEALTHY'],
-      'ALERT': data.Clusters.health_report['Host/host_status/ALERT'],
-      'UNKNOWN': data.Clusters.health_report['Host/host_status/UNKNOWN'],
-      'health-status-RESTART': data.Clusters.health_report['Host/stale_config'],
-      'health-status-PASSIVE_STATE': data.Clusters.health_report['Host/maintenance_state'],
-      'TOTAL': data.Clusters.total_hosts
-    };
-
-    this.set('hostsCountMap', hostsCountMap);
-  },
-
-  /**
-   * success callback on <code>updateStatusCounters()</code>
-   */
-  updateStatusCountersErrorCallback: Em.K,
 
   /**
    * Return value without predicate

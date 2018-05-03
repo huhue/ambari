@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,6 +20,7 @@ package org.apache.ambari.server.state.repository;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.StringWriter;
+import java.lang.reflect.Type;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -47,15 +48,30 @@ import javax.xml.transform.stream.StreamSource;
 import javax.xml.validation.Schema;
 import javax.xml.validation.SchemaFactory;
 
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.ComponentInfo;
+import org.apache.ambari.server.state.ConfigHelper;
 import org.apache.ambari.server.state.RepositoryType;
+import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.ServiceInfo;
 import org.apache.ambari.server.state.StackId;
 import org.apache.ambari.server.state.StackInfo;
 import org.apache.ambari.server.state.repository.AvailableVersion.Component;
+import org.apache.ambari.server.state.repository.StackPackage.UpgradeDependencies;
+import org.apache.ambari.server.state.repository.StackPackage.UpgradeDependencyDeserializer;
 import org.apache.ambari.server.state.stack.RepositoryXml;
+import org.apache.ambari.server.state.stack.RepositoryXml.Os;
+import org.apache.ambari.server.utils.VersionUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Sets;
+import com.google.common.reflect.TypeToken;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 /**
  * Class that wraps a repository definition file.
@@ -64,8 +80,9 @@ import org.apache.commons.lang.StringUtils;
 @XmlAccessorType(XmlAccessType.FIELD)
 public class VersionDefinitionXml {
 
-  public static String SCHEMA_LOCATION = "version_definition.xsd";
+  private static final Logger LOG = LoggerFactory.getLogger(VersionDefinitionXml.class);
 
+  public static String SCHEMA_LOCATION = "version_definition.xsd";
 
   /**
    * Release details.
@@ -101,13 +118,17 @@ public class VersionDefinitionXml {
   public String xsdLocation;
 
   @XmlTransient
-  private Map<String, AvailableService> availableMap;
+  private Map<String, AvailableService> m_availableMap;
 
   @XmlTransient
   private List<ManifestServiceInfo> m_manifest = null;
 
   @XmlTransient
   private boolean m_stackDefault = false;
+
+  @XmlTransient
+  private Map<String, String> m_packageVersions = null;
+
 
 
   /**
@@ -116,16 +137,16 @@ public class VersionDefinitionXml {
    * collection is either the subset of the manifest, or the manifest itself if no services
    * are specified as "available".
    */
-  public Collection<AvailableService> getAvailableServices(StackInfo stack) {
-    if (null == availableMap) {
+  public synchronized Collection<AvailableService> getAvailableServices(StackInfo stack) {
+    if (null == m_availableMap) {
       Map<String, ManifestService> manifests = buildManifest();
-      availableMap = new HashMap<>();
+      m_availableMap = new HashMap<>();
 
       if (availableServices.isEmpty()) {
+        // !!! populate available services from the manifest
         for (ManifestService ms : manifests.values()) {
-          addToAvailable(ms, stack, Collections.<String>emptySet());
+          addToAvailable(ms, stack, Collections.emptySet());
         }
-
       } else {
         for (AvailableServiceReference ref : availableServices) {
           ManifestService ms = manifests.get(ref.serviceIdReference);
@@ -135,7 +156,36 @@ public class VersionDefinitionXml {
       }
     }
 
-    return availableMap.values();
+    return m_availableMap.values();
+  }
+
+  /**
+   * Gets the set of services that are included in this XML
+   * @return an empty set for STANDARD repositories, or a non-empty set for PATCH type.
+   */
+  private Set<String> getAvailableServiceNames() {
+    if (availableServices.isEmpty()) {
+      return Collections.emptySet();
+    } else {
+      Set<String> serviceNames = new HashSet<>();
+
+      Map<String, ManifestService> manifest = buildManifest();
+
+      for (AvailableServiceReference ref : availableServices) {
+        ManifestService ms = manifest.get(ref.serviceIdReference);
+        serviceNames.add(ms.serviceName);
+      }
+
+      return serviceNames;
+    }
+  }
+
+  /**
+   * Sets if the version definition is a stack default.  This can only be true
+   * when parsing "latest-vdf" for a stack.
+   */
+  public void setStackDefault(boolean stackDefault) {
+    m_stackDefault = stackDefault;
   }
 
   /**
@@ -151,7 +201,7 @@ public class VersionDefinitionXml {
    * @param stack the stack for which to get the information
    * @return the list of {@code ManifestServiceInfo} instances for each service in the stack
    */
-  public List<ManifestServiceInfo> getStackServices(StackInfo stack) {
+  public synchronized List<ManifestServiceInfo> getStackServices(StackInfo stack) {
 
     if (null != m_manifest) {
       return m_manifest;
@@ -163,7 +213,7 @@ public class VersionDefinitionXml {
       String name = manifest.serviceName;
 
       if (!manifestVersions.containsKey(name)) {
-        manifestVersions.put(manifest.serviceName, new TreeSet<String>());
+        manifestVersions.put(manifest.serviceName, new TreeSet<>());
       }
 
       manifestVersions.get(manifest.serviceName).add(manifest.version);
@@ -183,55 +233,21 @@ public class VersionDefinitionXml {
     return m_manifest;
   }
 
-
   /**
-   * Helper method to use a {@link ManifestService} to generate the available services structure
-   * @param ms          the ManifestService instance
-   * @param stack       the stack object
-   * @param components  the set of components for the service
+   * Gets the package version for an OS family
+   * @param osFamily  the os family
+   * @return the package version, or {@code null} if not found
    */
-  private void addToAvailable(ManifestService ms, StackInfo stack, Set<String> components) {
-    ServiceInfo service = stack.getService(ms.serviceName);
+  public String getPackageVersion(String osFamily) {
+    if (null == m_packageVersions) {
+      m_packageVersions = new HashMap<>();
 
-    if (!availableMap.containsKey(ms.serviceName)) {
-      String display = (null == service) ? ms.serviceName: service.getDisplayName();
-
-      availableMap.put(ms.serviceName, new AvailableService(ms.serviceName, display));
+      for (Os os : repositoryInfo.getOses()) {
+        m_packageVersions.put(os.getFamily(), os.getPackageVersion());
+      }
     }
 
-    AvailableService as = availableMap.get(ms.serviceName);
-    as.getVersions().add(new AvailableVersion(ms.version, ms.versionId,
-        buildComponents(service, components)));
-  }
-
-
-  /**
-   * @return the list of manifest services to a map for easier access.
-   */
-  private Map<String, ManifestService> buildManifest() {
-    Map<String, ManifestService> normalized = new HashMap<>();
-
-    for (ManifestService ms : manifestServices) {
-      normalized.put(ms.serviceId, ms);
-    }
-    return normalized;
-  }
-
-  /**
-   * @param service the service containing components
-   * @param components the set of components in the service
-   * @return the set of components name/display name pairs
-   */
-  private Set<Component> buildComponents(ServiceInfo service, Set<String> components) {
-    Set<Component> set = new HashSet<>();
-
-    for (String component : components) {
-      ComponentInfo ci = service.getComponentByName(component);
-      String display = (null == ci) ? component : ci.getDisplayName();
-      set.add(new Component(component, display));
-    }
-
-    return set;
+    return m_packageVersions.get(osFamily);
   }
 
   /**
@@ -264,7 +280,256 @@ public class VersionDefinitionXml {
     }
   }
 
+  /**
+   * Gets a summary for cluster given the version information in this version.
+   * @param cluster the cluster by which to iterate services
+   * @return a summary instance
+   * @throws AmbariException
+   */
+  public ClusterVersionSummary getClusterSummary(Cluster cluster) throws AmbariException {
 
+    Map<String, ManifestService> manifests = buildManifestByService();
+    Set<String> available = getAvailableServiceNames();
+
+    available = available.isEmpty() ? manifests.keySet() : available;
+
+    Map<String, ServiceVersionSummary> summaries = new HashMap<>();
+    for (String serviceName : available) {
+      Service service = cluster.getServices().get(serviceName);
+      if (null == service) {
+        // !!! service is not installed
+        continue;
+      }
+
+      ServiceVersionSummary summary = new ServiceVersionSummary();
+      summaries.put(service.getName(), summary);
+
+      String serviceVersion = service.getDesiredRepositoryVersion().getVersion();
+
+      // !!! currently only one version is supported (unique service names)
+      ManifestService manifest = manifests.get(serviceName);
+
+      final String versionToCompare;
+      final String summaryReleaseVersion;
+      if (StringUtils.isEmpty(manifest.releaseVersion)) {
+        versionToCompare = release.getFullVersion();
+        summaryReleaseVersion = release.version;
+      } else {
+        versionToCompare = manifest.releaseVersion;
+        summaryReleaseVersion = manifest.releaseVersion;
+      }
+
+      summary.setVersions(manifest.version, summaryReleaseVersion);
+
+      if (RepositoryType.STANDARD == release.repositoryType) {
+        summary.setUpgrade(true);
+      } else {
+        // !!! installed service already meets the release version, then nothing to upgrade
+        // !!! TODO should this be using the release compatible-with field?
+        if (VersionUtils.compareVersionsWithBuild(versionToCompare, serviceVersion, 4) > 0) {
+          summary.setUpgrade(true);
+        }
+      }
+    }
+
+    return new ClusterVersionSummary(summaries);
+  }
+
+  /**
+   * Gets information about services which cannot be upgraded because the
+   * repository does not contain required dependencies. This method will look at
+   * the {@code cluster-env/stack_packages} structure to see if there are any
+   * dependencies listed in the {@code upgrade-dependencies} key.
+   *
+   * @param cluster
+   *          the cluster (not {@code null}).
+   * @return a mapping of service name to its missing service dependencies, or
+   *         an empty map if there are none (never {@code null}).
+   * @throws AmbariException
+   */
+  public Set<String> getMissingDependencies(Cluster cluster)
+      throws AmbariException {
+    Set<String> missingDependencies = Sets.newTreeSet();
+
+    String stackPackagesJson = cluster.getClusterProperty(
+        ConfigHelper.CLUSTER_ENV_STACK_PACKAGES_PROPERTY, null);
+
+    // quick exit
+    if (StringUtils.isEmpty(stackPackagesJson)) {
+      return missingDependencies;
+    }
+
+    // create a GSON builder which can deserialize the stack_packages.json
+    GsonBuilder gsonBuilder = new GsonBuilder();
+    gsonBuilder.registerTypeAdapter(UpgradeDependencies.class, new UpgradeDependencyDeserializer());
+    Gson gson = gsonBuilder.create();
+    Type type = new TypeToken<Map<String, StackPackage>>(){}.getType();
+
+    // a mapping of stack name to stack-select/conf-select/upgade-deps
+    final Map<String, StackPackage> stackPackages;
+
+    try {
+      stackPackages = gson.fromJson(stackPackagesJson, type);
+    } catch( Exception exception ) {
+      LOG.warn("Unable to deserialize the stack packages JSON, assuming no service dependencies",
+          exception);
+
+      return missingDependencies;
+    }
+
+    StackId stackId = new StackId(release.stackId);
+    StackPackage stackPackage = stackPackages.get(stackId.getStackName());
+    if (null == stackPackage || null == stackPackage.upgradeDependencies) {
+      return missingDependencies;
+    }
+
+    Map<String, List<String>> dependencies = stackPackage.upgradeDependencies.dependencies;
+
+    if (null == dependencies || dependencies.isEmpty()) {
+      return missingDependencies;
+    }
+
+    // the installed services in the cluster
+    Map<String,Service> installedServices = cluster.getServices();
+
+    ClusterVersionSummary clusterVersionSummary = getClusterSummary(cluster);
+    Set<String> servicesInUpgrade = clusterVersionSummary.getAvailableServiceNames();
+    Set<String> servicesInRepository = getAvailableServiceNames();
+
+    for (String serviceInUpgrade : servicesInUpgrade) {
+      List<String> servicesRequired = dependencies.get(serviceInUpgrade);
+      if (null == servicesRequired) {
+        continue;
+      }
+
+      for (String serviceRequired : servicesRequired) {
+        if (!servicesInRepository.contains(serviceRequired) && installedServices.containsKey(serviceRequired)) {
+          missingDependencies.add(serviceRequired);
+        }
+      }
+    }
+
+    // now that we have built the list of missing dependencies based solely on
+    // the services participating in the upgrade, recursively see if any of
+    // those services have dependencies as well
+    missingDependencies = getRecursiveDependencies(missingDependencies, dependencies,
+        servicesInUpgrade, installedServices.keySet());
+
+    return missingDependencies;
+  }
+
+  /**
+   * Gets all dependencies required to perform an upgrade, considering that the
+   * original set's depenencies may have dependencies of their own.
+   *
+   * @param missingDependencies
+   *          the set of missing dependencies so far.
+   * @param dependencies
+   *          the master list of dependency associations
+   * @param servicesInUpgrade
+   *          the services which the VDF indicates are going to be in the
+   *          upgrade *
+   * @param installedServices
+   *          the services installed in the cluster
+   * @return a new set including any dependencies of those which were already
+   *         found
+   */
+  Set<String> getRecursiveDependencies(Set<String> missingDependencies,
+      Map<String, List<String>> dependencies, Set<String> servicesInUpgrade,
+      Set<String> installedServices) {
+    Set<String> results = Sets.newHashSet();
+    results.addAll(missingDependencies);
+
+    for (String missingDependency : missingDependencies) {
+      if (dependencies.containsKey(missingDependency)) {
+        List<String> subDependencies = dependencies.get(missingDependency);
+        for (String subDependency : subDependencies) {
+          if (!missingDependencies.contains(subDependency)
+              && installedServices.contains(subDependency)
+              && !servicesInUpgrade.contains(subDependency)) {
+            results.add(subDependency);
+            results.addAll(getRecursiveDependencies(results, dependencies, servicesInUpgrade,
+                installedServices));
+          }
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Structures the manifest by service name.
+   * <p/>
+   * !!! WARNING. This is currently based on the assumption that there is one and only
+   * one version for a service in the VDF.  This may have to change in the future.
+   * </p>
+   * @return
+   */
+  private Map<String, ManifestService> buildManifestByService() {
+    Map<String, ManifestService> manifests = new HashMap<>();
+
+    for (ManifestService manifest : manifestServices) {
+      if (!manifests.containsKey(manifest.serviceName)) {
+        manifests.put(manifest.serviceName, manifest);
+      }
+    }
+
+    return manifests;
+  }
+
+  /**
+   * Helper method to use a {@link ManifestService} to generate the available services structure
+   * @param manifestService          the ManifestService instance
+   * @param stack       the stack object
+   * @param components  the set of components for the service
+   */
+  private void addToAvailable(ManifestService manifestService, StackInfo stack, Set<String> components) {
+    ServiceInfo service = stack.getService(manifestService.serviceName);
+
+    if (!m_availableMap.containsKey(manifestService.serviceName)) {
+      String display = (null == service) ? manifestService.serviceName: service.getDisplayName();
+
+      AvailableService available = new AvailableService(manifestService.serviceName, display);
+      m_availableMap.put(manifestService.serviceName, available);
+    }
+
+    AvailableService as = m_availableMap.get(manifestService.serviceName);
+    as.getVersions().add(new AvailableVersion(manifestService.version,
+        manifestService.versionId,
+        manifestService.releaseVersion,
+        buildComponents(service, components)));
+  }
+
+
+  /**
+   * @return the list of manifest services to a map for easier access.
+   */
+  private Map<String, ManifestService> buildManifest() {
+    Map<String, ManifestService> normalized = new HashMap<>();
+
+    for (ManifestService ms : manifestServices) {
+      normalized.put(ms.serviceId, ms);
+    }
+    return normalized;
+  }
+
+  /**
+   * @param service the service containing components
+   * @param components the set of components in the service
+   * @return the set of components name/display name pairs
+   */
+  private Set<Component> buildComponents(ServiceInfo service, Set<String> components) {
+    Set<Component> set = new HashSet<>();
+
+    for (String component : components) {
+      ComponentInfo ci = service.getComponentByName(component);
+      String display = (null == ci) ? component : ci.getDisplayName();
+      set.add(new Component(component, display));
+    }
+
+    return set;
+  }
 
   /**
    * Parses a URL for a definition XML file into the object graph.
@@ -333,7 +598,6 @@ public class VersionDefinitionXml {
 
   /**
    * Builds a Version Definition that is the default for the stack
-   * @param stack
    * @return the version definition
    */
   public static VersionDefinitionXml build(StackInfo stackInfo) {
@@ -401,7 +665,6 @@ public class VersionDefinitionXml {
         m_xml.release.build = null; // could be combining builds, so this is invalid
         m_xml.release.compatibleWith = xml.release.compatibleWith;
         m_xml.release.display = stackId.getStackName() + "-" + xml.release.version;
-        m_xml.release.packageVersion = null; // could be combining, so this is invalid
         m_xml.release.repositoryType = RepositoryType.STANDARD; // assumption since merging only done for new installs
         m_xml.release.releaseNotes = xml.release.releaseNotes;
         m_xml.release.stackId = xml.release.stackId;

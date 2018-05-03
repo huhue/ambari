@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,8 +20,10 @@ package org.apache.ambari.server.notifications.dispatchers;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.ambari.server.notifications.Notification;
 import org.apache.ambari.server.notifications.NotificationDispatcher;
@@ -160,6 +162,7 @@ public class SNMPDispatcher implements NotificationDispatcher {
     } catch (Exception ex) {
       LOG.error("Error occurred during SNMP trap dispatching.", ex);
       failureCallback(notification);
+      transportMapping = null;
     }
   }
 
@@ -168,15 +171,16 @@ public class SNMPDispatcher implements NotificationDispatcher {
    */
   @Override
   public TargetConfigurationResult validateTargetConfig(Map<String, Object> properties) {
-    Map<String, String> stringValuesConfig = new HashMap<String, String>(properties.size());
+    Map<String, String> stringValuesConfig = new HashMap<>(properties.size());
     for (Map.Entry<String, Object> propertyEntry : properties.entrySet()) {
       stringValuesConfig.put(propertyEntry.getKey(), propertyEntry.getValue().toString());
     }
     try {
-      getDispatchProperty(stringValuesConfig, BODY_OID_PROPERTY);
-      getDispatchProperty(stringValuesConfig, SUBJECT_OID_PROPERTY);
-      getDispatchProperty(stringValuesConfig, TRAP_OID_PROPERTY);
-      getDispatchProperty(stringValuesConfig, PORT_PROPERTY);
+
+      for (String property : getSetOfDefaultNeededPropertyNames()) {
+        getDispatchProperty(stringValuesConfig, property);
+      }
+
       SnmpVersion snmpVersion = getSnmpVersion(stringValuesConfig);
       switch (snmpVersion) {
         case SNMPv3:
@@ -201,6 +205,14 @@ public class SNMPDispatcher implements NotificationDispatcher {
       return TargetConfigurationResult.invalid(ex.getMessage());
     }
     return TargetConfigurationResult.valid();
+  }
+
+  /**
+   * @return Set that contains names of properties that are needed for all SNMP configurations.
+   */
+  protected Set<String> getSetOfDefaultNeededPropertyNames() {
+    return new HashSet<>(Arrays.asList(BODY_OID_PROPERTY, SUBJECT_OID_PROPERTY,
+            TRAP_OID_PROPERTY, PORT_PROPERTY));
   }
 
   /**
@@ -375,7 +387,7 @@ public class SNMPDispatcher implements NotificationDispatcher {
    * @return property value
    * @throws InvalidSnmpConfigurationException if property with such key does not exist
    */
-  private static String getDispatchProperty(Map<String, String> dispatchProperties, String key) throws InvalidSnmpConfigurationException {
+  protected static String getDispatchProperty(Map<String, String> dispatchProperties, String key) throws InvalidSnmpConfigurationException {
     if (dispatchProperties == null || !dispatchProperties.containsKey(key)) {
       throw new InvalidSnmpConfigurationException(String.format("Property \"%s\" should be set.", key));
     }
@@ -388,7 +400,7 @@ public class SNMPDispatcher implements NotificationDispatcher {
    * @return corresponding SnmpVersion instance
    * @throws InvalidSnmpConfigurationException if dispatch properties doesn't contain required property
    */
-  private SnmpVersion getSnmpVersion(Map<String, String> dispatchProperties) throws InvalidSnmpConfigurationException {
+  protected SnmpVersion getSnmpVersion(Map<String, String> dispatchProperties) throws InvalidSnmpConfigurationException {
     String snmpVersion = getDispatchProperty(dispatchProperties, SNMP_VERSION_PROPERTY);
     try {
       return SnmpVersion.valueOf(snmpVersion);
@@ -405,7 +417,7 @@ public class SNMPDispatcher implements NotificationDispatcher {
    * @return corresponding TrapSecurity instance
    * @throws InvalidSnmpConfigurationException if dispatch properties doesn't contain required property
    */
-  private TrapSecurity getSecurityLevel(Map<String, String> dispatchProperties) throws InvalidSnmpConfigurationException {
+  protected TrapSecurity getSecurityLevel(Map<String, String> dispatchProperties) throws InvalidSnmpConfigurationException {
     String securityLevel = getDispatchProperty(dispatchProperties, SECURITY_LEVEL_PROPERTY);
     try {
       return TrapSecurity.valueOf(securityLevel);
@@ -430,5 +442,9 @@ public class SNMPDispatcher implements NotificationDispatcher {
 
   public Integer getPort() {
     return port;
+  }
+
+  protected UdpTransportMapping getTransportMapping() {
+    return transportMapping;
   }
 }

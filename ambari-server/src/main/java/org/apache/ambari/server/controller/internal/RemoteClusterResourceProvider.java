@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,8 +18,14 @@
 
 package org.apache.ambari.server.controller.internal;
 
-import com.google.common.base.Strings;
-import com.google.inject.Inject;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.DuplicateResourceException;
 import org.apache.ambari.server.StaticallyInject;
@@ -44,14 +50,10 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
+import com.google.inject.Inject;
 
 /**
  *  Resource Provider for Remote Cluster
@@ -63,6 +65,7 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
    * Remote Cluster property id constants.
    */
   public static final String CLUSTER_NAME_PROPERTY_ID = "ClusterInfo/name";
+  public static final String CLUSTER_ID_PROPERTY_ID = "ClusterInfo/cluster_id";
   public static final String CLUSTER_URL_PROPERTY_ID  = "ClusterInfo/url";
   public static final String USERNAME_PROPERTY_ID = "ClusterInfo/username";
   public static final String PASSWORD_PROPERTY_ID = "ClusterInfo/password";
@@ -76,22 +79,20 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
   /**
    * The key property ids for a Remote Cluster resource.
    */
-  private static Map<Resource.Type, String> keyPropertyIds = new HashMap<Resource.Type, String>();
-  static {
-    keyPropertyIds.put(Resource.Type.RemoteCluster, CLUSTER_NAME_PROPERTY_ID);
-  }
+  private static Map<Resource.Type, String> keyPropertyIds = ImmutableMap.<Resource.Type, String>builder()
+      .put(Resource.Type.RemoteCluster, CLUSTER_NAME_PROPERTY_ID)
+      .build();
 
   /**
    * The property ids for a Remote Cluster resource.
    */
-  private static Set<String> propertyIds = new HashSet<String>();
-  static {
-    propertyIds.add(CLUSTER_NAME_PROPERTY_ID);
-    propertyIds.add(CLUSTER_URL_PROPERTY_ID);
-    propertyIds.add(USERNAME_PROPERTY_ID);
-    propertyIds.add(PASSWORD_PROPERTY_ID);
-    propertyIds.add(SERVICES_PROPERTY_ID);
-  }
+  private static Set<String> propertyIds = Sets.newHashSet(
+      CLUSTER_NAME_PROPERTY_ID,
+      CLUSTER_ID_PROPERTY_ID,
+      CLUSTER_URL_PROPERTY_ID,
+      USERNAME_PROPERTY_ID,
+      PASSWORD_PROPERTY_ID,
+      SERVICES_PROPERTY_ID);
 
   @Inject
   private static RemoteAmbariClusterDAO remoteAmbariClusterDAO;
@@ -106,7 +107,7 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
    * Create a  new resource provider.
    */
   protected RemoteClusterResourceProvider() {
-    super(propertyIds, keyPropertyIds);
+    super(Resource.Type.RemoteCluster, propertyIds, keyPropertyIds);
 
     EnumSet<RoleAuthorization> requiredAuthorizations = EnumSet.of(RoleAuthorization.AMBARI_ADD_DELETE_CLUSTERS);
     setRequiredCreateAuthorizations(requiredAuthorizations);
@@ -121,7 +122,7 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
 
   @Override
   protected Set<String> getPKPropertyIds() {
-    return new HashSet<String>(keyPropertyIds.values());
+    return new HashSet<>(keyPropertyIds.values());
   }
 
   @Override
@@ -136,12 +137,12 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
 
   @Override
   public Set<Resource> getResources(Request request, Predicate predicate) throws SystemException, UnsupportedPropertyException, NoSuchResourceException, NoSuchParentResourceException {
-    Set<Resource> resources    = new HashSet<Resource>();
+    Set<Resource> resources    = new HashSet<>();
     Set<String>   requestedIds = getRequestPropertyIds(request, predicate);
 
     Set<Map<String, Object>> propertyMaps = getPropertyMaps(predicate);
     if (propertyMaps.isEmpty()) {
-      propertyMaps.add(Collections.<String, Object>emptyMap());
+      propertyMaps.add(Collections.emptyMap());
     }
 
     for (Map<String, Object> propertyMap : propertyMaps) {
@@ -167,9 +168,10 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
   protected Resource toResource(Set<String> requestedIds, RemoteAmbariClusterEntity cluster) {
     Resource   resource   = new ResourceImpl(Resource.Type.RemoteCluster);
     setResourceProperty(resource, CLUSTER_NAME_PROPERTY_ID, cluster.getName(), requestedIds);
+    setResourceProperty(resource, CLUSTER_ID_PROPERTY_ID, cluster.getId(), requestedIds);
     setResourceProperty(resource, CLUSTER_URL_PROPERTY_ID, cluster.getUrl(), requestedIds);
     setResourceProperty(resource, USERNAME_PROPERTY_ID, cluster.getUsername(), requestedIds);
-    ArrayList<String> services = new ArrayList<String>();
+    ArrayList<String> services = new ArrayList<>();
     for (RemoteAmbariClusterServiceEntity remoteClusterServiceEntity : cluster.getServices()) {
       services.add(remoteClusterServiceEntity.getServiceName());
     }
@@ -237,8 +239,14 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
       public Void invoke() throws AmbariException {
         String name = (String)properties.get(CLUSTER_NAME_PROPERTY_ID);
 
-        if(StringUtils.isEmpty(name)){
-          throw new IllegalArgumentException("Cluster Name cannot ne null or Empty");
+        if (StringUtils.isEmpty(name)) {
+          throw new IllegalArgumentException("Cluster Name cannot be null or Empty");
+        }
+
+        String id = (String)properties.get(CLUSTER_ID_PROPERTY_ID);
+
+        if (StringUtils.isEmpty(id)) {
+          throw new IllegalArgumentException("Cluster Id cannot be null or Empty");
         }
 
         saveOrUpdateRemoteAmbariClusterEntity(properties,true);
@@ -261,16 +269,24 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
     String username = (String)properties.get(USERNAME_PROPERTY_ID);
     String password = (String)properties.get(PASSWORD_PROPERTY_ID);
 
-    if(StringUtils.isEmpty(url) && StringUtils.isEmpty(username)){
+    if (StringUtils.isEmpty(url) && StringUtils.isEmpty(username)) {
       throw new IllegalArgumentException("Url or username cannot be null");
     }
 
-    RemoteAmbariClusterEntity entity = remoteAmbariClusterDAO.findByName(name);
+    RemoteAmbariClusterEntity entity ;
 
-    if(update && entity == null){
-      throw new IllegalArgumentException(String.format("Cannot find cluster with name : \"%s\"",name));
-    }else if(!update && entity != null){
-      throw new DuplicateResourceException(String.format("Cluster with name : \"%s\" already exists",name));
+    if (update) {
+      Long id = Long.valueOf((String) properties.get(CLUSTER_ID_PROPERTY_ID));
+      entity = remoteAmbariClusterDAO.findById(id);
+      if (entity == null) {
+        throw new IllegalArgumentException(String.format("Cannot find cluster with Id : \"%s\"", id));
+      }
+    } else {
+
+      entity = remoteAmbariClusterDAO.findByName(name);
+      if (entity != null) {
+        throw new DuplicateResourceException(String.format("Cluster with name : \"%s\" already exists", name));
+      }
     }
 
     // Check Password not null for create
@@ -288,7 +304,7 @@ public class RemoteClusterResourceProvider extends AbstractAuthorizedResourcePro
     entity.setName(name);
     entity.setUrl(url);
     try {
-      if(password != null) {
+      if (password != null) {
         entity.setUsername(username);
         entity.setPassword(password);
       }

@@ -16,10 +16,18 @@
 # limitations under the License.
 #}
 
-collector={{metric_collector_protocol}}://{{metric_collector_host}}:{{metric_collector_port}}
+collector.hosts={{ams_collector_hosts}}
+protocol={{metric_collector_protocol}}
+zookeeper.quorum={{zookeeper_quorum}}
+port={{metric_collector_port}}
 collectionFrequency={{metrics_collection_period}}000
 maxRowCacheSize=10000
 sendInterval={{metrics_report_interval}}000
+host_in_memory_aggregation = {{host_in_memory_aggregation}}
+host_in_memory_aggregation_port = {{host_in_memory_aggregation_port}}
+{% if is_aggregation_https_enabled %}
+host_in_memory_aggregation_protocol = {{host_in_memory_aggregation_protocol}}
+{% endif %}
 
 # HTTPS properties
 truststore.path = {{metric_truststore_path}}

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,22 +17,28 @@
  */
 package org.apache.ambari.server.customactions;
 
-import org.apache.ambari.server.AmbariException;
-import org.apache.ambari.server.actionmanager.ActionType;
-import org.apache.ambari.server.actionmanager.TargetHostType;
-import org.apache.ambari.server.api.services.AmbariMetaInfo;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.UnmarshalException;
 import javax.xml.bind.Unmarshaller;
-import java.io.File;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.actionmanager.ActionType;
+import org.apache.ambari.server.actionmanager.TargetHostType;
+import org.apache.ambari.server.security.authorization.RoleAuthorization;
+import org.apache.ambari.server.stack.StackDirectory;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Manages Action definitions read from XML files
@@ -42,7 +48,7 @@ public class ActionDefinitionManager {
   private final static Logger LOG = LoggerFactory
       .getLogger(ActionDefinitionManager.class);
   private static final Map<Class<?>, JAXBContext> _jaxbContexts =
-      new HashMap<Class<?>, JAXBContext>();
+    new HashMap<>();
   private static final Short MAX_TIMEOUT = Short.MAX_VALUE-1;
 
   static {
@@ -54,7 +60,7 @@ public class ActionDefinitionManager {
     }
   }
 
-  private final Map<String, ActionDefinition> actionDefinitionMap = new HashMap<String, ActionDefinition>();
+  private final Map<String, ActionDefinition> actionDefinitionMap = new HashMap<>();
 
   public ActionDefinitionManager() {
   }
@@ -73,7 +79,7 @@ public class ActionDefinitionManager {
     try {
       return Enum.valueOf(enumm, s);
     } catch (IllegalArgumentException iaex) {
-      reason.append("Invalid value provided for " + enumm.getName());
+      reason.append("Invalid value provided for ").append(enumm.getName());
       return null;
     }
   }
@@ -87,7 +93,7 @@ public class ActionDefinitionManager {
     }
 
     File[] customActionDefinitionFiles
-        = customActionDefinitionRoot.listFiles(AmbariMetaInfo.FILENAME_FILTER);
+        = customActionDefinitionRoot.listFiles(StackDirectory.FILENAME_FILTER);
 
     if (customActionDefinitionFiles != null) {
       for (File definitionFile : customActionDefinitionFiles) {
@@ -99,9 +105,9 @@ public class ActionDefinitionManager {
           continue;
         }
         for (ActionDefinitionSpec ad : adx.actionDefinitions()) {
-          LOG.debug("Read action definition = " + ad.toString());
+          LOG.debug("Read action definition = {}", ad);
           StringBuilder errorReason =
-              new StringBuilder("Error while parsing action definition. ").append(ad.toString()).append(" --- ");
+              new StringBuilder("Error while parsing action definition. ").append(ad).append(" --- ");
 
           TargetHostType targetType = safeValueOf(TargetHostType.class, ad.getTargetType(), errorReason);
           ActionType actionType = safeValueOf(ActionType.class, ad.getActionType(), errorReason);
@@ -115,12 +121,13 @@ public class ActionDefinitionManager {
             String actionName = ad.getActionName();
             if (actionDefinitionMap.containsKey(actionName)) {
               LOG.warn("Ignoring action definition as a different definition by that name already exists. "
-                  + ad.toString());
+                  + ad);
               continue;
             }
 
             actionDefinitionMap.put(ad.getActionName(), new ActionDefinition(ad.getActionName(), actionType,
-                ad.getInputs(), ad.getTargetService(), ad.getTargetComponent(), ad.getDescription(), targetType, defaultTimeout));
+                ad.getInputs(), ad.getTargetService(), ad.getTargetComponent(), ad.getDescription(), targetType, defaultTimeout,
+                translatePermissions(ad.getPermissions())));
             LOG.info("Added custom action definition for " + ad.getActionName());
           } else {
             LOG.warn(errorReason.toString());
@@ -140,7 +147,7 @@ public class ActionDefinitionManager {
       }
 
       if (actionType == null || actionType == ActionType.SYSTEM_DISABLED) {
-        reason.append("Action type cannot be " + actionType);
+        reason.append("Action type cannot be ").append(actionType);
         return false;
       }
 
@@ -172,7 +179,7 @@ public class ActionDefinitionManager {
   }
 
   public List<ActionDefinition> getAllActionDefinition() {
-    return new ArrayList<ActionDefinition>(actionDefinitionMap.values());
+    return new ArrayList<>(actionDefinitionMap.values());
   }
 
   public ActionDefinition getActionDefinition(String name) {
@@ -198,5 +205,34 @@ public class ActionDefinitionManager {
       return false;
     }
     return true;
+  }
+
+  /**
+   * Given a comma-delimited list of permission names, translates into a {@link Set} of
+   * {@link RoleAuthorization}s.
+   * <p>
+   * <code>null</code> is returned if the permission string is null or empty, or if none of the
+   * permissions in the string translate to a {@link RoleAuthorization}.  Permissions that do not
+   * translate to a {@link RoleAuthorization} will yield a {@link IllegalArgumentException}.
+   *
+   * @param permissions a comma-delimited string of permission names
+   * @return a set of {@link RoleAuthorization}s; or null if no permissions are specified
+   */
+  private Set<RoleAuthorization> translatePermissions(String permissions) {
+    if (StringUtils.isEmpty(permissions)) {
+      return null;
+    } else {
+      Set<RoleAuthorization> authorizations = new HashSet<>();
+      String[] parts = permissions.split(",");
+
+      for (String permission : parts) {
+        RoleAuthorization authorization = RoleAuthorization.translate(permission);
+        if (authorization != null) {
+          authorizations.add(authorization);
+        }
+      }
+
+      return (authorizations.isEmpty()) ? null : EnumSet.copyOf(authorizations);
+    }
   }
 }

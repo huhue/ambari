@@ -29,8 +29,9 @@ from resource_management.libraries.functions import conf_select
 from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions import StackFeature
 from resource_management.libraries.functions.stack_features import check_stack_feature
+from resource_management.libraries.functions.stack_features import get_stack_feature_version
 from resource_management.libraries.functions import format
-from resource_management.libraries.functions.version import format_stack_version
+from resource_management.libraries.functions.version import format_stack_version, get_major_version
 from resource_management.libraries.functions.default import default
 from resource_management.libraries.functions.expect import expect
 from resource_management.libraries.functions import get_klist_path
@@ -38,24 +39,28 @@ from resource_management.libraries.functions import get_kinit_path
 from resource_management.libraries.functions.get_not_managed_resources import get_not_managed_resources
 from resource_management.libraries.script.script import Script
 from resource_management.libraries.resources.hdfs_resource import HdfsResource
-
 from resource_management.libraries.functions.format_jvm_option import format_jvm_option
-from resource_management.libraries.functions.get_lzo_packages import get_lzo_packages
-from resource_management.libraries.functions.is_empty import is_empty
-from resource_management.libraries.functions.expect import expect
-
+from resource_management.libraries.functions.hdfs_utils import is_https_enabled_in_hdfs
+from resource_management.libraries.functions import is_empty
+from resource_management.libraries.functions.get_architecture import get_architecture
+from resource_management.libraries.functions.setup_ranger_plugin_xml import get_audit_configs, generate_ranger_service_config
+from resource_management.libraries.functions.namenode_ha_utils import get_properties_for_all_nameservices, namenode_federation_enabled
 
 config = Script.get_config()
 tmp_dir = Script.get_tmp_dir()
 
+architecture = get_architecture()
+
 stack_name = status_params.stack_name
 stack_root = Script.get_stack_root()
 upgrade_direction = default("/commandParams/upgrade_direction", None)
-stack_version_unformatted = config['hostLevelParams']['stack_version']
+rolling_restart = default("/commandParams/rolling_restart", False)
+rolling_restart_safemode_exit_timeout = default("/configurations/cluster-env/namenode_rolling_restart_safemode_exit_timeout", None)
+stack_version_unformatted = config['clusterLevelParams']['stack_version']
 stack_version_formatted = format_stack_version(stack_version_unformatted)
-agent_stack_retry_on_unavailability = config['hostLevelParams']['agent_stack_retry_on_unavailability']
-agent_stack_retry_count = expect("/hostLevelParams/agent_stack_retry_count", int)
-stack_supports_ranger_kerberos = stack_version_formatted and check_stack_feature(StackFeature.RANGER_KERBEROS_SUPPORT, stack_version_formatted)
+major_stack_version = get_major_version(stack_version_formatted)
+agent_stack_retry_on_unavailability = config['ambariLevelParams']['agent_stack_retry_on_unavailability']
+agent_stack_retry_count = expect("/ambariLevelParams/agent_stack_retry_count", int)
 
 # there is a stack upgrade which has not yet been finalized; it's currently suspended
 upgrade_suspended = default("roleParams/upgrade_suspended", False)
@@ -68,6 +73,14 @@ version = default("/commandParams/version", None)
 # are started using different commands.
 desired_namenode_role = default("/commandParams/desired_namenode_role", None)
 
+command_timeout = default("/commandParams/command_timeout", 900)
+
+# get the correct version to use for checking stack features
+version_for_stack_feature_checks = get_stack_feature_version(config)
+
+stack_supports_ranger_kerberos = check_stack_feature(StackFeature.RANGER_KERBEROS_SUPPORT, version_for_stack_feature_checks)
+stack_supports_ranger_audit_db = check_stack_feature(StackFeature.RANGER_AUDIT_DB_SUPPORT, version_for_stack_feature_checks)
+stack_supports_zk_security = check_stack_feature(StackFeature.SECURE_ZOOKEEPER, version_for_stack_feature_checks)
 
 security_enabled = config['configurations']['cluster-env']['security_enabled']
 hdfs_user = status_params.hdfs_user
@@ -85,7 +98,8 @@ dfs_http_policy = default('/configurations/hdfs-site/dfs.http.policy', None)
 dfs_dn_ipc_address = config['configurations']['hdfs-site']['dfs.datanode.ipc.address']
 secure_dn_ports_are_in_use = False
 
-hdfs_tmp_dir = config['configurations']['hadoop-env']['hdfs_tmp_dir']
+hdfs_tmp_dir = default("/configurations/hadoop-env/hdfs_tmp_dir", "/tmp")
+namenode_backup_dir = default("/configurations/hadoop-env/namenode_backup_dir", "/tmp/upgrades")
 
 # hadoop default parameters
 mapreduce_libs_path = "/usr/lib/hadoop-mapreduce/*"
@@ -120,6 +134,10 @@ if stack_version_formatted and check_stack_feature(StackFeature.ROLLING_UPGRADE,
     else:
       hadoop_secure_dn_user = '""'
 
+# Parameters for upgrade packs
+skip_namenode_save_namespace_express = default("/configurations/cluster-env/stack_upgrade_express_skip_namenode_save_namespace", False)
+skip_namenode_namedir_backup_express = default("/configurations/cluster-env/stack_upgrade_express_skip_backup_namenode_dir", False)
+
 ambari_libs_dir = "/var/lib/ambari-agent/lib"
 limits_conf_dir = "/etc/security/limits.d"
 
@@ -148,26 +166,35 @@ hdfs_user_keytab = config['configurations']['hadoop-env']['hdfs_user_keytab']
 falcon_user = config['configurations']['falcon-env']['falcon_user']
 
 #exclude file
-hdfs_exclude_file = default("/clusterHostInfo/decom_dn_hosts", [])
+if 'all_decommissioned_hosts' in config['commandParams']:
+  hdfs_exclude_file = config['commandParams']['all_decommissioned_hosts'].split(",")
+else:
+  hdfs_exclude_file = []
 exclude_file_path = config['configurations']['hdfs-site']['dfs.hosts.exclude']
-update_exclude_file_only = default("/commandParams/update_exclude_file_only",False)
+slave_hosts = default("/clusterHostInfo/datanode_hosts", [])
+include_file_path = default("/configurations/hdfs-site/dfs.hosts", None)
+hdfs_include_file = None
+manage_include_files = default("/configurations/hdfs-site/manage.include.files", False)
+if include_file_path and manage_include_files:
+  hdfs_include_file = slave_hosts
+update_files_only = default("/commandParams/update_files_only",False)
 command_phase = default("/commandParams/phase","")
 
 klist_path_local = get_klist_path(default('/configurations/kerberos-env/executable_search_paths', None))
 kinit_path_local = get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))
 #hosts
-hostname = config["hostname"]
-rm_host = default("/clusterHostInfo/rm_host", [])
-slave_hosts = default("/clusterHostInfo/slave_hosts", [])
+hostname = config['agentLevelParams']['hostname']
+rm_host = default("/clusterHostInfo/resourcemanager_hosts", [])
+public_hostname = config["agentLevelParams"]["public_hostname"]
 oozie_servers = default("/clusterHostInfo/oozie_server", [])
-hcat_server_hosts = default("/clusterHostInfo/webhcat_server_host", [])
-hive_server_host =  default("/clusterHostInfo/hive_server_host", [])
+hcat_server_hosts = default("/clusterHostInfo/webhcat_server_hosts", [])
+hive_server_host =  default("/clusterHostInfo/hive_server_hosts", [])
 hbase_master_hosts = default("/clusterHostInfo/hbase_master_hosts", [])
-hs_host = default("/clusterHostInfo/hs_host", [])
-jtnode_host = default("/clusterHostInfo/jtnode_host", [])
-namenode_host = default("/clusterHostInfo/namenode_host", [])
-nm_host = default("/clusterHostInfo/nm_host", [])
-ganglia_server_hosts = default("/clusterHostInfo/ganglia_server_host", [])
+hs_host = default("/clusterHostInfo/historyserver_hosts", [])
+jtnode_host = default("/clusterHostInfo/jtnode_hosts", [])
+namenode_host = default("/clusterHostInfo/namenode_hosts", [])
+nm_host = default("/clusterHostInfo/nodemanager_hosts", [])
+ganglia_server_hosts = default("/clusterHostInfo/ganglia_server_hosts", [])
 journalnode_hosts = default("/clusterHostInfo/journalnode_hosts", [])
 zkfc_hosts = default("/clusterHostInfo/zkfc_hosts", [])
 falcon_host = default("/clusterHostInfo/falcon_server_hosts", [])
@@ -201,8 +228,7 @@ if has_ganglia_server:
 yarn_user = config['configurations']['yarn-env']['yarn_user']
 hbase_user = config['configurations']['hbase-env']['hbase_user']
 oozie_user = config['configurations']['oozie-env']['oozie_user']
-webhcat_user = config['configurations']['hive-env']['hcat_user']
-hcat_user = config['configurations']['hive-env']['hcat_user']
+webhcat_user = config['configurations']['hive-env']['webhcat_user']
 hive_user = config['configurations']['hive-env']['hive_user']
 smoke_user =  config['configurations']['cluster-env']['smokeuser']
 smokeuser_principal =  config['configurations']['cluster-env']['smokeuser_principal_name']
@@ -220,8 +246,13 @@ nfs_file_dump_dir = config['configurations']['hdfs-site']['nfs.file.dump.dir']
 
 dfs_domain_socket_path = config['configurations']['hdfs-site']['dfs.domain.socket.path']
 dfs_domain_socket_dir = os.path.dirname(dfs_domain_socket_path)
+hdfs_site = config['configurations']['hdfs-site']
 
-jn_edits_dir = config['configurations']['hdfs-site']['dfs.journalnode.edits.dir']
+
+if namenode_federation_enabled(hdfs_site):
+  jn_edits_dirs = get_properties_for_all_nameservices(hdfs_site, 'dfs.journalnode.edits.dir').values()
+else:
+  jn_edits_dirs = [config['configurations']['hdfs-site']['dfs.journalnode.edits.dir']]
 
 dfs_name_dir = config['configurations']['hdfs-site']['dfs.namenode.name.dir']
 
@@ -235,7 +266,7 @@ smoke_hdfs_user_mode = 0770
 hdfs_namenode_format_disabled = default("/configurations/cluster-env/hdfs_namenode_format_disabled", False)
 hdfs_namenode_formatted_mark_suffix = "/namenode-formatted/"
 hdfs_namenode_bootstrapped_mark_suffix = "/namenode-bootstrapped/"
-namenode_formatted_old_mark_dirs = ["/var/run/hadoop/hdfs/namenode-formatted", 
+namenode_formatted_old_mark_dirs = ["/var/run/hadoop/hdfs/namenode-formatted",
   format("{hadoop_pid_dir_prefix}/hdfs/namenode/formatted"),
   "/var/lib/hdfs/namenode/formatted"]
 dfs_name_dirs = dfs_name_dir.split(",")
@@ -257,8 +288,9 @@ else:
 
 fs_checkpoint_dirs = default("/configurations/hdfs-site/dfs.namenode.checkpoint.dir", "").split(',')
 
-dfs_data_dir = config['configurations']['hdfs-site']['dfs.datanode.data.dir']
-dfs_data_dir = ",".join([re.sub(r'^\[.+\]', '', dfs_dir.strip()) for dfs_dir in dfs_data_dir.split(",")])
+dfs_data_dirs = config['configurations']['hdfs-site']['dfs.datanode.data.dir']
+dfs_data_dirs_perm = default("/configurations/hdfs-site/dfs.datanode.data.dir.perm", "755")
+dfs_data_dirs_perm = int(dfs_data_dirs_perm, base=8) # convert int from octal representation
 
 data_dir_mount_file = "/var/lib/ambari-agent/data/datanode/dfs_data_dir_mount.hist"
 
@@ -267,13 +299,16 @@ dfs_ha_enabled = False
 dfs_ha_nameservices = default('/configurations/hdfs-site/dfs.internal.nameservices', None)
 if dfs_ha_nameservices is None:
   dfs_ha_nameservices = default('/configurations/hdfs-site/dfs.nameservices', None)
-dfs_ha_namenode_ids = default(format("/configurations/hdfs-site/dfs.ha.namenodes.{dfs_ha_nameservices}"), None)
+dfs_ha_namenode_ids_all_ns = get_properties_for_all_nameservices(hdfs_site, 'dfs.ha.namenodes')
 dfs_ha_automatic_failover_enabled = default("/configurations/hdfs-site/dfs.ha.automatic-failover.enabled", False)
 
 # hostname of the active HDFS HA Namenode (only used when HA is enabled)
-dfs_ha_namenode_active = default("/configurations/hadoop-env/dfs_ha_initial_namenode_active", None)
+dfs_ha_namenode_active = default("/configurations/cluster-env/dfs_ha_initial_namenode_active", None)
 # hostname of the standby HDFS HA Namenode (only used when HA is enabled)
-dfs_ha_namenode_standby = default("/configurations/hadoop-env/dfs_ha_initial_namenode_standby", None)
+dfs_ha_namenode_standby = default("/configurations/cluster-env/dfs_ha_initial_namenode_standby", None)
+ha_zookeeper_quorum = config['configurations']['core-site']['ha.zookeeper.quorum']
+jaas_file = os.path.join(hadoop_conf_secure_dir, 'hdfs_jaas.conf')
+zk_namespace = default('/configurations/hdfs-site/ha.zookeeper.parent-znode', '/hadoop-ha')
 
 # Values for the current Host
 namenode_id = None
@@ -282,23 +317,29 @@ namenode_rpc = None
 dfs_ha_namemodes_ids_list = []
 other_namenode_id = None
 
-if dfs_ha_namenode_ids:
-  dfs_ha_namemodes_ids_list = dfs_ha_namenode_ids.split(",")
-  dfs_ha_namenode_ids_array_len = len(dfs_ha_namemodes_ids_list)
-  if dfs_ha_namenode_ids_array_len > 1:
-    dfs_ha_enabled = True
-if dfs_ha_enabled:
-  for nn_id in dfs_ha_namemodes_ids_list:
-    nn_host = config['configurations']['hdfs-site'][format('dfs.namenode.rpc-address.{dfs_ha_nameservices}.{nn_id}')]
-    if hostname in nn_host:
-      namenode_id = nn_id
-      namenode_rpc = nn_host
-  # With HA enabled namenode_address is recomputed
-  namenode_address = format('hdfs://{dfs_ha_nameservices}')
+for ns, dfs_ha_namenode_ids in dfs_ha_namenode_ids_all_ns.iteritems():
+  found = False
+  if not is_empty(dfs_ha_namenode_ids):
+    dfs_ha_namemodes_ids_list = dfs_ha_namenode_ids.split(",")
+    dfs_ha_namenode_ids_array_len = len(dfs_ha_namemodes_ids_list)
+    if dfs_ha_namenode_ids_array_len > 1:
+      dfs_ha_enabled = True
+  if dfs_ha_enabled:
+    for nn_id in dfs_ha_namemodes_ids_list:
+      nn_host = config['configurations']['hdfs-site'][format('dfs.namenode.rpc-address.{ns}.{nn_id}')]
+      if hostname.lower() in nn_host.lower() or public_hostname.lower() in nn_host.lower():
+        namenode_id = nn_id
+        namenode_rpc = nn_host
+        found = True
+    # With HA enabled namenode_address is recomputed
+    namenode_address = format('hdfs://{ns}')
 
-  # Calculate the namenode id of the other namenode. This is needed during RU to initiate an HA failover using ZKFC.
-  if namenode_id is not None and len(dfs_ha_namemodes_ids_list) == 2:
-    other_namenode_id = list(set(dfs_ha_namemodes_ids_list) - set([namenode_id]))[0]
+    # Calculate the namenode id of the other namenode. This is needed during RU to initiate an HA failover using ZKFC.
+    if namenode_id is not None and len(dfs_ha_namemodes_ids_list) == 2:
+      other_namenode_id = list(set(dfs_ha_namemodes_ids_list) - set([namenode_id]))[0]
+
+  if found:
+    break
 
 
 if dfs_http_policy is not None and dfs_http_policy.upper() == "HTTPS_ONLY":
@@ -310,19 +351,19 @@ else:
 
 if journalnode_address:
   journalnode_port = journalnode_address.split(":")[1]
-  
-  
+
+
 if security_enabled:
   dn_principal_name = config['configurations']['hdfs-site']['dfs.datanode.kerberos.principal']
   dn_keytab = config['configurations']['hdfs-site']['dfs.datanode.keytab.file']
   dn_principal_name = dn_principal_name.replace('_HOST',hostname.lower())
-  
+
   dn_kinit_cmd = format("{kinit_path_local} -kt {dn_keytab} {dn_principal_name};")
-  
+
   nn_principal_name = config['configurations']['hdfs-site']['dfs.namenode.kerberos.principal']
   nn_keytab = config['configurations']['hdfs-site']['dfs.namenode.keytab.file']
   nn_principal_name = nn_principal_name.replace('_HOST',hostname.lower())
-  
+
   nn_kinit_cmd = format("{kinit_path_local} -kt {nn_keytab} {nn_principal_name};")
 
   jn_principal_name = default("/configurations/hdfs-site/dfs.journalnode.kerberos.principal", None)
@@ -359,16 +400,11 @@ HdfsResource = functools.partial(
   dfs_type = dfs_type
 )
 
-
-# The logic for LZO also exists in OOZIE's params.py
-io_compression_codecs = default("/configurations/core-site/io.compression.codecs", None)
-lzo_enabled = io_compression_codecs is not None and "com.hadoop.compression.lzo" in io_compression_codecs.lower()
-lzo_packages = get_lzo_packages(stack_version_unformatted)
-  
 name_node_params = default("/commandParams/namenode", None)
 
-java_home = config['hostLevelParams']['java_home']
-java_version = expect("/hostLevelParams/java_version", int)
+java_home = config['ambariLevelParams']['java_home']
+java_version = expect("/ambariLevelParams/java_version", int)
+java_exec = format("{java_home}/bin/java")
 
 hadoop_heapsize = config['configurations']['hadoop-env']['hadoop_heapsize']
 namenode_heapsize = config['configurations']['hadoop-env']['namenode_heapsize']
@@ -386,82 +422,100 @@ dtnode_heapsize = config['configurations']['hadoop-env']['dtnode_heapsize']
 mapred_pid_dir_prefix = default("/configurations/mapred-env/mapred_pid_dir_prefix","/var/run/hadoop-mapreduce")
 mapred_log_dir_prefix = default("/configurations/mapred-env/mapred_log_dir_prefix","/var/log/hadoop-mapreduce")
 
-# ranger host
-stack_supports_ranger_audit_db = stack_version_formatted and check_stack_feature(StackFeature.RANGER_AUDIT_DB_SUPPORT, stack_version_formatted)
-ranger_admin_hosts = default("/clusterHostInfo/ranger_admin_hosts", [])
-has_ranger_admin = not len(ranger_admin_hosts) == 0
-xml_configurations_supported = config['configurations']['ranger-env']['xml_configurations_supported']
-ambari_server_hostname = config['clusterHostInfo']['ambari_server_host'][0]
-
-#ranger hdfs properties
-policymgr_mgr_url = config['configurations']['admin-properties']['policymgr_external_url']
-xa_audit_db_name = config['configurations']['admin-properties']['audit_db_name']
-xa_audit_db_user = config['configurations']['admin-properties']['audit_db_user']
-xa_db_host = config['configurations']['admin-properties']['db_host']
-repo_name = str(config['clusterName']) + '_hadoop'
-
 hadoop_security_authentication = config['configurations']['core-site']['hadoop.security.authentication']
 hadoop_security_authorization = config['configurations']['core-site']['hadoop.security.authorization']
 fs_default_name = config['configurations']['core-site']['fs.defaultFS']
 hadoop_security_auth_to_local = config['configurations']['core-site']['hadoop.security.auth_to_local']
-hadoop_rpc_protection = config['configurations']['ranger-hdfs-plugin-properties']['hadoop.rpc.protection']
-common_name_for_certificate = config['configurations']['ranger-hdfs-plugin-properties']['common.name.for.certificate']
-
-repo_config_username = config['configurations']['ranger-hdfs-plugin-properties']['REPOSITORY_CONFIG_USERNAME']
 
 if security_enabled:
   sn_principal_name = default("/configurations/hdfs-site/dfs.secondary.namenode.kerberos.principal", "nn/_HOST@EXAMPLE.COM")
   sn_principal_name = sn_principal_name.replace('_HOST',hostname.lower())
 
-ranger_env = config['configurations']['ranger-env']
-ranger_plugin_properties = config['configurations']['ranger-hdfs-plugin-properties']
-policy_user = config['configurations']['ranger-hdfs-plugin-properties']['policy_user']
-
-#For curl command in ranger plugin to get db connector
-jdk_location = config['hostLevelParams']['jdk_location']
+# for curl command in ranger plugin to get db connector
+jdk_location = config['ambariLevelParams']['jdk_location']
 java_share_dir = '/usr/share/java'
 
-is_https_enabled = config['configurations']['hdfs-site']['dfs.https.enable'] if \
-  not is_empty(config['configurations']['hdfs-site']['dfs.https.enable']) else False
+is_https_enabled = is_https_enabled_in_hdfs(config['configurations']['hdfs-site']['dfs.http.policy'],
+                                            config['configurations']['hdfs-site']['dfs.https.enable'])
 
-if has_ranger_admin:
-  enable_ranger_hdfs = (config['configurations']['ranger-hdfs-plugin-properties']['ranger-hdfs-plugin-enabled'].lower() == 'yes')
-  xa_audit_db_password = unicode(config['configurations']['admin-properties']['audit_db_password']) if stack_supports_ranger_audit_db else None
-  repo_config_password = unicode(config['configurations']['ranger-hdfs-plugin-properties']['REPOSITORY_CONFIG_PASSWORD'])
-  xa_audit_db_flavor = (config['configurations']['admin-properties']['DB_FLAVOR']).lower()
+# ranger hdfs plugin section start
 
-  if stack_supports_ranger_audit_db:
+# ranger host
+ranger_admin_hosts = default("/clusterHostInfo/ranger_admin_hosts", [])
+has_ranger_admin = not len(ranger_admin_hosts) == 0
 
-    if xa_audit_db_flavor == 'mysql':
-      jdbc_jar_name = default("/hostLevelParams/custom_mysql_jdbc_name", None)
-      audit_jdbc_url = format('jdbc:mysql://{xa_db_host}/{xa_audit_db_name}')
-      jdbc_driver = "com.mysql.jdbc.Driver"
-    elif xa_audit_db_flavor == 'oracle':
-      jdbc_jar_name = default("/hostLevelParams/custom_oracle_jdbc_name", None)
-      colon_count = xa_db_host.count(':')
-      if colon_count == 2 or colon_count == 0:
-        audit_jdbc_url = format('jdbc:oracle:thin:@{xa_db_host}')
-      else:
-        audit_jdbc_url = format('jdbc:oracle:thin:@//{xa_db_host}')
-      jdbc_driver = "oracle.jdbc.OracleDriver"
-    elif xa_audit_db_flavor == 'postgres':
-      jdbc_jar_name = default("/hostLevelParams/custom_postgres_jdbc_name", None)
-      audit_jdbc_url = format('jdbc:postgresql://{xa_db_host}/{xa_audit_db_name}')
-      jdbc_driver = "org.postgresql.Driver"
-    elif xa_audit_db_flavor == 'mssql':
-      jdbc_jar_name = default("/hostLevelParams/custom_mssql_jdbc_name", None)
-      audit_jdbc_url = format('jdbc:sqlserver://{xa_db_host};databaseName={xa_audit_db_name}')
-      jdbc_driver = "com.microsoft.sqlserver.jdbc.SQLServerDriver"
-    elif xa_audit_db_flavor == 'sqla':
-      jdbc_jar_name = default("/hostLevelParams/custom_sqlanywhere_jdbc_name", None)
-      audit_jdbc_url = format('jdbc:sqlanywhere:database={xa_audit_db_name};host={xa_db_host}')
-      jdbc_driver = "sap.jdbc4.sqlanywhere.IDriver"
+# ranger support xml_configuration flag, instead of depending on ranger xml_configurations_supported/ranger-env, using stack feature
+xml_configurations_supported = check_stack_feature(StackFeature.RANGER_XML_CONFIGURATION, version_for_stack_feature_checks)
 
-  downloaded_custom_connector = format("{tmp_dir}/{jdbc_jar_name}") if stack_supports_ranger_audit_db else None
-  driver_curl_source = format("{jdk_location}/{jdbc_jar_name}") if stack_supports_ranger_audit_db else None
-  driver_curl_target = format("{hadoop_lib_home}/{jdbc_jar_name}") if stack_supports_ranger_audit_db else None
+# ambari-server hostname
+ambari_server_hostname = config['ambariLevelParams']['ambari_server_host']
 
-  sql_connector_jar = ''
+# ranger hdfs plugin enabled property
+enable_ranger_hdfs = default("/configurations/ranger-hdfs-plugin-properties/ranger-hdfs-plugin-enabled", "No")
+enable_ranger_hdfs = True if enable_ranger_hdfs.lower() == 'yes' else False
+
+# get ranger hdfs properties if enable_ranger_hdfs is True
+if enable_ranger_hdfs:
+  # ranger policy url
+  policymgr_mgr_url = config['configurations']['admin-properties']['policymgr_external_url']
+  if xml_configurations_supported:
+    policymgr_mgr_url = config['configurations']['ranger-hdfs-security']['ranger.plugin.hdfs.policy.rest.url']
+
+  if not is_empty(policymgr_mgr_url) and policymgr_mgr_url.endswith('/'):
+    policymgr_mgr_url = policymgr_mgr_url.rstrip('/')
+
+  # ranger audit db user
+  xa_audit_db_user = default('/configurations/admin-properties/audit_db_user', 'rangerlogger')
+
+  # ranger hdfs service name
+  repo_name = str(config['clusterName']) + '_hadoop'
+  repo_name_value = config['configurations']['ranger-hdfs-security']['ranger.plugin.hdfs.service.name']
+  if not is_empty(repo_name_value) and repo_name_value != "{{repo_name}}":
+    repo_name = repo_name_value
+
+  hadoop_rpc_protection = config['configurations']['ranger-hdfs-plugin-properties']['hadoop.rpc.protection']
+  common_name_for_certificate = config['configurations']['ranger-hdfs-plugin-properties']['common.name.for.certificate']
+  repo_config_username = config['configurations']['ranger-hdfs-plugin-properties']['REPOSITORY_CONFIG_USERNAME']
+
+  # ranger-env config
+  ranger_env = config['configurations']['ranger-env']
+
+  # create ranger-env config having external ranger credential properties
+  if not has_ranger_admin and enable_ranger_hdfs:
+    external_admin_username = default('/configurations/ranger-hdfs-plugin-properties/external_admin_username', 'admin')
+    external_admin_password = default('/configurations/ranger-hdfs-plugin-properties/external_admin_password', 'admin')
+    external_ranger_admin_username = default('/configurations/ranger-hdfs-plugin-properties/external_ranger_admin_username', 'amb_ranger_admin')
+    external_ranger_admin_password = default('/configurations/ranger-hdfs-plugin-properties/external_ranger_admin_password', 'amb_ranger_admin')
+    ranger_env = {}
+    ranger_env['admin_username'] = external_admin_username
+    ranger_env['admin_password'] = external_admin_password
+    ranger_env['ranger_admin_username'] = external_ranger_admin_username
+    ranger_env['ranger_admin_password'] = external_ranger_admin_password
+
+  ranger_plugin_properties = config['configurations']['ranger-hdfs-plugin-properties']
+  policy_user = config['configurations']['ranger-hdfs-plugin-properties']['policy_user']
+  repo_config_password = config['configurations']['ranger-hdfs-plugin-properties']['REPOSITORY_CONFIG_PASSWORD']
+
+  xa_audit_db_password = ''
+  if not is_empty(config['configurations']['admin-properties']['audit_db_password']) and stack_supports_ranger_audit_db and has_ranger_admin:
+    xa_audit_db_password = config['configurations']['admin-properties']['audit_db_password']
+
+  downloaded_custom_connector = None
+  previous_jdbc_jar_name = None
+  driver_curl_source = None
+  driver_curl_target = None
+  previous_jdbc_jar = None
+
+  # to get db connector related properties
+  if has_ranger_admin and stack_supports_ranger_audit_db:
+    xa_audit_db_flavor = config['configurations']['admin-properties']['DB_FLAVOR']
+    jdbc_jar_name, previous_jdbc_jar_name, audit_jdbc_url, jdbc_driver = get_audit_configs(config)
+
+    downloaded_custom_connector = format("{tmp_dir}/{jdbc_jar_name}") if stack_supports_ranger_audit_db else None
+    driver_curl_source = format("{jdk_location}/{jdbc_jar_name}") if stack_supports_ranger_audit_db else None
+    driver_curl_target = format("{hadoop_lib_home}/{jdbc_jar_name}") if stack_supports_ranger_audit_db else None
+    previous_jdbc_jar = format("{hadoop_lib_home}/{previous_jdbc_jar_name}") if stack_supports_ranger_audit_db else None
+    sql_connector_jar = ''
 
   hdfs_ranger_plugin_config = {
     'username': repo_config_username,
@@ -485,6 +539,11 @@ if has_ranger_admin:
     'repositoryType': 'hdfs',
     'assetType': '1'
   }
+
+  custom_ranger_service_config = generate_ranger_service_config(ranger_plugin_properties)
+  if len(custom_ranger_service_config) > 0:
+    hdfs_ranger_plugin_config.update(custom_ranger_service_config)
+
   if stack_supports_ranger_kerberos and security_enabled:
     hdfs_ranger_plugin_config['policy.download.auth.users'] = hdfs_user
     hdfs_ranger_plugin_config['tag.download.auth.users'] = hdfs_user
@@ -501,14 +560,19 @@ if has_ranger_admin:
     }
 
   xa_audit_db_is_enabled = False
-  ranger_audit_solr_urls = config['configurations']['ranger-admin-site']['ranger.audit.solr.urls']
   if xml_configurations_supported and stack_supports_ranger_audit_db:
     xa_audit_db_is_enabled = config['configurations']['ranger-hdfs-audit']['xasecure.audit.destination.db']
-  xa_audit_hdfs_is_enabled = config['configurations']['ranger-hdfs-audit']['xasecure.audit.destination.hdfs'] if xml_configurations_supported else None
-  ssl_keystore_password = unicode(config['configurations']['ranger-hdfs-policymgr-ssl']['xasecure.policymgr.clientssl.keystore.password']) if xml_configurations_supported else None
-  ssl_truststore_password = unicode(config['configurations']['ranger-hdfs-policymgr-ssl']['xasecure.policymgr.clientssl.truststore.password']) if xml_configurations_supported else None
-  credential_file = format('/etc/ranger/{repo_name}/cred.jceks') if xml_configurations_supported else None
 
-  #For SQLA explicitly disable audit to DB for Ranger
-  if xa_audit_db_flavor == 'sqla':
+  xa_audit_hdfs_is_enabled = config['configurations']['ranger-hdfs-audit']['xasecure.audit.destination.hdfs'] if xml_configurations_supported else False
+  ssl_keystore_password = config['configurations']['ranger-hdfs-policymgr-ssl']['xasecure.policymgr.clientssl.keystore.password'] if xml_configurations_supported else None
+  ssl_truststore_password = config['configurations']['ranger-hdfs-policymgr-ssl']['xasecure.policymgr.clientssl.truststore.password'] if xml_configurations_supported else None
+  credential_file = format('/etc/ranger/{repo_name}/cred.jceks')
+
+  # for SQLA explicitly disable audit to DB for Ranger
+  if has_ranger_admin and stack_supports_ranger_audit_db and xa_audit_db_flavor.lower() == 'sqla':
     xa_audit_db_is_enabled = False
+
+# need this to capture cluster name from where ranger hdfs plugin is enabled
+cluster_name = config['clusterName']
+
+# ranger hdfs plugin section end

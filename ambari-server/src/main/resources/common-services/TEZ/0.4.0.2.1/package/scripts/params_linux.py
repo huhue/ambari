@@ -29,23 +29,28 @@ from resource_management.libraries.functions.default import default
 from resource_management.libraries.functions import get_kinit_path
 from resource_management.libraries.functions.get_not_managed_resources import get_not_managed_resources
 from resource_management.libraries.script.script import Script
+from resource_management.libraries.functions.get_architecture import get_architecture
 
 # server configurations
 config = Script.get_config()
 tmp_dir = Script.get_tmp_dir()
 
-stack_name = default("/hostLevelParams/stack_name", None)
+architecture = get_architecture()
+
+stack_name = default("/clusterLevelParams/stack_name", None)
 stack_root = Script.get_stack_root()
 
 # This is expected to be of the form #.#.#.#
-stack_version_unformatted = config['hostLevelParams']['stack_version']
+stack_version_unformatted = config['clusterLevelParams']['stack_version']
 stack_version_formatted = format_stack_version(stack_version_unformatted)
 
 # New Cluster Stack Version that is defined during the RESTART of a Rolling Upgrade
 version = default("/commandParams/version", None)
 
+hadoop_lib_home = stack_select.get_hadoop_dir("lib")
+
 # default hadoop parameters
-hadoop_home = '/usr'
+hadoop_home = stack_select.get_hadoop_dir("home")
 hadoop_bin_dir = stack_select.get_hadoop_dir("bin")
 hadoop_conf_dir = conf_select.get_hadoop_conf_dir()
 tez_etc_dir = "/etc/tez"
@@ -63,6 +68,13 @@ if stack_version_formatted and check_stack_feature(StackFeature.CONFIG_VERSIONIN
   config_path = os.path.join(stack_root, "current/tez-client/conf")
   config_dir = os.path.realpath(config_path)
 
+# Heap dump related
+heap_dump_enabled = default('/configurations/tez-env/enable_heap_dump', None)
+heap_dump_opts = "" # Empty if 'heap_dump_enabled' is False.
+if heap_dump_enabled:
+  heap_dump_path = default('/configurations/tez-env/heap_dump_location', "/tmp")
+  heap_dump_opts = " -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath="+heap_dump_path
+
 kinit_path_local = get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))
 security_enabled = config['configurations']['cluster-env']['security_enabled']
 smokeuser = config['configurations']['cluster-env']['smokeuser']
@@ -72,14 +84,11 @@ hdfs_user = config['configurations']['hadoop-env']['hdfs_user']
 hdfs_principal_name = config['configurations']['hadoop-env']['hdfs_principal_name']
 hdfs_user_keytab = config['configurations']['hadoop-env']['hdfs_user_keytab']
 
-java64_home = config['hostLevelParams']['java_home']
+java64_home = config['ambariLevelParams']['java_home']
 
 tez_user = config['configurations']['tez-env']['tez_user']
 user_group = config['configurations']['cluster-env']['user_group']
 tez_env_sh_template = config['configurations']['tez-env']['content']
-
-
-
 
 hdfs_site = config['configurations']['hdfs-site']
 default_fs = config['configurations']['core-site']['fs.defaultFS']

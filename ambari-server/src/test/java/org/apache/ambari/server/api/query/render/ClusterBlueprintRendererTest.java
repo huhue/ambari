@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,6 +18,32 @@
 
 package org.apache.ambari.server.api.query.render;
 
+import static org.easymock.EasyMock.anyLong;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.createStrictMock;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.reset;
+import static org.easymock.EasyMock.verify;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.ambari.server.api.query.QueryInfo;
 import org.apache.ambari.server.api.resources.ClusterResourceDefinition;
 import org.apache.ambari.server.api.resources.HostComponentResourceDefinition;
@@ -26,6 +52,11 @@ import org.apache.ambari.server.api.services.Result;
 import org.apache.ambari.server.api.services.ResultImpl;
 import org.apache.ambari.server.api.util.TreeNode;
 import org.apache.ambari.server.api.util.TreeNodeImpl;
+import org.apache.ambari.server.controller.AmbariManagementController;
+import org.apache.ambari.server.controller.AmbariManagementControllerImpl;
+import org.apache.ambari.server.controller.AmbariServer;
+import org.apache.ambari.server.controller.KerberosHelper;
+import org.apache.ambari.server.controller.KerberosHelperImpl;
 import org.apache.ambari.server.controller.internal.ArtifactResourceProvider;
 import org.apache.ambari.server.controller.internal.ClusterControllerImpl;
 import org.apache.ambari.server.controller.internal.ResourceImpl;
@@ -35,8 +66,12 @@ import org.apache.ambari.server.controller.spi.Predicate;
 import org.apache.ambari.server.controller.spi.Request;
 import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.ResourceProvider;
+import org.apache.ambari.server.state.Cluster;
+import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.DesiredConfig;
 import org.apache.ambari.server.state.ServiceInfo;
+import org.apache.ambari.server.state.cluster.ClustersImpl;
+import org.apache.ambari.server.state.kerberos.KerberosDescriptor;
 import org.apache.ambari.server.topology.AmbariContext;
 import org.apache.ambari.server.topology.Blueprint;
 import org.apache.ambari.server.topology.ClusterTopology;
@@ -54,65 +89,46 @@ import org.powermock.api.easymock.PowerMock;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static org.easymock.EasyMock.anyLong;
-import static org.easymock.EasyMock.anyObject;
-import static org.easymock.EasyMock.createNiceMock;
-import static org.easymock.EasyMock.createStrictMock;
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.reset;
-import static org.easymock.EasyMock.verify;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-
 /**
  * ClusterBlueprintRenderer unit tests.
  */
 @SuppressWarnings("unchecked")
 @RunWith(PowerMockRunner.class)
-@PrepareForTest(AmbariContext.class)
+@PrepareForTest({AmbariContext.class, AmbariServer.class})
 public class ClusterBlueprintRendererTest {
 
   private static final ClusterTopology topology = createNiceMock(ClusterTopology.class);
   private static final ClusterController clusterController = createNiceMock(ClusterControllerImpl.class);
+
+  private static final AmbariContext ambariContext = createNiceMock(AmbariContext.class);
+  private static final Cluster cluster = createNiceMock(Cluster.class);
+  private static final Clusters clusters = createNiceMock(ClustersImpl.class);
+  private static final AmbariManagementController controller = createNiceMock(AmbariManagementControllerImpl.class);
+  private static final KerberosHelper kerberosHelper = createNiceMock(KerberosHelperImpl.class);
+  private static final KerberosDescriptor kerberosDescriptor = createNiceMock(KerberosDescriptor.class);
 
   private static final Blueprint blueprint = createNiceMock(Blueprint.class);
   private static final Stack stack = createNiceMock(Stack.class);
   private static final HostGroup group1 = createNiceMock(HostGroup.class);
   private static final HostGroup group2 = createNiceMock(HostGroup.class);
 
-  private static final Configuration emptyConfiguration = new Configuration(new HashMap<String, Map<String, String>>(),
-      new HashMap<String, Map<String, Map<String, String>>>());
+  private static final Configuration emptyConfiguration = new Configuration(new HashMap<>(), new HashMap<>());
 
-  private static final Map<String, Map<String, String>> clusterProps = new HashMap<String, Map<String, String>>();
+  private static final Map<String, Map<String, String>> clusterProps = new HashMap<>();
   private static final Map<String, Map<String, Map<String, String>>> clusterAttributes =
-      new HashMap<String, Map<String, Map<String, String>>>();
+    new HashMap<>();
 
   private static final Configuration clusterConfig = new Configuration(clusterProps, clusterAttributes);
   @Before
   public void setup() throws Exception {
 
-    Map<String, String> clusterTypeProps = new HashMap<String, String>();
+    Map<String, String> clusterTypeProps = new HashMap<>();
     clusterProps.put("test-type-one", clusterTypeProps);
     clusterTypeProps.put("propertyOne", "valueOne");
 
-    Map<String, Map<String, String>> clusterTypeAttributes = new HashMap<String, Map<String, String>>();
+    Map<String, Map<String, String>> clusterTypeAttributes = new HashMap<>();
     clusterAttributes.put("test-type-one", clusterTypeAttributes);
-    Map<String, String> clusterAttributeProps = new HashMap<String, String>();
+    Map<String, String> clusterAttributeProps = new HashMap<>();
     clusterAttributeProps.put("propertyOne", "true");
     clusterTypeAttributes.put("final", clusterAttributeProps);
 
@@ -121,11 +137,11 @@ public class ClusterBlueprintRendererTest {
 
     Collection<Component> group2Components = Arrays.asList(new Component("TASKTRACKER"), new Component("DATANODE"));
 
-    Map<String, Configuration> hostGroupConfigs = new HashMap<String, Configuration>();
+    Map<String, Configuration> hostGroupConfigs = new HashMap<>();
     hostGroupConfigs.put("host_group_1", emptyConfiguration);
     hostGroupConfigs.put("host_group_2", emptyConfiguration);
 
-    Map<String, HostGroup> hostGroups = new HashMap<String, HostGroup>();
+    Map<String, HostGroup> hostGroups = new HashMap<>();
     hostGroups.put("host_group_1", group1);
     hostGroups.put("host_group_2", group2);
 
@@ -133,7 +149,7 @@ public class ClusterBlueprintRendererTest {
     group1Info.addHost("host1");
     group1Info.setConfiguration(emptyConfiguration);
     HostGroupInfo group2Info = new HostGroupInfo("host_group_2");
-    Map<String, HostGroupInfo> groupInfoMap = new HashMap<String, HostGroupInfo>();
+    Map<String, HostGroupInfo> groupInfoMap = new HashMap<>();
     group2Info.addHosts(Arrays.asList("host2", "host3"));
     group2Info.setConfiguration(emptyConfiguration);
     groupInfoMap.put("host_group_1", group1Info);
@@ -154,7 +170,20 @@ public class ClusterBlueprintRendererTest {
     expect(group1.getComponents()).andReturn(group1Components).anyTimes();
     expect(group2.getComponents()).andReturn(group2Components).anyTimes();
 
-    replay(topology, blueprint, stack, group1, group2);
+    expect(topology.getAmbariContext()).andReturn(ambariContext).anyTimes();
+    expect(topology.getClusterId()).andReturn(1L).anyTimes();
+    PowerMock.mockStatic(AmbariServer.class);
+    expect(AmbariServer.getController()).andReturn(controller).anyTimes();
+    PowerMock.replay(AmbariServer.class);
+    expect(clusters.getCluster("clusterName")).andReturn(cluster).anyTimes();
+    expect(controller.getKerberosHelper()).andReturn(kerberosHelper).anyTimes();
+    expect(controller.getClusters()).andReturn(clusters).anyTimes();
+    expect(kerberosHelper.getKerberosDescriptor(cluster, false)).andReturn(kerberosDescriptor).anyTimes();
+    Set<String> properties = new HashSet<>();
+    properties.add("core-site/hadoop.security.auth_to_local");
+    expect(kerberosDescriptor.getAllAuthToLocalProperties()).andReturn(properties).anyTimes();
+    expect(ambariContext.getClusterName(1L)).andReturn("clusterName").anyTimes();
+    replay(topology, blueprint, stack, group1, group2, ambariContext, clusters, controller, kerberosHelper, cluster, kerberosDescriptor);
   }
 
   private void setupMocksForKerberosEnabledCluster() throws Exception {
@@ -164,6 +193,7 @@ public class ClusterBlueprintRendererTest {
 
     PowerMock.mockStatic(AmbariContext.class);
     expect(AmbariContext.getClusterController()).andReturn(clusterController).anyTimes();
+    expect(AmbariContext.getController()).andReturn(controller).anyTimes();
 
     reset(topology);
 
@@ -171,7 +201,7 @@ public class ClusterBlueprintRendererTest {
     group1Info.addHost("host1");
     group1Info.setConfiguration(emptyConfiguration);
     HostGroupInfo group2Info = new HostGroupInfo("host_group_2");
-    Map<String, HostGroupInfo> groupInfoMap = new HashMap<String, HostGroupInfo>();
+    Map<String, HostGroupInfo> groupInfoMap = new HashMap<>();
     group2Info.addHosts(Arrays.asList("host2", "host3"));
     group2Info.setConfiguration(emptyConfiguration);
     groupInfoMap.put("host_group_1", group1Info);
@@ -195,7 +225,7 @@ public class ClusterBlueprintRendererTest {
       (Predicate) anyObject(Predicate.class))).andReturn(result).once();
 
     Map<String, Map<String, Object>> resourcePropertiesMap = new HashMap<>();
-    resourcePropertiesMap.put(ArtifactResourceProvider.ARTIFACT_DATA_PROPERTY, Collections.<String, Object>emptyMap());
+    resourcePropertiesMap.put(ArtifactResourceProvider.ARTIFACT_DATA_PROPERTY, Collections.emptyMap());
     Map<String, Object> propertiesMap = new HashMap<>();
     propertiesMap.put("testProperty", "testValue");
     resourcePropertiesMap.put(ArtifactResourceProvider.ARTIFACT_DATA_PROPERTY + "/properties", propertiesMap);
@@ -209,21 +239,21 @@ public class ClusterBlueprintRendererTest {
 
   @After
   public void tearDown() {
-    verify(topology, blueprint, stack, group1, group2);
-    reset(topology, blueprint, stack, group1, group2);
+    verify(topology, blueprint, stack, group1, group2, ambariContext, clusters, controller, kerberosHelper, cluster, kerberosDescriptor);
+    reset(topology, blueprint, stack, group1, group2, ambariContext, clusters, controller, kerberosHelper, cluster, kerberosDescriptor);
   }
 
   @Test
   public void testFinalizeProperties__instance() {
-    QueryInfo rootQuery = new QueryInfo(new ClusterResourceDefinition(), new HashSet<String>());
-    TreeNode<QueryInfo> queryTree = new TreeNodeImpl<QueryInfo>(null, rootQuery, "Cluster");
+    QueryInfo rootQuery = new QueryInfo(new ClusterResourceDefinition(), new HashSet<>());
+    TreeNode<QueryInfo> queryTree = new TreeNodeImpl<>(null, rootQuery, "Cluster");
     rootQuery.getProperties().add("foo/bar");
     rootQuery.getProperties().add("prop1");
 
-    QueryInfo hostInfo = new QueryInfo(new HostResourceDefinition(), new HashSet<String>());
+    QueryInfo hostInfo = new QueryInfo(new HostResourceDefinition(), new HashSet<>());
     queryTree.addChild(hostInfo, "Host");
 
-    QueryInfo hostComponentInfo = new QueryInfo(new HostComponentResourceDefinition(), new HashSet<String>());
+    QueryInfo hostComponentInfo = new QueryInfo(new HostComponentResourceDefinition(), new HashSet<>());
     queryTree.getChild("Host").addChild(hostComponentInfo, "HostComponent");
 
     ClusterBlueprintRenderer renderer = new ClusterBlueprintRenderer();
@@ -238,10 +268,152 @@ public class ClusterBlueprintRendererTest {
     assertTrue(propertyTree.getChild("Host/HostComponent").getObject().contains("HostRoles/component_name"));
   }
 
+  public TreeNode<Resource> createResultTreeSettingsObject(TreeNode<Resource> resultTree){
+    Resource clusterResource = new ResourceImpl(Resource.Type.Cluster);
+
+    clusterResource.setProperty("Clusters/cluster_name", "testCluster");
+    clusterResource.setProperty("Clusters/version", "HDP-1.3.3");
+
+    TreeNode<Resource> clusterTree = resultTree.addChild(clusterResource, "Cluster:1");
+
+    TreeNode<Resource> servicesTree = clusterTree.addChild(null, "services");
+    servicesTree.setProperty("isCollection", "true");
+
+    //Scenario 1 : Service with Credential Store enabled, Recovery enabled for Component:1 and not for Component:2
+    Resource serviceResource1 = new ResourceImpl(Resource.Type.Service);
+    serviceResource1.setProperty("ServiceInfo/service_name","Service:1");
+    serviceResource1.setProperty("ServiceInfo/credential_store_supported","true");
+    serviceResource1.setProperty("ServiceInfo/credential_store_enabled","true");
+    TreeNode<Resource> serviceTree = servicesTree.addChild(serviceResource1, "Service:1");
+
+    Resource ttComponentResource = new ResourceImpl(Resource.Type.Component);
+    ttComponentResource.setProperty("ServiceComponentInfo/component_name", "Component:1");
+    ttComponentResource.setProperty("ServiceComponentInfo/cluster_name", "testCluster");
+    ttComponentResource.setProperty("ServiceComponentInfo/service_name", "Service:1");
+    ttComponentResource.setProperty("ServiceComponentInfo/recovery_enabled", "true");
+
+    Resource dnComponentResource = new ResourceImpl(Resource.Type.Component);
+    dnComponentResource.setProperty("ServiceComponentInfo/component_name", "Component:2");
+    dnComponentResource.setProperty("ServiceComponentInfo/cluster_name", "testCluster");
+    dnComponentResource.setProperty("ServiceComponentInfo/service_name", "Service:1");
+    dnComponentResource.setProperty("ServiceComponentInfo/recovery_enabled", "false");
+
+    TreeNode<Resource> componentsTree1 = serviceTree.addChild(null, "components");
+    componentsTree1.setProperty("isCollection", "true");
+
+    componentsTree1.addChild(ttComponentResource, "Component:1");
+    componentsTree1.addChild(dnComponentResource, "Component:2");
+
+    //Scenario 2 :Service with Credential Store disabled, Recovery enabled for Component:1
+    Resource serviceResource2 = new ResourceImpl(Resource.Type.Service);
+    serviceResource2.setProperty("ServiceInfo/service_name","Service:2");
+    serviceResource2.setProperty("ServiceInfo/credential_store_supported","true");
+    serviceResource2.setProperty("ServiceInfo/credential_store_enabled","false");
+    serviceTree = servicesTree.addChild(serviceResource2, "Service:2");
+
+    ttComponentResource = new ResourceImpl(Resource.Type.Component);
+    ttComponentResource.setProperty("ServiceComponentInfo/component_name", "Component:1");
+    ttComponentResource.setProperty("ServiceComponentInfo/cluster_name", "testCluster");
+    ttComponentResource.setProperty("ServiceComponentInfo/service_name", "Service:2");
+    ttComponentResource.setProperty("ServiceComponentInfo/recovery_enabled", "true");
+
+    TreeNode<Resource> componentsTree2 = serviceTree.addChild(null, "components");
+    componentsTree2.setProperty("isCollection", "true");
+
+    componentsTree2.addChild(ttComponentResource, "Component:1");
+
+    //Scenario 3 :Service with both Credential Store and Recovery enabled as false
+    Resource serviceResource3 = new ResourceImpl(Resource.Type.Service);
+    serviceResource3.setProperty("ServiceInfo/service_name","Service:3");
+    serviceResource3.setProperty("ServiceInfo/credential_store_supported","false");
+    serviceResource3.setProperty("ServiceInfo/credential_store_enabled","false");
+    serviceTree = servicesTree.addChild(serviceResource3, "Service:3");
+
+    ttComponentResource = new ResourceImpl(Resource.Type.Component);
+    ttComponentResource.setProperty("ServiceComponentInfo/component_name", "Component:1");
+    ttComponentResource.setProperty("ServiceComponentInfo/cluster_name", "testCluster");
+    ttComponentResource.setProperty("ServiceComponentInfo/service_name", "Service:3");
+    ttComponentResource.setProperty("ServiceComponentInfo/recovery_enabled", "false");
+
+    TreeNode<Resource> componentsTree3 = serviceTree.addChild(null, "components");
+    componentsTree3.setProperty("isCollection", "true");
+
+    componentsTree3.addChild(ttComponentResource, "Component:1");
+
+    //Add empty configurations
+    Resource configurationsResource = new ResourceImpl(Resource.Type.Configuration);
+    clusterTree.addChild(configurationsResource, "configurations");
+
+    //Add empty hosts
+    Resource hostResource = new ResourceImpl(Resource.Type.Host);
+    clusterTree.addChild(hostResource, "hosts");
+
+    return resultTree;
+  }
+
+  @Test
+  public void testGetSettings_instance(){
+    Result result = new ResultImpl(true);
+
+    TreeNode<Resource> resultTree = createResultTreeSettingsObject(result.getResultTree());
+
+    ClusterBlueprintRenderer renderer = new TestBlueprintRenderer(topology);
+    Result blueprintResult = renderer.finalizeResult(result);
+    TreeNode<Resource> blueprintTree = blueprintResult.getResultTree();
+    TreeNode<Resource> blueprintNode = blueprintTree.getChildren().iterator().next();
+    Resource blueprintResource = blueprintNode.getObject();
+    Map<String, Map<String, Object>> propertiesMap = blueprintResource.getPropertiesMap();
+    Map<String,Object> children = propertiesMap.get("");
+
+    //Verify if required information is present in actual result
+    assertTrue(children.containsKey("settings"));
+
+    List<Map<String,Object>> settingValues = (ArrayList)children.get("settings");
+    Boolean isRecoverySettings = false;
+    Boolean isComponentSettings = false;
+    Boolean isServiceSettings = false;
+
+    //Verify actual values
+    for(Map<String,Object> settingProp : settingValues){
+      if(settingProp.containsKey("recovery_settings")){
+        isRecoverySettings = true;
+        HashSet<Map<String,String>> checkPropSize = (HashSet)settingProp.get("recovery_settings");
+        assertEquals(1,checkPropSize.size());
+        assertEquals("true",checkPropSize.iterator().next().get("recovery_enabled"));
+
+      }
+      if(settingProp.containsKey("component_settings")){
+        isComponentSettings = true;
+        HashSet<Map<String,String>> checkPropSize = (HashSet)settingProp.get("component_settings");
+        assertEquals(1,checkPropSize.size());
+        Map<String, String> finalProp = checkPropSize.iterator().next();
+        assertEquals("Component:1",finalProp.get("name"));
+        assertEquals("true",finalProp.get("recovery_enabled"));
+      }
+      if(settingProp.containsKey("service_settings")){
+        isServiceSettings = true;
+        HashSet<Map<String,String>> checkPropSize = (HashSet)settingProp.get("service_settings");
+        assertEquals(2,checkPropSize.size());
+        for(Map<String,String> finalProp : checkPropSize){
+          if(finalProp.containsKey("credential_store_enabled")){
+            assertEquals("Service:1",finalProp.get("name"));
+            assertEquals("true",finalProp.get("recovery_enabled"));
+          }
+          assertFalse(finalProp.get("name").equals("Service:3"));
+        }
+      }
+    }
+    //Verify if required information is present in actual result
+    assertTrue(isRecoverySettings);
+    assertTrue(isComponentSettings);
+    assertTrue(isServiceSettings);
+
+  }
+
   @Test
   public void testFinalizeProperties__instance_noComponentNode() {
-    QueryInfo rootQuery = new QueryInfo(new ClusterResourceDefinition(), new HashSet<String>());
-    TreeNode<QueryInfo> queryTree = new TreeNodeImpl<QueryInfo>(null, rootQuery, "Cluster");
+    QueryInfo rootQuery = new QueryInfo(new ClusterResourceDefinition(), new HashSet<>());
+    TreeNode<QueryInfo> queryTree = new TreeNodeImpl<>(null, rootQuery, "Cluster");
     rootQuery.getProperties().add("foo/bar");
     rootQuery.getProperties().add("prop1");
 
@@ -318,10 +490,10 @@ public class ClusterBlueprintRendererTest {
         // 4 specified components and ambari server
         assertEquals(5, components.size());
 
-        Set<String> expectedValues = new HashSet<String>(
-            Arrays.asList("JOBTRACKER", "TASKTRACKER", "NAMENODE", "DATANODE", "AMBARI_SERVER"));
+        Set<String> expectedValues = new HashSet<>(
+          Arrays.asList("JOBTRACKER", "TASKTRACKER", "NAMENODE", "DATANODE", "AMBARI_SERVER"));
 
-        Set<String> actualValues = new HashSet<String>();
+        Set<String> actualValues = new HashSet<>();
 
 
         for (Map<String, String> componentProperties : components) {
@@ -336,10 +508,10 @@ public class ClusterBlueprintRendererTest {
         Collection<Map<String, String>> components = (Collection<Map<String, String>>) hostGroupProperties.get("components");
         assertEquals(2, components.size());
 
-        Set<String> expectedValues = new HashSet<String>(
-            Arrays.asList("TASKTRACKER", "DATANODE"));
+        Set<String> expectedValues = new HashSet<>(
+          Arrays.asList("TASKTRACKER", "DATANODE"));
 
-        Set<String> actualValues = new HashSet<String>();
+        Set<String> actualValues = new HashSet<>();
 
 
         for (Map<String, String> componentProperties : components) {
@@ -360,7 +532,7 @@ public class ClusterBlueprintRendererTest {
 
     Result result = new ResultImpl(true);
     Map<String, Object> testDesiredConfigMap =
-      new HashMap<String, Object>();
+      new HashMap<>();
 
     DesiredConfig testDesiredConfig =
       new DesiredConfig();
@@ -397,10 +569,10 @@ public class ClusterBlueprintRendererTest {
         // 4 specified components and ambari server
         assertEquals(5, components.size());
 
-        Set<String> expectedValues = new HashSet<String>(
+        Set<String> expectedValues = new HashSet<>(
           Arrays.asList("JOBTRACKER", "TASKTRACKER", "NAMENODE", "DATANODE", "AMBARI_SERVER"));
 
-        Set<String> actualValues = new HashSet<String>();
+        Set<String> actualValues = new HashSet<>();
 
 
         for (Map<String, String> componentProperties : components) {
@@ -415,10 +587,10 @@ public class ClusterBlueprintRendererTest {
         Collection<Map<String, String>> components = (Collection<Map<String, String>>) hostGroupProperties.get("components");
         assertEquals(2, components.size());
 
-        Set<String> expectedValues = new HashSet<String>(
+        Set<String> expectedValues = new HashSet<>(
           Arrays.asList("TASKTRACKER", "DATANODE"));
 
-        Set<String> actualValues = new HashSet<String>();
+        Set<String> actualValues = new HashSet<>();
 
 
         for (Map<String, String> componentProperties : components) {
@@ -501,7 +673,7 @@ public class ClusterBlueprintRendererTest {
 
         if (desiredConfig == null) {
           // override the properties map for simpler testing
-          originalMap.put("Clusters/desired_configs", Collections.<String, Object>emptyMap());
+          originalMap.put("Clusters/desired_configs", Collections.emptyMap());
         } else {
           // allow for unit tests to customize this, needed for attributes export testing
           originalMap.put("Clusters/desired_configs", desiredConfig);
@@ -550,8 +722,8 @@ public class ClusterBlueprintRendererTest {
           super.getPropertiesMap();
 
         // return test properties, to simulate valid configuration entry
-        originalMap.put("properties", Collections.<String, Object>singletonMap("propertyOne", "valueOne"));
-        originalMap.put("properties_attributes", Collections.<String, Object>singletonMap("final", Collections.singletonMap("propertyOne", "true")));
+        originalMap.put("properties", Collections.singletonMap("propertyOne", "valueOne"));
+        originalMap.put("properties_attributes", Collections.singletonMap("final", Collections.singletonMap("propertyOne", "true")));
 
         return originalMap;
       }

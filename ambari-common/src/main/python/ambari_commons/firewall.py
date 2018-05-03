@@ -18,11 +18,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 '''
 
+from ambari_commons import subprocess32
 from ambari_commons import OSCheck, OSConst
 from ambari_commons.logging_utils import print_warning_msg
 from ambari_commons.os_family_impl import OsFamilyImpl
-from ambari_commons.os_utils import run_os_command, run_in_shell
-
+from resource_management.core import shell
 
 class Firewall(object):
   def __init__(self):
@@ -46,7 +46,7 @@ class FirewallLinux(Firewall):
       return UbuntuFirewallChecks()
     elif self.OS_TYPE == OSConst.OS_FEDORA and int(self.OS_VERSION) >= 18:
       return Fedora18FirewallChecks()
-    elif OSCheck.is_redhat_family() and int(self.OS_VERSION) >= 7:
+    elif OSCheck.is_redhat_family():
       return RedHat7FirewallChecks()
     elif OSCheck.is_suse_family():
       return SuseFirewallChecks()
@@ -81,10 +81,13 @@ class FirewallChecks(object):
     return result
 
   def run_command(self):
-    retcode, out, err = run_os_command(self.get_command())
-    self.returncode = retcode
-    self.stdoutdata = out
-    self.stderrdata = err
+    try:
+      retcode, out, err = shell.call(self.get_command(), stdout = subprocess32.PIPE, stderr = subprocess32.PIPE, timeout = 5, quiet = True)
+      self.returncode = retcode
+      self.stdoutdata = out
+      self.stderrdata = err
+    except Exception as ex:
+      print_warning_msg("Unable to check firewall status: {0}".format(ex))
 
   def check_firewall(self):
     try:
@@ -120,16 +123,17 @@ class RedHat7FirewallChecks(FirewallChecks):
   #firewalld added to support default firewall (started from RHEL7/CentOS7)
   #script default iptables checked as user can use iptables as known from previous RHEL releases.
   def get_command(self):
-    return "%(servcmd)s is-active %(fwl1)s || %(servcmd)s is-active %(fwl2)s" % {"servcmd":self.SERVICE_CMD,"fwl1":"iptables", "fwl2":"firewalld"}
+    return "%(servcmd)s is-active %(fwl1)s %(fwl2)s" % {"servcmd":self.SERVICE_CMD,"fwl1":"iptables", "fwl2":"firewalld"}
 
   def check_result(self):
-    return self.returncode == 0
+    if self.stdoutdata is None:
+      return False
 
-  def run_command(self):
-    retcode, out, err = run_in_shell(self.get_command())
-    self.returncode = retcode
-    self.stdoutdata = out
-    self.stderrdata = err
+    for line in self.stdoutdata.split("\n"):
+      if line.strip() == "active":
+        return True
+    return False
+
 
 class Fedora18FirewallChecks(FirewallChecks):
   def __init__(self):

@@ -26,6 +26,7 @@ App.cache = {
   'previousHostStatuses': {},
   'previousComponentStatuses': {},
   'previousComponentPassiveStates': {},
+  'staleConfigsComponentHosts': {},
   'services': [],
   'currentConfigVersions': {}
 };
@@ -41,6 +42,42 @@ App.cache.clear = function () {
   };
   App.cache.clear = clear;
 };
+
+App.store.reopen({
+  safeLoadMany: function(model, records) {
+    try {
+      this.loadMany(model, records);
+    } catch (e) {
+      console.debug('Resolve uncommitted records before load');
+      this.fastCommit();
+      this.loadMany(model, records);
+    }
+  },
+
+  safeLoad: function(model, record) {
+    try {
+      this.load(model, record);
+    } catch (e) {
+      console.debug('Resolve uncommitted record before load');
+      this.fastCommit();
+      this.load(model, record);
+    }
+  },
+
+  /**
+   * App.store.commit() - creates new transaction,
+   * and them move all records from old to new transactions which is expensive
+   *
+   * We should use only defaultTransaction,
+   * and then we can stub <code>removeCleanRecords</code> method,
+   * because it would remove from and add records to the same (default) transaction
+   */
+  fastCommit: function() {
+    console.time('store commit');
+    App.store.defaultTransaction.commit();
+    console.timeEnd('store commit');
+  }
+});
 
 App.ServerDataMapper = Em.Object.extend({
   jsonKey: false,
@@ -76,7 +113,7 @@ App.QuickDataMapper = App.ServerDataMapper.extend({
         result.push(this.parseIt(item, this.config));
       }, this);
 
-      App.store.loadMany(this.get('model'), result);
+      App.store.safeLoadMany(this.get('model'), result);
     }
   },
 
@@ -142,9 +179,11 @@ App.QuickDataMapper = App.ServerDataMapper.extend({
    * @param item
    */
   deleteRecord: function (item) {
-    item.deleteRecord();
-    App.store.commit();
-    item.get('stateManager').transitionTo('loading');
+    if (item.get('isLoaded')) {
+      item.deleteRecord();
+      App.store.fastCommit();
+      item.get('stateManager').transitionTo('loading');
+    }
   },
   /**
    * check mutable fields whether they have been changed and if positive
@@ -206,6 +245,22 @@ App.QuickDataMapper = App.ServerDataMapper.extend({
     }
 
     return ~maxIndex;
+  },
+
+  /**
+   * @param {Em.Object} record
+   * @param {object} event
+   * @param {object} config
+   */
+  updatePropertiesByConfig: function(record, event, config) {
+    if (record.get('isLoaded')) {
+      for (var internalProp in config) {
+        let externalProp = config[internalProp];
+        if (!Em.isNone(event[externalProp])) {
+          record.set(internalProp, event[externalProp]);
+        }
+      }
+    }
   }
 
 });

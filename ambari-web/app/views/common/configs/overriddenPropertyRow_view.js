@@ -25,37 +25,6 @@ App.ServiceConfigView.SCPOverriddenRowsView = Ember.View.extend({
   // we are declaring this from configs.hbs ( we are initializing this from UI )
   categoryConfigs: null, // just declared as viewClass need it
 
-  init: function () {
-    this._super();
-    if (this.get('controller.name') != 'mainServiceInfoConfigsController') {
-      this.addObserver('isDefaultGroupSelected', this, 'setSwitchText');
-    }
-  },
-
-  didInsertElement: function () {
-    this.setSwitchText();
-  },
-
-  willDestroyElement: function () {
-    if (this.get('controller.name') != 'mainServiceInfoConfigsController') {
-      this.removeObserver('isDefaultGroupSelected', this, 'setSwitchText');
-    }
-  },
-
-  setSwitchText: function () {
-    if (this.get('isDefaultGroupSelected')) {
-      var overrides = this.get('serviceConfigProperty.overrides');
-      if (!overrides) return;
-      overrides.forEach(function(overriddenSCP) {
-        overriddenSCP.get('group').set('switchGroupTextShort',
-            Em.I18n.t('services.service.config_groups.switchGroupTextShort').format(overriddenSCP.get('group.displayName')));
-        overriddenSCP.get('group').set('switchGroupTextFull',
-            Em.I18n.t('services.service.config_groups.switchGroupTextFull').format(overriddenSCP.get('group.displayName')));
-      });
-      this.set('serviceConfigProperty.overrides', overrides);
-    }
-  },
-
   toggleFinalFlag: function (event) {
     var override = event.contexts[0];
     if (override.get('isNotEditable')) {
@@ -67,14 +36,26 @@ App.ServiceConfigView.SCPOverriddenRowsView = Ember.View.extend({
   removeOverride: function (event) {
     // arg 1 SCP means ServiceConfigProperty
     var scpToBeRemoved = event.contexts[0];
-    var overrides = this.get('serviceConfigProperty.overrides');
+    var scp = this.get('serviceConfigProperty');
+    var overrides = scp.get('overrides');
+    var controller = this.get('controller');
+    var group = controller.get('selectedService.configGroups').findProperty('name', controller.get('selectedConfigGroup.name'));
     // remove override property from selectedService on installer 7-th step
-    if (this.get('controller.name') == 'wizardStep7Controller') {
-      var controller = this.get('controller');
-      var group = controller.get('selectedService.configGroups').findProperty('name', controller.get('selectedConfigGroup.name'));
+    if (this.get('controller.name') === 'wizardStep7Controller') {
       group.get('properties').removeObject(scpToBeRemoved);
     }
-    overrides = overrides.without(scpToBeRemoved);
-    this.set('serviceConfigProperty.overrides', overrides);
+    if (overrides) {
+      overrides = overrides.without(scpToBeRemoved);
+      this.set('serviceConfigProperty.overrides', overrides);
+    }
+    else {
+      if (scp.get('isUserProperty')) {
+        this.get('parentView.serviceConfigs').removeObject(scpToBeRemoved);
+        this.get('parentView.categoryConfigsAll').removeObject(scpToBeRemoved);
+      }
+    }
+    if (scp.get('isUndefinedLabel')) {
+      scp.set('isVisible', false);
+    }
   }
 });

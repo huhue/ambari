@@ -21,6 +21,10 @@
     <service>
       <name>HIVE</name>
       <version>1.2.1.2.5</version>
+      <credential-store>
+        <supported>true</supported>
+        <enabled>true</enabled>
+      </credential-store>
       <components>
         <component>
           <name>HIVE_SERVER_INTERACTIVE</name>
@@ -102,9 +106,16 @@
             </customCommand>
           </customCommands>
           <configuration-dependencies>
+            <config-type>beeline-log4j2</config-type>
+            <config-type>hive-exec-log4j2</config-type>
+            <config-type>hive-log4j2</config-type>
             <config-type>hive-site</config-type>
             <config-type>hive-interactive-site</config-type>
+            <config-type>tez-interactive-site</config-type>
+            <config-type>hiveserver2-interactive-site</config-type>
             <config-type>hive-interactive-env</config-type>
+            <config-type>llap-cli-log4j2</config-type>
+            <config-type>llap-daemon-log4j</config-type>
           </configuration-dependencies>
         </component>
       </components>
@@ -131,17 +142,7 @@
       </requiredServices>
       <osSpecifics>
         <osSpecific>
-          <osFamily>any</osFamily>
-          <packages>
-            <package>
-              <name>mysql-connector-java</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_mysl_connector</condition>
-            </package>
-          </packages>
-        </osSpecific>
-        <osSpecific>
-          <osFamily>redhat7,amazon2015,redhat6,suse11,suse12</osFamily>
+          <osFamily>redhat7,amazonlinux2,redhat6,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>hive_${stack_version}</name>
@@ -165,7 +166,7 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>amazon2015,redhat6,suse11,suse12</osFamily>
+          <osFamily>amazonlinux2,redhat6,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>mysql</name>
@@ -175,22 +176,17 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>redhat7</osFamily>
+          <osFamily>redhat7,amazonlinux2</osFamily>
           <packages>
             <package>
-              <name>mysql-community-release</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_mysql</condition>
-            </package>
-            <package>
-              <name>mysql-community-server</name>
+              <name>mariadb-server</name>
               <skipUpgrade>true</skipUpgrade>
               <condition>should_install_mysql</condition>
             </package>
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>hive-${stack_version}</name>
@@ -214,7 +210,7 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>amazon2015,redhat6,debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>amazonlinux2,redhat6,debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>mysql-server</name>
@@ -233,6 +229,10 @@
           </packages>
         </osSpecific>
       </osSpecifics>
+      <configuration-dependencies>
+        <config-type>application-properties</config-type>
+        <config-type>hive-atlas-application.properties</config-type>
+      </configuration-dependencies>
     </service>
   </services>
 </metainfo>

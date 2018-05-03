@@ -22,7 +22,6 @@ import httplib
 import imp
 import time
 import urllib
-from alerts.base_alert import BaseAlert
 from alerts.metric_alert import MetricAlert
 import ambari_simplejson as json
 import logging
@@ -30,8 +29,9 @@ import re
 import uuid
 
 from resource_management.libraries.functions.get_port_from_url import get_port_from_url
+from ambari_commons import inet_utils
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 AMS_METRICS_GET_URL = "/ws/v1/timeline/metrics?%s"
 
@@ -64,10 +64,11 @@ class AmsAlert(MetricAlert):
     # use the URI lookup keys to get a final URI value to query
     alert_uri = self._get_uri_from_structure(self.uri_property_keys)
 
-    logger.debug("[Alert][{0}] Calculated metric URI to be {1} (ssl={2})".format(
-      self.get_name(), alert_uri.uri, str(alert_uri.is_ssl_enabled)))
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug("[Alert][{0}] Calculated metric URI to be {1} (ssl={2})".format(
+        self.get_name(), alert_uri.uri, str(alert_uri.is_ssl_enabled)))
 
-    host = BaseAlert.get_host_from_url(alert_uri.uri)
+    host = inet_utils.get_host_from_url(alert_uri.uri)
     if host is None:
       host = self.host_name
 
@@ -81,10 +82,10 @@ class AmsAlert(MetricAlert):
 
     if isinstance(self.metric_info, AmsMetric):
       raw_data_points, http_code = self._load_metric(alert_uri.is_ssl_enabled, host, port, self.metric_info)
-      if not raw_data_points and http_code in [200, 307]:
+      if not raw_data_points and http_code not in [200, 307]:
         collect_result = self.RESULT_UNKNOWN
         value_list.append('HTTP {0} response (metrics unavailable)'.format(str(http_code)))
-      elif not raw_data_points and http_code not in [200, 307]:
+      elif not raw_data_points and http_code in [200, 307]:
         raise Exception("[Alert][{0}] Unable to extract JSON from HTTP response".format(self.get_name()))
       else:
 
@@ -94,7 +95,8 @@ class AmsAlert(MetricAlert):
 
         collect_result = self._get_result(value_list[0] if compute_result is None else compute_result)
 
-        logger.debug("[Alert][{0}] Computed result = {1}".format(self.get_name(), str(value_list)))
+        if logger.isEnabledFor(logging.DEBUG):
+          logger.debug("[Alert][{0}] Computed result = {1}".format(self.get_name(), str(value_list)))
 
     return (collect_result, value_list)
 
@@ -130,6 +132,8 @@ class AmsAlert(MetricAlert):
     except Exception, exception:
       if logger.isEnabledFor(logging.DEBUG):
         logger.exception("[Alert][{0}] Unable to retrieve metrics from AMS: {1}".format(self.get_name(), str(exception)))
+      status = response.status if 'response' in vars() else None
+      return (None, status)
     finally:
       if logger.isEnabledFor(logging.DEBUG):
         logger.debug("""
@@ -141,8 +145,7 @@ class AmsAlert(MetricAlert):
         try:
           conn.close()
         except:
-          logger.debug("[Alert][{0}] Unable to close URL connection to {1}".format
-                       (self.get_name(), url))
+          logger.debug("[Alert][{0}] Unable to close URL connection to {1}".format(self.get_name(), url))
     json_is_valid = True
     try:
       data_json = json.loads(data)

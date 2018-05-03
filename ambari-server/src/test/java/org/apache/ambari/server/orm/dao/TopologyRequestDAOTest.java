@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,11 +17,13 @@
  */
 package org.apache.ambari.server.orm.dao;
 
-import com.google.inject.Guice;
-import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
-import junit.framework.Assert;
+import java.sql.SQLException;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
 import org.apache.ambari.server.orm.OrmTestHelper;
@@ -31,9 +33,11 @@ import org.apache.ambari.server.orm.entities.TopologyRequestEntity;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+
+import com.google.inject.Guice;
+import com.google.inject.Injector;
+
+import junit.framework.Assert;
 
 public class TopologyRequestDAOTest {
   private Injector injector;
@@ -51,8 +55,8 @@ public class TopologyRequestDAOTest {
   }
 
   @After
-  public void teardown() throws AmbariException {
-    injector.getInstance(PersistService.class).stop();
+  public void teardown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
   private void create() {

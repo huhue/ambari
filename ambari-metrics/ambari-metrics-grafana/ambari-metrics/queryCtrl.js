@@ -31,6 +31,7 @@ define([
           $scope.aggregators = ['none','avg', 'sum', 'min', 'max'];
           $scope.precisions = ['default','seconds', 'minutes', 'hours', 'days'];
           $scope.transforms = ['none','diff','rate'];
+          $scope.seriesAggregators = ['none', 'avg', 'sum', 'min', 'max'];
 
           if (!$scope.target.aggregator) {
             $scope.target.aggregator = 'avg';
@@ -45,10 +46,16 @@ define([
                 $scope.target.transform = "none";
            }
           };
+          $scope.seriesAggregator = function () {
+           if (typeof $scope.target.seriesAggregator == 'undefined') {
+                $scope.target.seriesAggregator = "none";
+           }
+          };
           $scope.$watch('target.app', function (newValue) {
             if (newValue === '') {
               $scope.target.metric = '';
               $scope.target.hosts = '';
+              $scope.target.cluster = '';
             }
           });
           if (!$scope.target.downsampleAggregator) {
@@ -80,8 +87,14 @@ define([
             .then(callback);
         };
 
+        $scope.suggestClusters = function(query, callback) {
+          $scope.datasource.suggestClusters($scope.target.app)
+            .then($scope.getTextValues)
+            .then(callback);
+        };
+
         $scope.suggestHosts = function(query, callback) {
-          $scope.datasource.suggestHosts(query, $scope.target.app)
+          $scope.datasource.suggestHosts($scope.target.app, $scope.target.cluster)
             .then($scope.getTextValues)
             .then(callback);
         };

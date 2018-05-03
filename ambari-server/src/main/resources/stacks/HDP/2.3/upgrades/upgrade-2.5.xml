@@ -16,14 +16,12 @@
    limitations under the License.
 -->
 
-
-<upgrade xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<upgrade xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="upgrade-pack.xsd">
   <target>2.5.*.*</target>
   <target-stack>HDP-2.5</target-stack>
-  <type>ROLLING</type>
   <skip-failures>false</skip-failures>
   <skip-service-check-failures>false</skip-service-check-failures>
-
+  <type>ROLLING</type>
   <prerequisite-checks>
     <!-- List of additional pre-req checks to run in addition to the required pre-reqs -->
     <check>org.apache.ambari.server.checks.HiveMultipleMetastoreCheck</check>
@@ -35,7 +33,11 @@
     <check>org.apache.ambari.server.checks.ServicesYarnWorkPreservingCheck</check>
     <check>org.apache.ambari.server.checks.YarnRMHighAvailabilityCheck</check>
     <check>org.apache.ambari.server.checks.YarnTimelineServerStatePreservingCheck</check>
-    <check>org.apache.ambari.server.checks.AtlasPresenceCheck</check>
+    <check>org.apache.ambari.server.checks.ServicePresenceCheck</check>
+    <check>org.apache.ambari.server.checks.RangerAuditDbCheck</check>
+
+    <!-- Specific to HDP 2.5, Storm is not rolling -->
+    <check>org.apache.ambari.server.checks.StormShutdownWarning</check>
 
     <configuration>
       <!-- Configuration properties for all pre-reqs including required pre-reqs -->
@@ -43,11 +45,11 @@
       <check-properties name="org.apache.ambari.server.checks.HiveDynamicServiceDiscoveryCheck">
         <property name="min-failure-stack-version">HDP-2.3.0.0</property>
       </check-properties>
+      <check-properties name="org.apache.ambari.server.checks.ServicePresenceCheck">
+        <property name="no-upgrade-support-service-names">Atlas</property>
+      </check-properties>
     </configuration>
   </prerequisite-checks>
-
-  <skip-failures>false</skip-failures>
-  <skip-service-check-failures>false</skip-service-check-failures>
 
   <!-- Instructs the upgrade pack how to build the configuration pack -->
   <upgrade-path>
@@ -100,11 +102,10 @@
 
       <execute-stage service="RANGER" component="RANGER_ADMIN" title="Pre Upgrade Ranger Backup">
         <task xsi:type="manual">
-          <message>Before continuing, please backup the Ranger Admin database and Ranger Audit database.
-                If audit database size is too large( > 3GB ) then follow the below instructions:
-                1. Backup the audit table from audit database.
-                2. Truncate audit table.
-                3. Follow upgrade process and once completed then restore audit data to audit table.</message>
+          <message>Before continuing, please backup the Ranger Admin database and Ranger Audit database. If audit database size is too large( > 3GB ) then follow the below instructions:</message>
+          <message>1. Backup the audit table from audit database.</message>
+          <message>2. Truncate audit table.</message>
+          <message>3. Follow upgrade process and once completed then restore audit data to audit table.</message>
         </task>
       </execute-stage>
 
@@ -116,6 +117,7 @@
     </group>
 
     <group name="ZOOKEEPER" title="ZooKeeper">
+      <supports-auto-skip-failure>false</supports-auto-skip-failure>
       <service name="ZOOKEEPER">
         <component>ZOOKEEPER_SERVER</component>
       </service>
@@ -130,12 +132,92 @@
       </service>
     </group>
 
+    <group xsi:type="cluster" name="UPDATE_RANGER_KMS_SITE" title="Update Ranger KMS Configuration">
+      <direction>UPGRADE</direction>
+      <skippable>true</skippable>
+      <execute-stage service="RANGER_KMS" component="RANGER_KMS_SERVER" title="Calculating Proxy Properties under kms-site">
+        <condition xsi:type="security" type="kerberos"/>
+        <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.RangerKmsProxyConfig">
+          <summary>Adding Ranger proxy user properties under kms-site</summary>
+        </task>
+      </execute-stage>
+    </group>
+
     <group name="RANGER_KMS" title="Ranger_KMS">
       <skippable>true</skippable>
       <supports-auto-skip-failure>false</supports-auto-skip-failure>
       <service name="RANGER_KMS">
         <component>RANGER_KMS_SERVER</component>
       </service>
+    </group>
+
+    <group name="KAFKA" title="Kafka">
+      <skippable>true</skippable>
+      <service name="KAFKA">
+        <component>KAFKA_BROKER</component>
+      </service>
+    </group>
+
+    <group xsi:type="cluster" name="HBASE" title="Update HBase Configuration">
+      <skippable>true</skippable>
+
+      <execute-stage service="HBASE" component="HBASE_MASTER" title="Update HBase Configuration">
+        <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.HBaseEnvMaxDirectMemorySizeAction">
+          <summary>Update HBase Env Configuration</summary>
+        </task>
+      </execute-stage>
+
+    </group>
+
+    <!-- This group should exist for all RUs that cross a major stack version. -->
+    <group xsi:type="cluster" name="UPDATE_CLIENT_CONFIGS" title="Update Client Configs">
+      <direction>UPGRADE</direction>
+      <execute-stage service="TEZ" component="TEZ_CLIENT" title="Update tez.lib.uris">
+        <task xsi:type="configure" id="hdp_2_5_0_0_tez_client_adjust_tez_lib_uris_property"/>
+      </execute-stage>
+
+      <execute-stage service="TEZ" component="TEZ_CLIENT" title="Verify LZO codec path for Tez">
+        <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.FixLzoCodecPath">
+          <summary>Verifying LZO codec path for Tez</summary>
+        </task>
+      </execute-stage>
+    </group>
+
+    <!-- This needs to be done for every Rolling Upgrade pack that changes configurations. -->
+    <group xsi:type="cluster" name="CONFIGURE_CLIENT_DEPENDENCIES" title="Write client configs">
+      <direction>UPGRADE</direction>
+      <skippable>true</skippable>
+      <supports-auto-skip-failure>false</supports-auto-skip-failure>
+
+      <execute-stage service="MAPREDUCE2" component="MAPREDUCE2_CLIENT" title="Write Mapreduce2 Client configs">
+        <task xsi:type="execute">
+          <script>scripts/mapreduce2_client.py</script>
+          <function>stack_upgrade_save_new_config</function>
+        </task>
+      </execute-stage>
+      <execute-stage service="TEZ" component="TEZ_CLIENT" title="Write Tez Client configs">
+        <task xsi:type="execute">
+          <script>scripts/tez_client.py</script>
+          <function>stack_upgrade_save_new_config</function>
+        </task>
+      </execute-stage>
+      <execute-stage service="SPARK" component="SPARK_CLIENT" title="Write Spark Client configs">
+        <task xsi:type="execute">
+          <script>scripts/spark_client.py</script>
+          <function>stack_upgrade_save_new_config</function>
+        </task>
+      </execute-stage>
+    </group>
+
+    <!--
+    After processing this group, the user-specified Kerberos descriptor will be updated to work with
+    the new stack-level Kerberos descriptor.
+    -->
+    <group xsi:type="cluster" name="UPDATE_KERBEROS_DESCRIPTORS" title="Update Kerberos Descriptors">
+      <condition xsi:type="security" type="kerberos"/>
+      <execute-stage title="Update the user-specified Kerberos descriptor">
+        <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.UpgradeUserKerberosDescriptor"/>
+      </execute-stage>
     </group>
 
     <group name="CORE_MASTER" title="Core Masters">
@@ -160,9 +242,9 @@
       </service>
     </group>
 
-    <group name="SERVICE_CHECK" title="All Service Checks" xsi:type="service-check">
-      <skippable>true</skippable>
+    <group name="SERVICE_CHECK_1" title="All Service Checks" xsi:type="service-check">
       <direction>UPGRADE</direction>
+      <skippable>true</skippable>
       <priority>
         <service>ZOOKEEPER</service>
         <service>HDFS</service>
@@ -177,10 +259,11 @@
     </group>
 
     <group name="CORE_SLAVES" title="Core Slaves" xsi:type="colocated">
-      <skippable>true</skippable>
       <service-check>false</service-check>
+      <skippable>true</skippable>
       <service name="HDFS">
         <component>DATANODE</component>
+        <component>NFS_GATEWAY</component>
       </service>
 
       <service name="HBASE">
@@ -199,9 +282,9 @@
       </batch>
     </group>
 
-    <group name="SERVICE_CHECK" title="All Service Checks" xsi:type="service-check">
-      <skippable>true</skippable>
+    <group name="SERVICE_CHECK_2" title="All Service Checks" xsi:type="service-check">
       <direction>UPGRADE</direction>
+      <skippable>true</skippable>
       <priority>
         <service>ZOOKEEPER</service>
         <service>HDFS</service>
@@ -317,9 +400,9 @@
       </service>
     </group>
 
-    <group name="SERVICE_CHECK" title="All Service Checks" xsi:type="service-check">
-      <skippable>true</skippable>
+    <group name="SERVICE_CHECK_3" title="All Service Checks" xsi:type="service-check">
       <direction>UPGRADE</direction>
+      <skippable>true</skippable>
       <priority>
         <service>ZOOKEEPER</service>
         <service>HDFS</service>
@@ -332,13 +415,6 @@
       </exclude>
     </group>
 
-    <group name="KAFKA" title="Kafka">
-      <skippable>true</skippable>
-      <service name="KAFKA">
-        <component>KAFKA_BROKER</component>
-      </service>
-    </group>
-
     <group name="KNOX" title="Knox">
       <skippable>true</skippable>
       <service name="KNOX">
@@ -346,7 +422,43 @@
       </service>
     </group>
 
-    <group name="STORM" title="Storm">
+    <!-- Storm package names changed causing an incompatibility between versions; we must
+    shut all daemons down before deleting ZooKeeper/local data. -->
+    <group xsi:type="cluster" name="STOP_STORM_WARNING" title="Deactivate Storm Topologies">
+      <direction>UPGRADE</direction>
+      <supports-auto-skip-failure>false</supports-auto-skip-failure>
+      <execute-stage service="STORM" component="NIMBUS" title="Deactivate Storm Topologies">
+        <task xsi:type="manual">
+          <message>Before continuing, please deactivate and kill any currently running topologies.</message>
+        </task>
+      </execute-stage>
+    </group>
+
+    <group xsi:type="stop" name="STOP_STORM_UPGRADE" title="Stop Storm Services">
+      <direction>UPGRADE</direction>
+      <service-check>false</service-check>
+      <skippable>true</skippable>
+      <service name="STORM">
+        <component>NIMBUS</component>
+        <component>SUPERVISOR</component>
+        <component>STORM_UI_SERVER</component>
+        <component>DRPC_SERVER</component>
+      </service>
+    </group>
+
+    <group xsi:type="restart" name="RESTART_STORM" title="Restart Storm Services">
+      <skippable>true</skippable>
+      <service name="STORM">
+        <component>NIMBUS</component>
+        <component>SUPERVISOR</component>
+        <component>STORM_UI_SERVER</component>
+        <component>DRPC_SERVER</component>
+      </service>
+    </group>
+
+    <group xsi:type="stop" name="STOP_STORM_DOWNGRADE" title="Stop Storm Services">
+      <direction>DOWNGRADE</direction>
+      <service-check>false</service-check>
       <skippable>true</skippable>
       <service name="STORM">
         <component>NIMBUS</component>
@@ -383,6 +495,7 @@
     </group>
 
     <group xsi:type="cluster" name="ALL_HOST_OPS" title="Finalize Hosts">
+      <scope>COMPLETE</scope>
       <execute-stage title="Update remaining HDP stack to {{version}}">
         <task xsi:type="execute">
           <script>scripts/ru_set_all.py</script>
@@ -410,6 +523,34 @@
         </task>
       </execute-stage>
 
+      <execute-stage service="RANGER" component="RANGER_ADMIN" title="Ranger Kerberos Keytab Check">
+        <condition xsi:type="security" type="kerberos"/>
+        <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.KerberosKeytabsAction">
+          <summary>Ranger Kerberos Keytab Check</summary>
+          <message>Please follow below steps to complete upgrade in kerberos environment</message>
+          <message>-- If keytabs are managed by Ambari, Perform Regenerate Keytabs for missing components to get Ranger keytabs and restart Ranger components.</message>
+          <message>-- If keytabs are managed manually, create the required ranger keytabs in the locations specified in ranger config and restart Ranger components.</message>
+        </task>
+      </execute-stage>
+      
+      <execute-stage service="KAFKA" component="KAFKA_BROKER" title="Kafka Property Removal">
+        <task xsi:type="manual">
+          <message>Kafka Brokers have been upgraded with version compatability.</message>
+          <message>Config property "inter.broker.protocol.version" should be removed at your convenience.</message>
+          <message>Config property "log.message.format.version" should be removed when all clients have been upgraded.</message>
+        </task>
+      </execute-stage>
+
+      <execute-stage service="HBASE" component="HBASE_MASTER" title="Delete HBase snapshots">
+        <direction>UPGRADE</direction>
+        <task xsi:type="manual">
+          <message>You can now remove any HBase snapshots which were created at the beginning of the upgrade. To see existing snapshots, use the following HBase shell command:</message>
+          <message>hbase> list_snapshots</message>
+          <message>Once you have found an existing snapshot which you would like to remove, you can use the following command:</message>
+          <message>hbase> delete_snapshot 'snapshotName'</message>
+        </task>
+      </execute-stage>
+
       <execute-stage service="HDFS" component="NAMENODE" title="Execute HDFS Finalize">
         <task xsi:type="execute" hosts="master">
           <script>scripts/namenode.py</script>
@@ -417,7 +558,7 @@
         </task>
       </execute-stage>
 
-      <execute-stage title="Save Cluster State" service="" component="">
+      <execute-stage title="Save Cluster State">
         <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.FinalizeUpgradeAction" />
       </execute-stage>
 
@@ -427,6 +568,10 @@
   <processing>
     <service name="ZOOKEEPER">
       <component name="ZOOKEEPER_SERVER">
+        <pre-upgrade>
+          <task xsi:type="configure" id="zookeeper_log4j_parameterize" />
+        </pre-upgrade>
+        <pre-downgrade/>
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -442,40 +587,51 @@
     <service name="RANGER">
       <component name="RANGER_ADMIN">
         <pre-upgrade>
+          <task xsi:type="execute" hosts="all">
+            <summary>Stop Ranger Admin</summary>
+            <script>scripts/ranger_admin.py</script>
+            <function>stop</function>
+          </task>
+
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_audit_db_flag" />
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_audit_db_admin_properties" />
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_audit_db_ranger_admin_site" />
+          <task xsi:type="configure" id="hdp_2_5_0_0_remove_sso_property" />
+          <task xsi:type="configure" id="hdp_2_5_0_0_set_external_solrCloud_flag"/>
 
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Upgrading Ranger database schema">
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.RangerKerberosConfigCalculation">
+            <summary>Calculating Ranger Properties</summary>
+          </task>
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.RangerWebAlertConfigAction">
+            <summary>Configuring Ranger Alerts</summary>
+          </task>
+
+          <task xsi:type="execute" hosts="all">
+            <script>scripts/ranger_admin.py</script>
+            <function>set_pre_start</function>
+          </task>
+
+          <task xsi:type="execute" hosts="any">
+            <summary>Upgrading Ranger database schema</summary>
             <script>scripts/ranger_admin.py</script>
             <function>setup_ranger_database</function>
+          </task>
+
+          <task xsi:type="configure_function" hosts="all" />
+
+          <task xsi:type="execute" hosts="any">
+            <summary>Applying Ranger java patches</summary>
+            <script>scripts/ranger_admin.py</script>
+            <function>setup_ranger_java_patches</function>
           </task>
         </pre-upgrade>
 
-        <pre-downgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Downgrading Ranger database schema">
-            <script>scripts/ranger_admin.py</script>
-            <function>setup_ranger_database</function>
-          </task>
-        </pre-downgrade>
+        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
 
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
 
-        <post-upgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Applying Ranger java patches">
-            <script>scripts/ranger_admin.py</script>
-            <function>setup_ranger_java_patches</function>
-          </task>
-        </post-upgrade>
-
-        <post-downgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Applying Ranger java patches">
-            <script>scripts/ranger_admin.py</script>
-            <function>setup_ranger_java_patches</function>
-          </task>
-        </post-downgrade>
       </component>
 
       <component name="RANGER_USERSYNC">
@@ -483,21 +639,24 @@
           <task xsi:type="restart-task" />
         </upgrade>
       </component>
+
     </service>
 
     <service name="RANGER_KMS">
       <component name="RANGER_KMS_SERVER">
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_ranger_kms_audit_db" />
-
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Upgrading Ranger KMS database schema">
+          <task xsi:type="configure" id="kms_log4j_parameterize" />
+          <task xsi:type="execute" hosts="any" sequential="true">
+            <summary>Upgrading Ranger KMS database schema</summary>
             <script>scripts/kms_server.py</script>
             <function>setup_ranger_kms_database</function>
           </task>
         </pre-upgrade>
 
         <pre-downgrade>
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Downgrading Ranger KMS database schema">
+          <task xsi:type="execute" hosts="any" sequential="true">
+            <summary>Downgrading Ranger KMS database schema</summary>
             <script>scripts/kms_server.py</script>
             <function>setup_ranger_kms_database</function>
           </task>
@@ -511,15 +670,17 @@
 
     <service name="HDFS">
       <component name="NAMENODE">
-        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
-
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_4_0_0_namenode_ha_adjustments"/>
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_ranger_hdfs_audit_db" />
+          <task xsi:type="configure" id="hdfs_log4j_parameterize" />
+          <task xsi:type="configure" id="hdfs_namenode_prevent_gc_heuristics"/>
         </pre-upgrade>
 
+        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
+
         <upgrade>
-          <task xsi:type="restart-task" />
+          <task xsi:type="restart-task" timeout-config="upgrade.parameter.nn-restart.timeout"/>
         </upgrade>
       </component>
 
@@ -529,7 +690,17 @@
         </upgrade>
       </component>
 
+      <component name="NFS_GATEWAY">
+        <upgrade>
+          <task xsi:type="restart-task" />
+        </upgrade>
+      </component>
+
       <component name="HDFS_CLIENT">
+        <pre-upgrade>
+          <task xsi:type="configure" id="hdfs_user_agent" />
+        </pre-upgrade>
+        <pre-downgrade />
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -559,8 +730,12 @@
 
       <component name="MAPREDUCE2_CLIENT">
         <pre-upgrade>
-          <task xsi:type="server_action" summary="Verifying LZO codec path for mapreduce" class="org.apache.ambari.server.serveraction.upgrades.FixLzoCodecPath"/>
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.FixLzoCodecPath">
+            <summary>Verifying LZO codec path for mapreduce</summary>
+          </task>
         </pre-upgrade>
+        
+        <pre-downgrade copy-upgrade="true" />
 
         <upgrade>
           <task xsi:type="restart-task" />
@@ -579,7 +754,10 @@
 
       <component name="RESOURCEMANAGER">
         <pre-upgrade>
-          <task xsi:type="server_action" summary="Calculating Yarn Properties for Spark Shuffle" class="org.apache.ambari.server.serveraction.upgrades.SparkShufflePropertyConfig" />
+          <task xsi:type="configure" id="yarn_log4j_parameterize" />
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.SparkShufflePropertyConfig">
+            <summary>Calculating Yarn Properties for Spark Shuffle</summary>
+          </task>
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_ranger_yarn_audit_db" />
         </pre-upgrade>
         <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
@@ -590,6 +768,12 @@
       </component>
 
       <component name="NODEMANAGER">
+        <pre-upgrade>
+          <task xsi:type="configure" id="hdp_2_5_0_0_add_spark2_yarn_shuffle"/>
+        </pre-upgrade>
+
+        <pre-downgrade/>
+
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -608,6 +792,7 @@
           <!-- These HBASE configs changed in HDP 2.3.4.0, but Ambari can't distinguish HDP 2.3.2.0 vs HDP 2.3.4.0, so easier to always do them. -->
           <task xsi:type="configure" id="hdp_2_4_0_0_hbase_remove_local_indexing"/>
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_ranger_hbase_audit_db" />
+          <task xsi:type="configure" id="hbase_log4j_parameterize" />
         </pre-upgrade>
 
         <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
@@ -638,11 +823,6 @@
 
     <service name="TEZ">
       <component name="TEZ_CLIENT">
-        <pre-upgrade>
-          <task xsi:type="configure" id="hdp_2_5_0_0_tez_client_adjust_tez_lib_uris_property"/>
-
-          <task xsi:type="server_action" summary="Verifying LZO codec path for Tez" class="org.apache.ambari.server.serveraction.upgrades.FixLzoCodecPath"/>
-        </pre-upgrade>
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -667,6 +847,17 @@
 
     <service name="SQOOP">
       <component name="SQOOP">
+        <pre-upgrade>
+          <!-- Remove Atlas configs that were incorrectly added to sqoop-site instead of Atlas' application.properties. -->
+          <task xsi:type="configure" id="hdp_2_5_0_0_remove_sqoop_atlas_configs" />
+
+          <!-- If cluster is Kerberized, add configs to sqoop-atlas-application.properties,
+          which will be written to the local file system if Atlas is present. -->
+          <task xsi:type="configure" id="hdp_2_5_0_0_add_sqoop_atlas_security_configs" />
+        </pre-upgrade>
+
+        <pre-downgrade/> <!--  no-op to prevent config changes on downgrade -->
+
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -682,24 +873,20 @@
 
       <component name="HIVE_SERVER">
         <pre-upgrade>
-          <task xsi:type="manual">
-            <summary>HiveServer Port Availability</summary>
-            <message>Please note that the HiveServer port will now change to 10010 if Hive is using a binary transfer mode or 10011 if Hive is using an http transport mode. You can use "netstat -anp | grep 1001[01]" to determine if the port is available on each of following HiveServer host(s): {{hosts.all}}. If the port is not available, the process using it must be terminated.</message>
-          </task>
-
-          <task xsi:type="configure" id="hdp_2_5_0_0_hive_server_set_transport_mode"/>
           <task xsi:type="configure" id="hdp_2_4_0_0_hive_server_configure_authentication"/>
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_ranger_hive_audit_db" />
+          <task xsi:type="configure" id="hive_log4j_parameterize" />
+          <task xsi:type="configure" id="hdp_2_5_0_0_remove_atlas_cluster_name" />
+
+          <!-- Remove Atlas configs that were incorrectly added to hive-site instead of Atlas' application.properties. -->
+          <task xsi:type="configure" id="hdp_2_5_0_0_remove_hive_atlas_configs" />
+
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.HiveEnvClasspathAction">
+            <summary>Update hive-env content</summary>
+          </task>
         </pre-upgrade>
 
-        <pre-downgrade>
-          <task xsi:type="manual">
-            <summary>HiveServer Port Availability</summary>
-            <message>Please note that the HiveServer port will now change to 10000 if Hive is using a binary transfer mode or 10001 if Hive is using an http transport mode. You can use "netstat -anp | grep 1000[01]" to determine if the port is available on each of following HiveServer host(s): {{hosts.all}}. If the port is not available, the process using it must be terminated.</message>
-          </task>
-
-          <task xsi:type="configure" id="hdp_2_5_0_0_hive_server_restore_transport_mode_on_downgrade"/>
-        </pre-downgrade>
+        <pre-downgrade/>
 
         <upgrade>
           <task xsi:type="restart-task" />
@@ -709,7 +896,10 @@
       <component name="WEBHCAT_SERVER">
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_5_0_0_webhcat_server_update_configuration_paths"/>
+          <task xsi:type="configure" id="webhcat_log4j_parameterize"/>
         </pre-upgrade>
+        
+        <pre-downgrade />
 
         <upgrade>
           <task xsi:type="restart-task" />
@@ -727,7 +917,7 @@
           <task xsi:type="restart-task" />
         </upgrade>
       </component>
-    </service>
+   </service>
 
     <service name="SLIDER">
       <component name="SLIDER">
@@ -739,24 +929,37 @@
 
     <service name="SPARK">
       <component name="SPARK_JOBHISTORYSERVER">
-        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_4_0_0_spark_jobhistoryserver"/>
+          <task xsi:type="configure" id="hdp_2_4_0_0_spark_java_opts"/>
         </pre-upgrade>
+        
+        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
+        
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
       </component>
       <component name="SPARK_THRIFTSERVER">
-        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_4_0_0_spark_thriftserver"/>
+          <task xsi:type="configure" id="hdp_2_4_0_0_spark_java_opts"/>
         </pre-upgrade>
+        
+        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
+        
         <upgrade>
           <task xsi:type="restart-task"/>
         </upgrade>
       </component>
       <component name="SPARK_CLIENT">
+        <pre-upgrade>
+          <task xsi:type="configure" id="hdp_2_4_0_0_remove_spark_properties_extraJavaOptions"/>
+          <task xsi:type="configure" id="hdp_2_4_0_0_spark_java_opts"/>
+        </pre-upgrade>
+
+        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
+
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -767,10 +970,13 @@
       <component name="OOZIE_SERVER">
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_4_0_0_oozie_remove_service_classes" />
+          <task xsi:type="configure" id="oozie_log4j_parameterize" />
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.OozieConfigCalculation">
+            <summary>Adjusting Oozie properties</summary>
+          </task>
 
-          <task xsi:type="server_action" summary="Adjusting Oozie properties" class="org.apache.ambari.server.serveraction.upgrades.OozieConfigCalculation"/>
-
-          <task xsi:type="execute" hosts="all" sequential="true" summary="Shut down all Oozie servers">
+          <task xsi:type="execute" hosts="all" sequential="true">
+            <summary>Shut down all Oozie servers</summary>
             <script>scripts/oozie_server.py</script>
             <function>stop</function>
           </task>
@@ -778,19 +984,25 @@
           <!-- It is extremely important that both of these tasks run on the exact same host. Hence, pick the first alphabetically. -->
           <task xsi:type="configure_function" hosts="first" />
 
-          <task xsi:type="execute" hosts="first" sequential="true" summary="Upgrading the Oozie database and creating a new sharelib">
+          <task xsi:type="execute" hosts="first" sequential="true">
+            <summary>Upgrading the Oozie database and creating a new sharelib</summary>
             <script>scripts/oozie_server_upgrade.py</script>
             <function>upgrade_oozie_database_and_sharelib</function>
+          </task>
+          <task xsi:type="server_action" class="org.apache.ambari.server.serveraction.upgrades.FixOozieAdminUsers">
+            <summary>Fixing Oozie admin users</summary>
           </task>
         </pre-upgrade>
 
         <pre-downgrade>
-          <task xsi:type="execute" hosts="all" sequential="true" summary="Shut down all Oozie servers">
+          <task xsi:type="execute" hosts="all" sequential="true">
+            <summary>Shut down all Oozie servers</summary>
             <script>scripts/oozie_server.py</script>
             <function>stop</function>
           </task>
 
-          <task xsi:type="execute" hosts="any" sequential="true" summary="Create a new sharelib">
+          <task xsi:type="execute" hosts="any" sequential="true">
+            <summary>Create a new sharelib</summary>
             <script>scripts/oozie_server_upgrade.py</script>
             <function>create_sharelib</function>
           </task>
@@ -810,6 +1022,11 @@
 
     <service name="FALCON">
       <component name="FALCON_SERVER">
+        <pre-upgrade>
+          <task xsi:type="configure" id="hdp_2_5_0_0_falcon_server_adjust_services_property"/>
+          <task xsi:type="configure" id="falcon_log4j_parameterize" />
+        </pre-upgrade>
+        <pre-downgrade/>
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
@@ -824,9 +1041,12 @@
     <service name="KAFKA">
       <component name="KAFKA_BROKER">
         <pre-upgrade>
-          <task xsi:type="configure" id ="hdp_2_4_0_0_kafka_broker_deprecate_port"/>
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_ranger_kafka_audit_db" />
+          <task xsi:type="configure" id="hdp_2_5_0_0_add_protocol_compatibility" />
+          <task xsi:type="configure" id="kafka_log4j_parameterize" />
         </pre-upgrade>
+        
+        <pre-downgrade/>
 
         <upgrade>
           <task xsi:type="restart-task" />
@@ -836,10 +1056,13 @@
 
     <service name="KNOX">
       <component name="KNOX_GATEWAY">
-        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_ranger_knox_audit_db" />
+          <task xsi:type="configure" id="knox_gateway_log4j_parameterize" />
+          <task xsi:type="configure" id="knox_ldap_log4j_parameterize" />
         </pre-upgrade>
+        
+        <pre-downgrade /> <!--  no-op to prevent config changes on downgrade -->
 
         <upgrade>
           <task xsi:type="restart-task" />
@@ -851,30 +1074,112 @@
       <component name="NIMBUS">
         <pre-upgrade>
           <task xsi:type="configure" id="hdp_2_5_0_0_remove_ranger_storm_audit_db" />
+          <task xsi:type="configure" id="hdp_2_5_0_0_upgrade_storm_1.0"/>
+
+          <!-- Remove Atlas configs that were incorrectly added to storm-site instead of Atlas' application.properties. -->
+          <task xsi:type="configure" id="hdp_2_5_0_0_remove_storm_atlas_configs" />
+
+          <task xsi:type="configure" id="hdp_2_3_0_0_remove_empty_storm_topology_submission_notifier_plugin_class"/>
+
+          <task xsi:type="configure" id="increase_storm_zookeeper_timeouts"/>
+
+          <task xsi:type="execute" hosts="any">
+            <summary>Removing Storm data from ZooKeeper</summary>
+            <script>scripts/storm_upgrade.py</script>
+            <function>delete_storm_zookeeper_data</function>
+          </task>
+
+          <task xsi:type="execute">
+            <summary>Removing local Storm data</summary>
+            <script>scripts/storm_upgrade.py</script>
+            <function>delete_storm_local_data</function>
+          </task>
+          <task xsi:type="configure" id="hdp_2_5_0_0_add_storm_security_configs" />
+          <task xsi:type="configure" id="storm_worker_log4j_parameterize" />
+          <task xsi:type="configure" id="storm_cluster_log4j_parameterize" />
+          <task xsi:type="configure" id="storm_worker_log4j_directory" />
         </pre-upgrade>
+
+        <pre-downgrade>
+          <task xsi:type="execute" hosts="any">
+            <summary>Removing Storm data from ZooKeeper</summary>
+            <script>scripts/storm_upgrade.py</script>
+            <function>delete_storm_zookeeper_data</function>
+          </task>
+
+          <task xsi:type="execute">
+            <summary>Removing local Storm data</summary>
+            <script>scripts/storm_upgrade.py</script>
+            <function>delete_storm_local_data</function>
+          </task>
+        </pre-downgrade>
+
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
       </component>
-      <component name="STORM_REST_API">
-        <upgrade>
-          <task xsi:type="restart-task" />
-        </upgrade>
-      </component>
+
       <component name="SUPERVISOR">
+        <pre-upgrade>
+          <task xsi:type="execute">
+            <summary>Removing local Storm data</summary>
+            <script>scripts/storm_upgrade.py</script>
+            <function>delete_storm_local_data</function>
+          </task>
+        </pre-upgrade>
+
+        <pre-downgrade>
+          <task xsi:type="execute">
+            <summary>Removing local Storm data</summary>
+            <script>scripts/storm_upgrade.py</script>
+            <function>delete_storm_local_data</function>
+          </task>
+        </pre-downgrade>
+
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
       </component>
+
       <component name="STORM_UI_SERVER">
+        <pre-upgrade>
+          <task xsi:type="execute">
+            <summary>Removing local Storm data</summary>
+            <script>scripts/storm_upgrade.py</script>
+            <function>delete_storm_local_data</function>
+          </task>
+        </pre-upgrade>
+        
+        <pre-downgrade copy-upgrade="true" />
+
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
       </component>
+
       <component name="DRPC_SERVER">
+        <pre-upgrade>
+          <task xsi:type="execute">
+            <summary>Removing local Storm data</summary>
+            <script>scripts/storm_upgrade.py</script>
+            <function>delete_storm_local_data</function>
+          </task>
+        </pre-upgrade>
+
+        <pre-downgrade copy-upgrade="true" />
+
         <upgrade>
           <task xsi:type="restart-task" />
         </upgrade>
+
+        <post-upgrade>
+          <task xsi:type="manual">
+            <message>Please rebuild your topology using the new Storm version dependencies and resubmit it using the newly created jar.</message>
+          </task>
+        </post-upgrade>
+        
+        <post-downgrade copy-upgrade="true" />
+        
       </component>
     </service>
 
@@ -918,5 +1223,18 @@
         </upgrade>
       </component>
     </service>
+
+    <service name="ATLAS">
+    <component name="ATLAS_SERVER">
+      <pre-upgrade>
+        <task xsi:type="configure" id="atlas_log4j_parameterize" />
+      </pre-upgrade>
+      <pre-downgrade />
+      <upgrade>
+        <task xsi:type="restart-task" />
+      </upgrade>
+    </component>
+    </service>
+
   </processing>
 </upgrade>

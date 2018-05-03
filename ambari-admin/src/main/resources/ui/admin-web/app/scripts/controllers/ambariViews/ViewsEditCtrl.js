@@ -18,12 +18,12 @@
 'use strict';
 
 angular.module('ambariAdminConsole')
-  .controller('ViewsEditCtrl', ['$scope', '$routeParams', 'RemoteCluster', 'Cluster', 'View', 'Alert', 'PermissionLoader', 'PermissionSaver', 'ConfirmationModal', '$location', 'UnsavedDialog', '$translate', function($scope, $routeParams, RemoteCluster, Cluster, View, Alert, PermissionLoader, PermissionSaver, ConfirmationModal, $location, UnsavedDialog, $translate) {
+  .controller('ViewsEditCtrl', ['$scope','$route', '$templateCache', '$routeParams', 'RemoteCluster', 'Cluster', 'View', 'Alert', 'PermissionLoader', 'PermissionSaver', 'ConfirmationModal', '$location', 'UnsavedDialog', '$translate', function($scope, $route, $templateCache , $routeParams, RemoteCluster, Cluster, View, Alert, PermissionLoader, PermissionSaver, ConfirmationModal, $location, UnsavedDialog, $translate) {
     var $t = $translate.instant;
     $scope.identity = angular.identity;
     $scope.isConfigurationEmpty = true;
     $scope.isSettingsEmpty = true;
-    $scope.clusterInheritedPermissionKeys = View.clusterInheritedPermissionKeys;
+    $scope.permissionRoles = View.permissionRoles;
     $scope.constants = {
       instance: $t('views.instance'),
       props: $t('views.properties'),
@@ -35,6 +35,7 @@ angular.module('ambariAdminConsole')
       View.getInstance($routeParams.viewId, $routeParams.version, $routeParams.instanceId)
         .then(function(instance) {
           $scope.instance = instance;
+          $scope.viewUrl = instance.ViewInstanceInfo.view_name + '/' + instance.ViewInstanceInfo.version + '/' + instance.ViewInstanceInfo.instance_name;
           $scope.settings = {
             'visible': $scope.instance.ViewInstanceInfo.visible,
             'label': $scope.instance.ViewInstanceInfo.label,
@@ -63,14 +64,27 @@ angular.module('ambariAdminConsole')
 
     function initCtrlVariables(instance) {
        $scope.data.clusterType = instance.ViewInstanceInfo.cluster_type;
+       var clusterId = instance.ViewInstanceInfo.cluster_handle;
+       if (!clusterId) $scope.data.clusterType = 'NONE';
        switch($scope.data.clusterType) {
           case 'LOCAL_AMBARI':
-            $scope.cluster = instance.ViewInstanceInfo.cluster_handle;
+            $scope.cluster = null;
+            $scope.clusters.forEach(function(cluster){
+              if(cluster.id == clusterId){
+                $scope.cluster = cluster;
+              }
+            })
             break;
           case 'REMOTE_AMBARI':
-            $scope.data.remoteCluster = instance.ViewInstanceInfo.cluster_handle;
+            $scope.data.remoteCluster = null;
+            $scope.remoteClusters.forEach(function(cluster){
+              if(cluster.id == clusterId){
+                $scope.data.remoteCluster = cluster;
+              }
+            })
             break;
        }
+
       $scope.originalClusterType = $scope.data.clusterType;
       $scope.isConfigurationEmpty = !$scope.numberOfClusterConfigs;
       $scope.isSettingsEmpty = !$scope.numberOfSettingsConfigs;
@@ -203,7 +217,10 @@ angular.module('ambariAdminConsole')
     Cluster.getAllClusters().then(function (clusters) {
       if(clusters.length >0){
         clusters.forEach(function(cluster) {
-          $scope.clusters.push(cluster.Clusters.cluster_name)
+          $scope.clusters.push({
+            "name" : cluster.Clusters.cluster_name,
+            "id" : cluster.Clusters.cluster_id
+          })
         });
         $scope.noLocalClusterAvailible = false;
       }else{
@@ -218,7 +235,10 @@ angular.module('ambariAdminConsole')
       RemoteCluster.listAll().then(function (clusters) {
         if(clusters.length >0){
           clusters.forEach(function(cluster) {
-            $scope.remoteClusters.push(cluster.ClusterInfo.name)
+            $scope.remoteClusters.push({
+              "name" : cluster.ClusterInfo.name,
+              "id" : cluster.ClusterInfo.cluster_id
+            })
           });
           $scope.noRemoteClusterAvailible = false;
           }else{
@@ -319,10 +339,11 @@ angular.module('ambariAdminConsole')
 
         switch($scope.data.clusterType) {
           case 'LOCAL_AMBARI':
-            data.ViewInstanceInfo.cluster_handle = $scope.cluster;
+            data.ViewInstanceInfo.cluster_handle = $scope.cluster.id;
             break;
           case 'REMOTE_AMBARI':
-            data.ViewInstanceInfo.cluster_handle = $scope.data.remoteCluster;
+            data.ViewInstanceInfo.cluster_handle = $scope.data.remoteCluster.id;
+            break;
             break;
           default :
             data.ViewInstanceInfo.cluster_handle = null;
@@ -331,7 +352,7 @@ angular.module('ambariAdminConsole')
                 data.ViewInstanceInfo.properties[element.name] = $scope.configuration[element.name];
               }
             });
-            $scope.clearClusterInheritedPermissions();
+            $scope.removeAllRolePermissions();
 
           }
 
@@ -396,9 +417,9 @@ angular.module('ambariAdminConsole')
         });
     };
 
-    $scope.clearClusterInheritedPermissions = function() {
-      angular.forEach(View.clusterInheritedPermissionKeys, function(key) {
-        $scope.permissionsEdit["VIEW.USER"][key] = false;
+    $scope.removeAllRolePermissions = function() {
+      angular.forEach(View.permissionRoles, function(key) {
+        $scope.permissionsEdit["VIEW.USER"]["ROLE"][key] = false;
       })
     };
 
@@ -429,6 +450,24 @@ angular.module('ambariAdminConsole')
           .catch(function(data) {
             Alert.error($t('views.alerts.cannotDeleteInstance'), data.data.message);
           });
+      });
+    };
+
+    $scope.deleteShortURL = function(shortUrlName) {
+      ConfirmationModal.show(
+        $t('common.delete', {
+          term: $t('urls.url')
+        }),
+        $t('common.deleteConfirmation', {
+          instanceType: $t('urls.url').toLowerCase(),
+          instanceName: '"' + shortUrlName + '"'
+        })
+      ).then(function() {
+        View.deleteUrl(shortUrlName).then(function() {
+          var currentPageTemplate = $route.current.templateUrl;
+          $templateCache.remove(currentPageTemplate);
+          $route.reload();
+        });
       });
     };
 
@@ -471,11 +510,9 @@ angular.module('ambariAdminConsole')
     };
 
     function setAllViewRoles(value) {
-      var viewRoles = $scope.permissionsEdit["VIEW.USER"];
+      var viewRoles = $scope.permissionsEdit["VIEW.USER"]["ROLE"];
       for (var role in viewRoles) {
-        if ($scope.clusterInheritedPermissionKeys.indexOf(role) !== -1) {
-          viewRoles[role] = value;
-        }
+        $scope.permissionsEdit["VIEW.USER"]["ROLE"][role] = value;
       }
     }
   }]);

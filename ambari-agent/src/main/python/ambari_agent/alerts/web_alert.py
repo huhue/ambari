@@ -21,9 +21,7 @@ limitations under the License.
 import logging
 import time
 import urllib2
-import ssl
 
-from functools import wraps
 from urllib2 import HTTPError
 
 from tempfile import gettempdir
@@ -33,19 +31,9 @@ from resource_management.libraries.functions.get_port_from_url import get_port_f
 from resource_management.libraries.functions.get_path_from_url import get_path_from_url
 from resource_management.libraries.functions.curl_krb_request import curl_krb_request
 from ambari_commons import OSCheck
-from ambari_commons.inet_utils import resolve_address
-from ambari_agent import Constants
-
-# hashlib is supplied as of Python 2.5 as the replacement interface for md5
-# and other secure hashes.  In 2.6, md5 is deprecated.  Import hashlib if
-# available, avoiding a deprecation warning under 2.6.  Import md5 otherwise,
-# preserving 2.4 compatibility.
-try:
-  import hashlib
-  _md5 = hashlib.md5
-except ImportError:
-  import md5
-  _md5 = md5.new
+from ambari_commons.inet_utils import resolve_address, ensure_ssl_using_protocol, get_host_from_url
+from ambari_commons.constants import AGENT_TMP_DIR
+from ambari_agent.AmbariConfig import AmbariConfig
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +42,10 @@ DEFAULT_CONNECTION_TIMEOUT = 5
 
 WebResponse = namedtuple('WebResponse', 'status_code time_millis error_msg')
 
-# patch ssl module to fix SSLv3 communication bug
-# for more info see http://stackoverflow.com/questions/9835506/urllib-urlopen-works-on-sslv3-urls-with-python-2-6-6-on-1-machine-but-not-wit
-def sslwrap(func):
-    @wraps(func)
-    def bar(*args, **kw):
-        kw['ssl_version'] = ssl.PROTOCOL_TLSv1
-        return func(*args, **kw)
-    return bar
-ssl.wrap_socket = sslwrap(ssl.wrap_socket)
+ensure_ssl_using_protocol(
+    AmbariConfig.get_resolved_config().get_force_https_protocol_name(),
+    AmbariConfig.get_resolved_config().get_ca_cert_file_path()
+)
 
 class WebAlert(BaseAlert):
 
@@ -93,7 +76,7 @@ class WebAlert(BaseAlert):
       raise Exception("Could not determine result. URL(s) were not defined.")
 
     # use the URI lookup keys to get a final URI value to query
-    alert_uri = self._get_uri_from_structure(self.uri_property_keys)      
+    alert_uri = self._get_uri_from_structure(self.uri_property_keys)
 
     logger.debug("[Alert][{0}] Calculated web URI to be {1} (ssl={2})".format(
       self.get_name(), alert_uri.uri, str(alert_uri.is_ssl_enabled)))
@@ -110,6 +93,10 @@ class WebAlert(BaseAlert):
 
     if status_code == 0:
       return (self.RESULT_CRITICAL, [status_code, url, time_seconds, error_message])
+
+    # check explicit listed codes
+    if self.uri_property_keys.acceptable_codes and status_code in self.uri_property_keys.acceptable_codes:
+      return (self.RESULT_OK, [status_code, url, time_seconds])
 
     # anything that's less than 400 is OK
     if status_code < 400:
@@ -135,7 +122,7 @@ class WebAlert(BaseAlert):
       uri_path = get_path_from_url(string_uri)
 
     # start building the URL manually
-    host = BaseAlert.get_host_from_url(alert_uri.uri)
+    host = get_host_from_url(alert_uri.uri)
     if host is None:
       host = self.host_name
 
@@ -174,8 +161,10 @@ class WebAlert(BaseAlert):
       kerberos_keytab = None
       kerberos_principal = None
 
+      configurations = self.configuration_builder.get_configuration(self.cluster_id, None, None)
+
       if self.uri_property_keys.kerberos_principal is not None:
-        kerberos_principal = self._get_configuration_value(
+        kerberos_principal = self._get_configuration_value(configurations,
           self.uri_property_keys.kerberos_principal)
 
         if kerberos_principal is not None:
@@ -183,22 +172,20 @@ class WebAlert(BaseAlert):
           kerberos_principal = kerberos_principal.replace('_HOST', self.host_name)
 
       if self.uri_property_keys.kerberos_keytab is not None:
-        kerberos_keytab = self._get_configuration_value(self.uri_property_keys.kerberos_keytab)
+        kerberos_keytab = self._get_configuration_value(configurations, self.uri_property_keys.kerberos_keytab)
 
-      security_enabled = self._get_configuration_value('{{cluster-env/security_enabled}}')
-      
+      security_enabled = self._get_configuration_value(configurations, '{{cluster-env/security_enabled}}')
+
       if kerberos_principal is not None and kerberos_keytab is not None \
         and security_enabled is not None and security_enabled.lower() == "true":
-        # Create the kerberos credentials cache (ccache) file and set it in the environment to use
-        # when executing curl. Use the md5 hash of the combination of the principal and keytab file
-        # to generate a (relatively) unique cache filename so that we can use it as needed.
-        tmp_dir = Constants.AGENT_TMP_DIR
+
+        tmp_dir = AGENT_TMP_DIR
         if tmp_dir is None:
           tmp_dir = gettempdir()
 
         # Get the configured Kerberos executables search paths, if any
-        kerberos_executable_search_paths = self._get_configuration_value('{{kerberos-env/executable_search_paths}}')
-        smokeuser = self._get_configuration_value('{{cluster-env/smokeuser}}')
+        kerberos_executable_search_paths = self._get_configuration_value(configurations, '{{kerberos-env/executable_search_paths}}')
+        smokeuser = self._get_configuration_value(configurations, '{{cluster-env/smokeuser}}')
 
         response_code, error_msg, time_millis = curl_krb_request(tmp_dir, kerberos_keytab, kerberos_principal, url,
           "web_alert", kerberos_executable_search_paths, True, self.get_name(), smokeuser,

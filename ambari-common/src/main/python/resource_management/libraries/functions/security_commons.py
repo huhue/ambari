@@ -22,10 +22,47 @@ from resource_management import Execute, File
 from tempfile import mkstemp
 import os
 import ambari_simplejson as json # simplejson is much faster comparing to Python 2.6 json module and has the same functions set.
+from resource_management.core.source import StaticFile
 
 FILE_TYPE_XML = 'XML'
 FILE_TYPE_PROPERTIES = 'PROPERTIES'
 FILE_TYPE_JAAS_CONF = 'JAAS_CONF'
+
+# The property name used by the hadoop credential provider
+HADOOP_CREDENTIAL_PROVIDER_PROPERTY_NAME = 'hadoop.security.credential.provider.path'
+
+# Copy JCEKS provider to service specific location and update the ACL
+def update_credential_provider_path(config, config_type, dest_provider_path, file_owner, file_group, use_local_jceks=False):
+  """
+  Copies the JCEKS file for the specified config from the default location to the given location,
+  and sets the ACLs for the specified owner and group. Also updates the config type's configuration
+  hadoop credential store provider with the copied file name.
+  :param config: configurations['configurations'][config_type]
+  :param config_type: Like hive-site, oozie-site, etc.
+  :param dest_provider_path: The full path to the file where the JCEKS provider file is to be copied to.
+  :param file_owner: File owner
+  :param file_group: Group
+  :return: A copy of the config that was modified or the input config itself if nothing was modified.
+  """
+  # Get the path to the provider <config_type>.jceks
+  if HADOOP_CREDENTIAL_PROVIDER_PROPERTY_NAME in config:
+    provider_path = config[HADOOP_CREDENTIAL_PROVIDER_PROPERTY_NAME]
+    src_provider_path = provider_path[len('jceks://file'):]
+    File(dest_provider_path,
+        owner = file_owner,
+        group = file_group,
+        mode = 0640,
+        content = StaticFile(src_provider_path)
+    )
+    # make a copy of the config dictionary since it is read-only
+    config_copy = config.copy()
+    # overwrite the provider path with the path specified
+    if use_local_jceks:
+      config_copy[HADOOP_CREDENTIAL_PROVIDER_PROPERTY_NAME] = 'localjceks://file{0}'.format(dest_provider_path)
+    else:
+      config_copy[HADOOP_CREDENTIAL_PROVIDER_PROPERTY_NAME] = 'jceks://file{0}'.format(dest_provider_path)
+    return config_copy
+  return config
 
 def validate_security_config_properties(params, configuration_rules):
   """
@@ -125,8 +162,13 @@ def get_params_from_filesystem(conf_dir, config_files):
   for config_file, file_type in config_files.iteritems():
     file_name, file_ext = os.path.splitext(config_file)
 
+    config_filepath = conf_dir + os.sep + config_file
+
+    if not os.path.isfile(config_filepath):
+      continue
+
     if file_type == FILE_TYPE_XML:
-      configuration = ET.parse(conf_dir + os.sep + config_file)
+      configuration = ET.parse(config_filepath)
       props = configuration.getroot().getchildren()
       config_file_id = file_name if file_name else config_file
       result[config_file_id] = {}
@@ -134,7 +176,7 @@ def get_params_from_filesystem(conf_dir, config_files):
         result[config_file_id].update({prop[0].text: prop[1].text})
 
     elif file_type == FILE_TYPE_PROPERTIES:
-      with open(conf_dir + os.sep + config_file, 'r') as f:
+      with open(config_filepath, 'r') as f:
         config_string = '[root]\n' + f.read()
       ini_fp = StringIO.StringIO(re.sub(r'\\\s*\n', '\\\n ', config_string))
       config = ConfigParser.RawConfigParser()
@@ -150,7 +192,7 @@ def get_params_from_filesystem(conf_dir, config_files):
       section_footer = re.compile('^\}\s*;?\s*$')
       section_name = "root"
       result[file_name] = {}
-      with open(conf_dir + os.sep + config_file, 'r') as f:
+      with open(config_filepath, 'r') as f:
         for line in f:
           if line:
             line = line.strip()
@@ -222,6 +264,10 @@ def new_cached_exec(key, file_path, kinit_path, temp_dir, exec_user, keytab_file
   os.close(temp_kinit_cache_fd)
 
   try:
+    # Ensure the proper user owns this file
+    File(temp_kinit_cache_filename, owner=exec_user, mode=0600)
+
+    # Execute the kinit
     Execute(command, user=exec_user)
 
     with open(file_path, 'w+') as cache_file:

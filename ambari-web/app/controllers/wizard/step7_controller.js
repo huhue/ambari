@@ -42,7 +42,7 @@ var App = require('app');
  * @property {?object[]} slaveComponentHosts
  */
 
-App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.EnhancedConfigsMixin, App.ToggleIsRequiredMixin, App.GroupsMappingMixin, {
+App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.EnhancedConfigsMixin, App.ToggleIsRequiredMixin, App.GroupsMappingMixin, App.AddSecurityConfigs, App.KDCCredentialsControllerMixin, {
 
   name: 'wizardStep7Controller',
 
@@ -65,10 +65,21 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   submitButtonClicked: false,
 
   isRecommendedLoaded: false,
+
+  /**
+   * Indicates if all stepConfig objects are created
+   */
+  stepConfigsCreated: false,
+
+  /**
+   * Define state of next button on credentials tab
+   */
+  credentialsTabNextEnabled: false,
+
   /**
    * used in services_config.js view to mark a config with security icon
    */
-  secureConfigs: require('data/HDP2/secure_mapping'),
+  secureConfigs: require('data/configs/wizards/secure_mapping'),
 
   /**
    * If configChangeObserver Modal is shown
@@ -78,11 +89,15 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
 
   overrideToAdd: null,
 
+  isInstaller: true, //todo: refactor using of this property
+
   /**
    * Is installer controller used
    * @type {bool}
    */
-  isInstaller: true,
+  isInstallWizard: function () {
+    return this.get('content.controllerName') === 'installerController';
+  }.property('content.controllerName'),
 
   /**
    * List of config groups
@@ -116,7 +131,32 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    */
   isAppliedConfigLoaded: true,
 
+  /**
+   * Is there validation issues
+   * @type {bool}
+   */
+  hasErrors: false,
+
+  /**
+   * Total number of recommendation and validation issues
+   * @type {number}
+   */
+  issuesCounter: 0,
+
+  /**
+   * Number of ui-side validation issues
+   * @type {number}
+   */
+  validationsCounter: 0,
+
+  /**
+   * Tab objects to represent each config category tab
+   */
+  tabs: [],
+
   isConfigsLoaded: Em.computed.and('wizardController.stackConfigsLoaded', 'isAppliedConfigLoaded'),
+
+  transitionInProgress: Em.computed.alias('App.router.btnClickInProgress'),
 
   /**
    * PreInstall Checks allowed only for Install
@@ -132,7 +172,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    */
   errorsCount: function() {
     return this.get('selectedService.configsWithErrors').filter(function(c) {
-      return Em.isNone(c.get('widget'));
+      return Em.isNone(c.get('isInDefaultTheme'));
     }).length;
   }.property('selectedService.configsWithErrors.length'),
 
@@ -143,8 +183,11 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   isSubmitDisabled: function () {
     if (!this.get('stepConfigs.length')) return true;
     if (this.get('submitButtonClicked')) return true;
-    return !this.get('stepConfigs').filterProperty('showConfig', true).everyProperty('errorCount', 0) || this.get("miscModalVisible");
-  }.property('stepConfigs.@each.errorCount', 'miscModalVisible', 'submitButtonClicked'),
+    if (App.get('router.btnClickInProgress')) return true;
+    return !this.get('stepConfigs').filterProperty('showConfig', true).everyProperty('errorCount', 0)
+      || this.get("miscModalVisible")
+      || !!this.get('configErrorList.criticalIssues.length');
+  }.property('stepConfigs.@each.errorCount', 'miscModalVisible', 'submitButtonClicked', 'App.router.btnClickInProgress', 'configErrorList.criticalIssues.length'),
 
   /**
    * List of selected to install service names
@@ -179,10 +222,15 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   }.property('content.services').cacheable(),
 
   installedServices: function () {
+    var self = this;
     return App.StackService.find().toArray().toMapByCallback('serviceName', function (item) {
-      return Em.get(item, 'isInstalled');
+      return self.get('installedServiceNames').contains(item.get('serviceName'));
     });
-  }.property(),
+  }.property('installedServiceNames.length'),
+
+  requiredChanges: function () {
+    return this.get('recommendations').filterProperty('isEditable', false);
+  }.property('recommendatios.@each.isEditable'),
 
   /**
    * List of master components
@@ -217,9 +265,15 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
     var dependencies = {};
     var hiveMetastore = App.configsCollection.getConfigByName('hive.metastore.uris', 'hive-site.xml');
     var clientPort = App.configsCollection.getConfigByName('clientPort', 'zoo.cfg.xml');
+    var atlasTls = App.configsCollection.getConfigByName('atlas.enableTLS', 'application-properties.xml');
+    var atlasHttpPort = App.configsCollection.getConfigByName('atlas.server.http.port', 'application-properties.xml');
+    var atlasHttpsPort = App.configsCollection.getConfigByName('atlas.server.https.port', 'application-properties.xml');
 
     if (hiveMetastore) dependencies['hive.metastore.uris'] = hiveMetastore.recommendedValue;
     if (clientPort) dependencies.clientPort = clientPort.recommendedValue;
+    if (atlasTls) dependencies['atlas.enableTLS'] = atlasTls.recommendedValue;
+    if (atlasHttpPort) dependencies['atlas.server.http.port'] = atlasHttpPort.recommendedValue;
+    if (atlasHttpsPort) dependencies['atlas.server.https.port'] = atlasHttpsPort.recommendedValue;
     return dependencies;
   }.property(),
 
@@ -245,20 +299,24 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   ],
 
   issuesFilterText: function () {
-    return this.get('isSubmitDisabled') && !this.get('submitButtonClicked') &&
-      this.get('filterColumns').findProperty('attributeName', 'hasIssues').get('selected') ?
+    return !this.get('transitionInProgress') && this.get('issuesFilterSelected') ?
         Em.I18n.t('installer.step7.showingPropertiesWithIssues') : '';
   }.property('isSubmitDisabled', 'submitButtonClicked', 'filterColumns.@each.selected'),
 
+  /**
+   * @type {string}
+   */
   issuesFilterLinkText: function () {
-    if (this.get('filterColumns').findProperty('attributeName', 'hasIssues').get('selected')) {
-      return Em.I18n.t('installer.step7.showAllProperties');
+    var issuesAttrSelected = this.get('issuesFilterSelected');
+    if (!this.get('transitionInProgress')) {
+      if (issuesAttrSelected) {
+        return Em.I18n.t('installer.step7.showAllProperties');
+      }
+      if (this.get('hasStepConfigIssues')) {
+        return Em.I18n.t('installer.step7.showPropertiesWithIssues');
+      }
     }
-
-    return this.get('isSubmitDisabled') && !this.get('submitButtonClicked') ?
-        this.get('filterColumns').findProperty('attributeName', 'hasIssues').get('selected') ?
-          Em.I18n.t('installer.step7.showAllProperties') : Em.I18n.t('installer.step7.showPropertiesWithIssues')
-       : '';
+    return '';
   }.property('isSubmitDisabled', 'submitButtonClicked', 'filterColumns.@each.selected'),
 
   /**
@@ -281,19 +339,29 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    *    <li>stepConfigs</li>
    *    <li>filter</li>
    *  </ul>
-   *  and desect all <code>filterColumns</code>
+   *  and deselect all <code>filterColumns</code>
    * @method clearStep
    */
   clearStep: function () {
+    this.abortRequests();
     this.setProperties({
       configValidationGlobalMessage: [],
       submitButtonClicked: false,
       isSubmitDisabled: true,
-      isRecommendedLoaded: false
+      isRecommendedLoaded: false,
+      stepConfigsCreated: false,
+      initialRecommendations: []
+    });
+    App.ServiceConfigGroup.find().filterProperty('isDefault', false).forEach(function (record) {
+      App.configGroupsMapper.deleteRecord(record);
     });
     this.get('stepConfigs').clear();
     this.set('filter', '');
     this.get('filterColumns').setEach('selected', false);
+  },
+
+  clearLastSelectedService: function () {
+    this.get('tabs').filterProperty('selectedServiceName').setEach('selectedServiceName', null);
   },
 
   /**
@@ -353,13 +421,13 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
         serviceConfigs = stepConfig.get('configs'),
         configGroup = App.ServiceConfigGroup.find().filterProperty('serviceName', group.service_name).findProperty('name', group.group_name);
 
-      var isEditable = self.get('canEdit') && configGroup.get('name') == stepConfig.get('selectedConfigGroup.name');
+      var isEditable = self.get('canEdit') && configGroup.get('name') === stepConfig.get('selectedConfigGroup.name');
 
       group.configurations.forEach(function (config) {
         for (var prop in config.properties) {
           var fileName = App.config.getOriginalFileName(config.type);
           var serviceConfig = serviceConfigs.filterProperty('name', prop).findProperty('filename', fileName);
-          if (serviceConfig) {
+          if (serviceConfig && serviceConfig.get('isOriginalSCP')) {
             var value = App.config.formatPropertyValue(serviceConfig, config.properties[prop]);
             var isFinal = !!(config.properties_attributes && config.properties_attributes.final && config.properties_attributes.final[prop]);
 
@@ -400,6 +468,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       // override if a property isRequired or not
       this.overrideConfigIsRequired(stepConfig);
     }, this);
+    console.timeEnd('loadConfigGroups execution time: ');
   },
 
   /**
@@ -412,7 +481,11 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    */
   _updateIsEditableFlagForConfig: function (serviceConfigProperty, defaultGroupSelected) {
     if (App.isAuthorized('AMBARI.ADD_DELETE_CLUSTERS')) {
-      if (defaultGroupSelected && !Em.get(serviceConfigProperty, 'group')) {
+      if (App.get('isKerberosEnabled') &&
+          serviceConfigProperty.get('isConfigIdentity') &&
+          !App.StackService.find().filterProperty('isSelected').mapProperty('serviceName').contains(Em.get(serviceConfigProperty, 'serviceName'))) {
+        serviceConfigProperty.set('isEditable', false);
+      } else if (defaultGroupSelected && !Em.get(serviceConfigProperty, 'group')) {
         if (serviceConfigProperty.get('serviceName') === 'MISC') {
           var service = App.config.get('serviceByConfigTypeMap')[App.config.getConfigTagFromFileName(serviceConfigProperty.get('filename'))];
           serviceConfigProperty.set('isEditable', service && !this.get('installedServiceNames').contains(service.get('serviceName')));
@@ -422,8 +495,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       } else if (!(Em.get(serviceConfigProperty, 'group') && Em.get(serviceConfigProperty, 'group.name') === this.get('selectedConfigGroup.name'))) {
         serviceConfigProperty.set('isEditable', false);
       }
-    }
-    else {
+    } else {
       serviceConfigProperty.set('isEditable', false);
     }
     return serviceConfigProperty;
@@ -458,21 +530,19 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
     this.clearStep();
 
     var self = this;
-
     App.config.setPreDefinedServiceConfigs(this.get('addMiscTabToPage'));
 
     var storedConfigs = this.get('content.serviceConfigProperties');
-
-    var configs = (storedConfigs && storedConfigs.length) ? storedConfigs : App.configsCollection.getAll();
+    var configs = storedConfigs && storedConfigs.length ? storedConfigs : App.configsCollection.getAll();
 
     this.set('groupsToDelete', this.get('wizardController').getDBProperty('groupsToDelete') || []);
-    if (this.get('wizardController.name') === 'addServiceController' && !this.get('content.serviceConfigProperties.length')) {
+    if (this.get('wizardController.name') === 'addServiceController' && !storedConfigs) {
       App.router.get('configurationController').getConfigsByTags(this.get('serviceConfigTags')).done(function (loadedConfigs) {
         configs = self.setInstalledServiceConfigs(configs, loadedConfigs, self.get('installedServiceNames'));
         self.applyServicesConfigs(configs);
       });
     } else {
-      this.applyServicesConfigs(configs);
+      this.applyServicesConfigs(configs, true);
     }
   },
 
@@ -499,16 +569,18 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
     return configs
   },
 
-  applyServicesConfigs: function (configs) {
+  applyServicesConfigs: function (configs, isRestoring) {
+    var self = this;
+    console.time('applyServicesConfigs execution time: ');
     if (!this.get('installedServiceNames').contains('HAWQ') && this.get('allSelectedServiceNames').contains('HAWQ')) {
       this.updateHawqConfigs(configs);
     }
     if (App.get('isKerberosEnabled') && this.get('wizardController.name') === 'addServiceController') {
-      this.addKerberosDescriptorConfigs(configs, this.get('wizardController.kerberosDescriptorConfigs') || []);
+      this.addKerberosDescriptorConfigs(configs, this.get('wizardController.kerberosDescriptorConfigs') || [], isRestoring);
     }
-    App.configTheme.resolveConfigThemeConditions(configs);
     var stepConfigs = this.createStepConfigs();
     var serviceConfigs = this.renderConfigs(stepConfigs, configs);
+    this.addUidAndGidRepresentations(serviceConfigs);
     // if HA is enabled -> Make some reconfigurations
     if (this.get('wizardController.name') === 'addServiceController') {
       this.updateComponentActionConfigs(configs, serviceConfigs);
@@ -517,13 +589,42 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       }
     }
     this.set('stepConfigs', serviceConfigs);
+    this.set('stepConfigsCreated', true);
     this.checkHostOverrideInstaller();
     this.selectProperService();
+    var isInstallerWizard = (this.get("content.controllerName") === 'installerController');
     var rangerService = App.StackService.find().findProperty('serviceName', 'RANGER');
-    if (rangerService && !rangerService.get('isInstalled') && !rangerService.get('isSelected')) {
-      App.config.removeRangerConfigs(this.get('stepConfigs'));
+    var isRangerServiceAbsent =  rangerService && !rangerService.get('isInstalled') && !rangerService.get('isSelected');
+    if (isRangerServiceAbsent) {
+      var isExternalRangerSetup;
+      if (isInstallerWizard) {
+        isExternalRangerSetup = configs.filterProperty('fileName','cluster-env.xml').findProperty('name','enable_external_ranger');
+        if (Em.isNone(isExternalRangerSetup) || isExternalRangerSetup.value !== "true") {
+          App.config.removeRangerConfigs(this.get('stepConfigs'));
+        }
+        console.timeEnd('applyServicesConfigs execution time: ');
+        console.time('loadConfigRecommendations execution time: ');
+        self.loadConfigRecommendations(null, self.completeConfigLoading.bind(self));
+      } else {
+        var mainController = App.get('router.mainController');
+        var clusterController = App.get('router.clusterController');
+        mainController.isLoading.call(clusterController, 'clusterEnv').done(function () {
+          isExternalRangerSetup = clusterController.get("clusterEnv")["properties"]["enable_external_ranger"];
+          if (isExternalRangerSetup !== "true") {
+            App.config.removeRangerConfigs(self.get('stepConfigs'));
+          }
+          console.timeEnd('applyServicesConfigs execution time: ');
+          console.time('loadConfigRecommendations execution time: ');
+          self.loadConfigRecommendations(null, self.completeConfigLoading.bind(self));
+        });
+      }
+
+    } else {
+      console.timeEnd('applyServicesConfigs execution time: ');
+      console.time('loadConfigRecommendations execution time: ');
+      self.loadConfigRecommendations(null, self.completeConfigLoading.bind(self));
     }
-    this.loadConfigRecommendations(null, this.completeConfigLoading.bind(this));
+
   },
 
   /**
@@ -541,20 +642,34 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       var config = configs.filterProperty('filename', fileName).findProperty('name', configName);
       if (config) {
         var isServiceInstalled = App.Service.find().findProperty('serviceName', config.serviceName);
-        if (isServiceInstalled) {
+        // service already installed or is being added in add service wizard
+        if (isServiceInstalled || stepConfigs.someProperty("serviceName", config.serviceName)) {
           var serviceConfigs = stepConfigs.findProperty('serviceName', config.serviceName).get('configs');
           var serviceConfig = serviceConfigs.filterProperty('filename', fileName).findProperty('name', configName);
+          var notEditableText = " " + Em.I18n.t('installer.step7.addWizard.notEditable');
+          serviceConfig.set('description', serviceConfig.get('description') + notEditableText);
           serviceConfig.set('isReconfigurable', false);
+          serviceConfig.set('isEditable', false);
+          serviceConfig.set('disabledAsComponentAction', true);
           config.isReconfigurable = false;
+          config.isEditable = false;
+          config.disabledAsComponentActio = true;
         }
       }
     }, this);
   },
 
   completeConfigLoading: function() {
-    this.clearRecommendationsByServiceName(App.StackService.find().filterProperty('isSelected').mapProperty('serviceName'));
-    console.timeEnd('wizard loadStep: ');
+    this.get('stepConfigs').forEach(function(service) {
+      App.configTheme.resolveConfigThemeConditions(service.get('configs'));
+    });
+    this.clearRecommendationsByServiceName(App.StackService.find().filter(function (s) {
+      return s.get('isSelected') && !s.get('isInstalled');
+    }).mapProperty('serviceName'));
+    this.saveInitialRecommendations();
     this.set('isRecommendedLoaded', true);
+    console.timeEnd('loadConfigRecommendations execution time: ');
+    console.timeEnd('wizard loadStep: ');
     if (this.get('content.skipConfigStep')) {
       App.router.send('next');
     }
@@ -579,17 +694,33 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    * @param {App.ServiceConfigProperty[]} descriptor - parsed kerberos descriptor
    * @method addKerberosDescriptorConfigs
    */
-  addKerberosDescriptorConfigs: function (configs, descriptor) {
+  addKerberosDescriptorConfigs: function (configs, descriptor, isRestoring) {
+    var servicesToBeInstalled = this.get('content.services').filterProperty('isSelected').mapProperty('serviceName');
     descriptor.forEach(function (item) {
-      var property = configs.findProperty('name', item.get('name'));
+      var service = item.get('serviceName');
+      if (!servicesToBeInstalled.contains(service)) return false;
+      var name = item.get('name');
+      var filename = Em.get(item, 'filename');
+      var property = configs.filterProperty('serviceName', service).findProperty('name', name);
+      var propertyObj = {
+        isSecureConfig: true,
+        value: Em.get(isRestoring && property ? property : item, 'value'),
+        defaultValue: Em.get(item, 'value'),
+        displayName: name,
+        isOverridable: false,
+        isConfigIdentity: Em.get(item, 'isConfigIdentity'),
+        isUserProperty: !!Em.get(item, 'isUserProperty'),
+        category: (Em.get(item, 'isUserProperty') ? 'Custom ' : 'Advanced ') + filename
+      };
       if (property) {
-        Em.setProperties(property, {
-          isSecureConfig: true,
-          displayName: Em.get(item, 'name'),
-          isUserProperty: false,
-          isOverridable: false,
-          category: 'Advanced ' + Em.get(item, 'filename')
-        });
+        Em.setProperties(property, $.extend(propertyObj, {
+          savedValue: Em.get(item, 'value'),
+          description: Em.get(item, 'isConfigIdentity')
+              ? App.config.kerberosIdentitiesDescription(Em.get(property, 'description'))
+              : Em.get(property, 'description')
+        }));
+      } else {
+        configs.push(App.ServiceConfigProperty.create(App.config.getDefaultConfig(name, filename, propertyObj)));
       }
     });
   },
@@ -604,9 +735,10 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       this.restoreConfigGroups(this.get('content.configGroups'));
     } else {
       if (this.get('installedServiceNames').length > 0 && !this.get('wizardController.areInstalledConfigGroupsLoaded')) {
+        console.time('loadConfigGroups execution time: ');
         this.loadConfigGroups(this.get('allSelectedServiceNames')).done(this.loadOverrides.bind(this));
       } else {
-        App.store.commit();
+        App.store.fastCommit();
         App.configGroupsMapper.map(null, false, this.get('allSelectedServiceNames'));
         this.onLoadOverrides();
       }
@@ -721,6 +853,38 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   },
 
   /**
+   * Set the uid property for user properties. The uid is later used to help map the user and uid values in adjacent columns
+   * @param {object} miscSvc
+   * @param {string} svcName
+   * @private
+   */
+  _setUID: function (miscSvc, svcName) {
+    var user = miscSvc.configs.findProperty('name', svcName + '_user');
+    if (user) {
+      var uid = miscSvc.configs.findProperty('name', user.value + '_uid');
+      if (uid) {
+        user.set('ugid', uid);
+      }
+    }
+  },
+
+  /**
+   * Set the gid property for group properties. The gid is later used to help map the group and gid values in adjacent columns
+   * @param {object} miscSvc
+   * @param {string} svcName
+   * @private
+   */
+  _setGID: function (miscSvc, svcName) {
+    var group = miscSvc.configs.findProperty('name', svcName + '_group');
+    if (group) {
+      var gid = miscSvc.configs.findProperty('name', group.value + '_gid');
+      if (gid) {
+        group.set('ugid', gid);
+      }
+    }
+  },
+
+  /**
    * render configs, distribute them by service
    * and wrap each in ServiceConfigProperty object
    * @param stepConfigs
@@ -731,8 +895,25 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
     var localDB = {
       hosts: this.get('wizardController.content.hosts'),
       masterComponentHosts: this.get('wizardController.content.masterComponentHosts'),
-      slaveComponentHosts: this.get('wizardController.content.slaveComponentHosts')
+      slaveComponentHosts: this.get('wizardController.content.slaveComponentHosts'),
+      selectedStack: {}
     };
+    var selectedRepoVersion,
+        repoVersion;
+    if (this.get('wizardController.name') === 'addServiceController') {
+      repoVersion = App.RepositoryVersion.find().filter(function(i) {
+        return i.get('stackVersionType') === App.get('currentStackName') &&
+          i.get('stackVersionNumber') === App.get('currentStackVersionNumber');
+      })[0];
+      if (repoVersion) {
+        selectedRepoVersion = Em.get(repoVersion, 'repositoryVersion').split('-')[0];
+      }
+    } else {
+      selectedRepoVersion = Em.getWithDefault(App.Stack.find().findProperty('isSelected', true) || {}, 'repositoryVersion', false);
+    }
+    if (selectedRepoVersion) {
+      localDB.selectedStack = selectedRepoVersion;
+    }
     var configsByService = {}, dependencies = this.get('configDependencies');
 
     configs.forEach(function (_config) {
@@ -743,6 +924,11 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       this.updateHostOverrides(serviceConfigProperty, _config);
       if (this.get('wizardController.name') === 'addServiceController') {
         this._updateIsEditableFlagForConfig(serviceConfigProperty, true);
+        //since the override_uid and ignore_groupusers_create changes are not saved to the database post install, they should be editable only
+        //during initial cluster installation
+        if (['override_uid', 'ignore_groupsusers_create'].contains(serviceConfigProperty.get('name'))) {
+          serviceConfigProperty.set('isEditable', false);
+        }
       }
       if (!this.get('content.serviceConfigProperties.length') && !serviceConfigProperty.get('hasInitialValue')) {
         App.ConfigInitializer.initialValue(serviceConfigProperty, localDB, dependencies);
@@ -754,12 +940,41 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       if (service.get('serviceName') === 'YARN') {
         configsByService[service.get('serviceName')] = App.config.addYarnCapacityScheduler(configsByService[service.get('serviceName')]);
       }
-      service.set('configs', configsByService[service.get('serviceName')]);
+      service.set('configs', configsByService[service.get('serviceName')] || []);
       if (['addServiceController', 'installerController'].contains(this.get('wizardController.name'))) {
         this.addHostNamesToConfigs(service, localDB.masterComponentHosts, localDB.slaveComponentHosts);
       }
     }, this);
     return stepConfigs;
+  },
+
+  addUidAndGidRepresentations: function(serviceConfigs) {
+    //map the uids to the corresponding users
+    var miscSvc = serviceConfigs.findProperty('serviceName', 'MISC');
+    if (miscSvc) {
+      //iterate through the list of users and groups and assign the uid/gid accordingly
+      //user properties are servicename_user
+      //uid properties are value of servicename_user + _uid
+      //group properties are servicename_group
+      //gid properties are value of servicename_group + _gid
+      //we will map the users/uids and groups/gids based on this assumption
+      this.get('selectedServiceNames').forEach(function (serviceName) {
+        this._setUID(miscSvc, serviceName.toLowerCase());
+        this._setGID(miscSvc, serviceName.toLowerCase());
+      }, this);
+
+      //for zookeeper, the user property name does not follow the convention that users for other services do. i.e. the user property name is not servicename_user as is the case with other services
+      //the user property name is zk_user and not zookeeper_user, hence set the uid for zk_user separately
+      this._setUID(miscSvc, 'zk');
+      //the user property name is mapred_user and not mapreduce2_user for mapreduce2 service, hence set the uid for mapred_user separately
+      this._setUID(miscSvc, 'mapred');
+      //for haddop, the group property name does not follow the convention that groups for other services do. i.e. the group property name is not servicename_group as is the case with other services
+      //the group property name is user_group and not zookeeper_group, hence set the gid for user_group separately
+      this._setGID(miscSvc, 'user');
+
+      // uid/gid properties are displayed in a separate column, hence prevent the properties from showing up on a separate line
+      miscSvc.configs.filterProperty('displayType', 'uid_gid').setEach('isVisible', false);
+    }
   },
 
   /**
@@ -839,47 +1054,55 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   _reconfigureServicesOnNnHa: function (serviceConfigs) {
     var selectedServiceNames = this.get('selectedServiceNames');
     var nameServiceId = serviceConfigs.findProperty('serviceName', 'HDFS').configs.findProperty('name', 'dfs.nameservices');
-    Em.A([
-      {
-        serviceName: 'HBASE',
-        configToUpdate: 'hbase.rootdir'
-      },
-      {
-        serviceName: 'ACCUMULO',
-        configToUpdate: 'instance.volumes'
-      },
-      {
-        serviceName: 'HAWQ',
-        configToUpdate: 'hawq_dfs_url',
-        regexPattern: /(^.*:[0-9]+)(?=\/)/,
-        replacementValue: nameServiceId.get('value')
-      }
-    ]).forEach(function (c) {
-      if (selectedServiceNames.contains(c.serviceName) && nameServiceId) {
-        var cfg = serviceConfigs.findProperty('serviceName', c.serviceName).configs.findProperty('name', c.configToUpdate);
-        var regexPattern = /\/\/.*:[0-9]+/i;
-        var replacementValue = '//' + nameServiceId.get('value');
-        if (!Em.isNone(c.regexPattern) && !Em.isNone(c.replacementValue)) {
-          regexPattern = c.regexPattern;
-          replacementValue = c.replacementValue;
+    if (nameServiceId) {
+      Em.A([
+        {
+          serviceName: 'HBASE',
+          configToUpdate: 'hbase.rootdir'
+        },
+        {
+          serviceName: 'ACCUMULO',
+          configToUpdate: 'instance.volumes'
+        },
+        {
+          serviceName: 'HAWQ',
+          configToUpdate: 'hawq_dfs_url',
+          regexPattern: /(^.*:[0-9]+)(?=\/)/,
+          replacementValue: nameServiceId.get('value')
         }
-        var newValue = cfg.get('value').replace(regexPattern, replacementValue);
-        cfg.setProperties({
-          value: newValue,
-          recommendedValue: newValue
-        });
-      }
-    });
+      ]).forEach(function (c) {
+        if (selectedServiceNames.contains(c.serviceName) && nameServiceId) {
+          var cfg = serviceConfigs.findProperty('serviceName', c.serviceName).configs.findProperty('name', c.configToUpdate);
+          var regexPattern = /\/\/.*:[0-9]+/i;
+          var replacementValue = '//' + nameServiceId.get('value');
+          if (!Em.isNone(c.regexPattern) && !Em.isNone(c.replacementValue)) {
+            regexPattern = c.regexPattern;
+            replacementValue = c.replacementValue;
+          }
+          var newValue = cfg.get('value').replace(regexPattern, replacementValue);
+          cfg.setProperties({
+            value: newValue,
+            recommendedValue: newValue
+          });
+        }
+      });
+    }
     return serviceConfigs;
   },
 
   /**
+   * Select previously selected service if not within the tab for the first time
    * Select first addable service for <code>addServiceWizard</code>
    * Select first service at all in other cases
    * @method selectProperService
    */
   selectProperService: function () {
-    if (this.get('wizardController.name') === 'addServiceController') {
+    var activeTab = this.get('tabs').findProperty('isActive', true);
+    var tabSelectedServiceName = activeTab ? activeTab.get('selectedServiceName') : null;
+    var lastSelectedService = tabSelectedServiceName ? this.get('stepConfigs').findProperty('serviceName', tabSelectedServiceName) : null
+    if(tabSelectedServiceName && lastSelectedService) {
+      this.set('selectedService', lastSelectedService);
+    } else if (this.get('wizardController.name') === 'addServiceController') {
       this.set('selectedService', this.get('stepConfigs').filterProperty('selected', true).get('firstObject'));
     } else {
       this.set('selectedService', this.get('stepConfigs').filterProperty('showConfig', true).objectAt(0));
@@ -891,13 +1114,34 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    * @return {$.ajax|null}
    * @method getConfigTags
    */
-  getConfigTags: function () {
-    this.set('isAppliedConfigLoaded', false);
+  getConfigTags: function (resetFlag) {
+    if (resetFlag) this.set('isAppliedConfigLoaded', false);
     return App.ajax.send({
       name: 'config.tags',
       sender: this,
       success: 'getConfigTagsSuccess'
     });
+  },
+
+  getServicesConfigurations: function() {
+    var dfd = $.Deferred();
+    var configs, servicesConfigurations;
+    configs = this.get('wizardController').getConfigsAndFilenames(this, true).serviceConfigProperties;
+    servicesConfigurations = configs.reduce(function(configTags, property) {
+      var fileName = App.config.getConfigTagFromFileName(property.filename),
+          configType;
+      if (!configTags.someProperty('type', fileName)) {
+        configTags.push({
+          type: fileName,
+          properties: {}
+        });
+      }
+      configType = configTags.findProperty('type', fileName);
+      configType.properties[property.name] = property.value;
+      return configTags;
+    }, []);
+    dfd.resolve(servicesConfigurations);
+    return dfd.promise();
   },
 
   /**
@@ -939,9 +1183,13 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    */
   setInstalledServiceConfigs: function (configs, configsByTags, installedServiceNames) {
     var configsMap = {};
+    var finalAttrMap = {};
+    var passwordAttrMap = {};
 
     configsByTags.forEach(function (configSite) {
       configsMap[configSite.type] = configSite.properties || {};
+      finalAttrMap[configSite.type] = configSite.properties_attributes && configSite.properties_attributes.final || {};
+      passwordAttrMap[configSite.type] = configSite.properties_attributes && configSite.properties_attributes.password || {};
     });
     var allConfigs = configs.filter(function (_config) {
       // filter out alert_notification configs on add service //TODO find better place for this!
@@ -952,27 +1200,27 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
         if (Em.isNone(mappedConfigValue)) {
           //for now ranger plugin properties are not sending by recommendations if they are missed - it should be added
           return _config.serviceName === 'MISC' || /^ranger-/.test(_config.filename);
-        } else {
-          if (_config.savedValue != mappedConfigValue) {
-            _config.savedValue = App.config.formatPropertyValue(_config, mappedConfigValue);
-          }
-          _config.value = App.config.formatPropertyValue(_config, mappedConfigValue);
-          _config.hasInitialValue = true;
-          this.updateDependencies(_config);
-          delete configsMap[type][_config.name];
-          return true;
         }
-      } else {
+        if (_config.savedValue != mappedConfigValue) {
+          _config.savedValue = App.config.formatPropertyValue(_config, mappedConfigValue);
+        }
+        _config.value = App.config.formatPropertyValue(_config, mappedConfigValue);
+        _config.hasInitialValue = true;
+        this.updateDependencies(_config);
+        delete configsMap[type][_config.name];
         return true;
       }
+      return true;
     }, this);
     //add user properties
     Em.keys(configsMap).forEach(function (filename) {
       Em.keys(configsMap[filename]).forEach(function (propertyName) {
         allConfigs.push(App.config.createDefaultConfig(propertyName, App.config.getOriginalFileName(filename), false, {
-            value: configsMap[filename][propertyName],
-            savedValue: configsMap[filename][propertyName],
-            hasInitialValue: true
+          value: configsMap[filename][propertyName],
+          savedValue: configsMap[filename][propertyName],
+          propertyType: passwordAttrMap[filename][propertyName] === 'true' ? ['PASSWORD'] : null,
+          isFinal: finalAttrMap[filename][propertyName] === 'true',
+          hasInitialValue: true
         }));
       });
     });
@@ -985,10 +1233,19 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    * @param config
    */
   updateDependencies: function(config) {
-    if (config.name === 'hive.metastore.uris' && config.filename === 'hive-site.xml') {
-      this.get('configDependencies')['hive.metastore.uris'] = config.savedValue;
-    } else if (config.name === 'clientPort' && config.filename === 'hive-site.xml') {
-      this.get('configDependencies').clientPort = config.savedValue;
+    if (config.filename === 'hive-site.xml') {
+      if (config.name === 'hive.metastore.uris') {
+        this.get('configDependencies')['hive.metastore.uris'] = config.savedValue;
+      }
+      else
+        if (config.name === 'clientPort') {
+          this.get('configDependencies').clientPort = config.savedValue;
+        }
+    }
+    if (config.filename === 'application-properties.xml') {
+      if (this.get('configDependencies').hasOwnProperty(config.name)) {
+        this.get('configDependencies')[config.name] = config.savedValue;
+      }
     }
   },
 
@@ -1028,7 +1285,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       this.set('configGroups', serviceGroups);
       this.set('selectedConfigGroup', serviceGroups.findProperty('isDefault'));
     }
-  }.observes('selectedService.configGroups.@each'),
+  }.observes('selectedService.configGroups.[]'),
 
   /**
    * load default groups for each service in case of initial load
@@ -1042,14 +1299,12 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       if (service.get('serviceName') === 'MISC') return;
       var serviceRawGroups = serviceConfigGroups.filterProperty('service_name', service.serviceName);
       if (serviceRawGroups.length) {
-        App.store.commit();
-        App.store.loadMany(App.ServiceConfigGroup, serviceRawGroups);
-        App.store.commit();
+        App.store.safeLoadMany(App.ServiceConfigGroup, serviceRawGroups);
         serviceRawGroups.forEach(function(item){
           var modelGroup = App.ServiceConfigGroup.find(item.id);
           modelGroup.set('properties', []);
           item.properties.forEach(function (propertyData) {
-            var overriddenSCP, parentSCP = service.configs.filterProperty('filename', propertyData.filename).findProperty('name', propertyData.name);
+            var overriddenSCP, parentSCP = service.configs.filterProperty('filename', propertyData.filename).filterProperty('isOriginalSCP').findProperty('name', propertyData.name);
             if (parentSCP) {
               App.config.createOverride(parentSCP, propertyData, modelGroup)
             } else {
@@ -1063,6 +1318,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
               this.get('stepConfigs').findProperty('serviceName', service.serviceName).get('configs').pushObject(overriddenSCP);
             }
           }, this);
+          modelGroup.set('hash', this.get('wizardController').getConfigGroupHash(modelGroup));
         }, this);
         service.set('configGroups', App.ServiceConfigGroup.find().filterProperty('serviceName', service.get('serviceName')));
       }
@@ -1123,17 +1379,23 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   _setEditableValue: function (config) {
     var selectedGroup = this.get('selectedConfigGroup');
     if (!selectedGroup) return config;
-    var isEditable = config.get('isEditable'),
-      isServiceInstalled = this.get('installedServiceNames').contains(this.get('selectedService.serviceName'));
-    if (isServiceInstalled) {
-      isEditable = config.get('isReconfigurable') && selectedGroup.get('isDefault');
+    if (App.get('isKerberosEnabled') &&
+        config.get('isConfigIdentity') &&
+        !App.StackService.find().filterProperty('isSelected').mapProperty('serviceName').contains(Em.get(config, 'serviceName'))) {
+      config.set('isEditable', false);
     } else {
-      isEditable = selectedGroup.get('isDefault');
+      var isEditable = config.get('isEditable'),
+        isServiceInstalled = this.get('installedServiceNames').contains(this.get('selectedService.serviceName'));
+      if (isServiceInstalled) {
+        isEditable = config.get('isReconfigurable') && selectedGroup.get('isDefault') && !config.get('disabledAsComponentAction');
+      } else {
+        isEditable = selectedGroup.get('isDefault') && !config.get('disabledAsComponentAction');
+      }
+      if (config.get('group')) {
+        isEditable = config.get('group.name') === this.get('selectedConfigGroup.name');
+      }
+      config.set('isEditable', isEditable);
     }
-    if (config.get('group')) {
-      isEditable = config.get('group.name') === this.get('selectedConfigGroup.name');
-    }
-    config.set('isEditable', isEditable);
     return config;
   },
 
@@ -1148,9 +1410,9 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
     if (config.get('group')) return config;
     var selectedGroup = this.get('selectedConfigGroup'),
       overrideToAdd = this.get('overrideToAdd'),
-      configOverrides = overrides.filterProperty('name', config.get('name'));
+      configOverrides = overrides.filterProperty('id', config.get('id'));
     if (!selectedGroup) return config;
-    if (overrideToAdd && overrideToAdd.get('name') === config.get('name')) {
+    if (overrideToAdd && overrideToAdd.get('id') === config.get('id')) {
       var valueForOverride = (config.get('widget') || config.get('displayType') === 'checkbox') ? config.get('value') : '';
       var group = this.get('selectedService.configGroups').findProperty('name', selectedGroup.get('name'));
       var newSCP = App.config.createOverride(config, {value: valueForOverride, recommendedValue: valueForOverride}, group);
@@ -1177,10 +1439,12 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    * @param parentProperties
    * @param name
    * @param fileName
+   * @param configGroup
+   * @param savedValue
    * @returns {*}
    * @override
    */
-  allowUpdateProperty: function(parentProperties, name, fileName) {
+  allowUpdateProperty: function(parentProperties, name, fileName, configGroup, savedValue) {
     if (name.contains('proxyuser')) return true;
     if (['installerController'].contains(this.get('wizardController.name')) || !!(parentProperties && parentProperties.length)) {
       return true;
@@ -1189,12 +1453,12 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       if (!stackProperty || !this.get('installedServices')[stackProperty.serviceName]) {
         return true;
       } else if (stackProperty.propertyDependsOn.length) {
-        return !!stackProperty.propertyDependsOn.filter(function (p) {
+        return stackProperty.propertyDependsOn.some(function (p) {
           var service = App.config.get('serviceByConfigTypeMap')[p.type];
           return service && !this.get('installedServices')[service.get('serviceName')];
-        }, this).length;
+        }, this);
       } else {
-        return false;
+        return !Em.isNone(savedValue) && stackProperty.recommendedValue === savedValue;
       }
     }
     return true;
@@ -1275,12 +1539,11 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    * that using MySql database too.
    *
    * @method resolveHiveMysqlDatabase
-   **/
+   */
   resolveHiveMysqlDatabase: function () {
     var hiveService = this.get('content.services').findProperty('serviceName', 'HIVE');
     if (!hiveService || !hiveService.get('isSelected') || hiveService.get('isInstalled')) {
-      this.moveNext();
-      return;
+      return this.moveNext();
     }
     var hiveDBType = this.get('stepConfigs').findProperty('serviceName', 'HIVE').configs.findProperty('name', 'hive_database').value;
     if (hiveDBType === 'New MySQL Database') {
@@ -1289,9 +1552,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
         self.mySQLWarningHandler();
       });
     }
-    else {
-      this.moveNext();
-    }
+    return this.moveNext();
   },
 
   /**
@@ -1340,9 +1601,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
         }
       });
     }
-    else {
-      return this.moveNext();
-    }
+    return this.moveNext();
   },
 
   checkDatabaseConnectionTest: function () {
@@ -1404,6 +1663,8 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
       },
       onSecondary: function () {
         this.hide();
+        App.set('router.btnClickInProgress', false);
+        App.set('router.backBtnClickInProgress', false);
       }
     });
   },
@@ -1419,10 +1680,14 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
         deferred.resolve();
         this._super();
       },
+      onClose: function () {
+        this.onSecondary();
+      },
       onSecondary: function () {
-        self.set('submitButtonClicked', false);
-        deferred.reject();
         this._super();
+        self.set('submitButtonClicked', false);
+        App.set('router.nextBtnClickInProgress', false);
+        deferred.reject();
       }
     });
   },
@@ -1464,7 +1729,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    * Proceed to the next step
    **/
   moveNext: function () {
-    App.set('router.nextBtnClickInProgress', true);
+    App.set('router.nextBtnClickInProgress', false);
     App.router.send('next');
     this.set('submitButtonClicked', false);
   },
@@ -1475,7 +1740,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
    * @method submit
    */
   submit: function () {
-    if (this.get('isSubmitDisabled') || App.router.nextBtnClickInProgress) {
+    if (this.get('isSubmitDisabled') || App.get('router.nextBtnClickInProgress')) {
       return false;
     }
     App.set('router.nextBtnClickInProgress', true);
@@ -1492,10 +1757,12 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   postSubmit: function () {
     var self = this;
     this.set('submitButtonClicked', true);
-    this.serverSideValidation().done(function() {
-      self.serverSideValidationCallback();
-    })
-      .fail(function (value) {
+    if (this.get('isInstallWizard')) {
+      this.serverSideValidationCallback();
+    } else {
+      this.serverSideValidation().done(function () {
+        self.serverSideValidationCallback();
+      }).fail(function (value) {
         if ("invalid_configs" === value) {
           self.set('submitButtonClicked', false);
           App.set('router.nextBtnClickInProgress', false);
@@ -1505,6 +1772,7 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
           self.serverSideValidationCallback();
         }
       });
+    }
   },
 
   /**
@@ -1520,18 +1788,298 @@ App.WizardStep7Controller = Em.Controller.extend(App.ServerValidatorMixin, App.E
   },
 
   toggleIssuesFilter: function () {
+    var errorServices = [],
+        issueServices = [];
+
     this.get('filterColumns').findProperty('attributeName', 'hasIssues').toggleProperty('selected');
 
     // if currently selected service does not have issue, jump to the first service with issue.
-    if (this.get('selectedService.errorCount') == 0 )
+    if (this.get('selectedService.errorCount') === 0 )
     {
-      var errorServices = this.get('stepConfigs').filterProperty('errorCount');
-      if (errorServices.length > 0)
-      {
-        var service = errorServices[0];
-        this.set('selectedService', service);
-        $('a[href="#' + service.serviceName + '"]').tab('show');
+      this.get('stepConfigs').filterProperty('showConfig', true).forEach(function(service) {
+        if (service.get('errorCount') > 0) errorServices.push(service);
+        if (service.get('hasConfigIssues') === true) issueServices.push(service);
+      });
+      if (errorServices.length === 0 && issueServices.length === 0) return;
+      this.switchToService(errorServices.length > 0 ? errorServices[0] : issueServices[0]);
+    }
+  },
+
+  switchToService: function(service) {
+    this.set('selectedService', service);
+    $('a[href="#' + service.serviceName + '"]').tab('show');
+  },
+
+
+  issuesFilterSelected: function() {
+    return this.get('filterColumns').findProperty('attributeName', 'hasIssues').get('selected');
+  }.property('filterColumns.@each.selected'),
+
+  hasStepConfigIssues: function() {
+    return !this.get('stepConfigs').filterProperty('showConfig', true).everyProperty('hasConfigIssues', false);
+  }.property('stepConfigs.@each.hasConfigIssues'),
+
+  checkDescriptor: function() {
+    if (App.get('isKerberosEnabled')) {
+      return App.ajax.send({
+        sender: self,
+        name: 'admin.kerberize.cluster_descriptor_artifact'
+      });
+    }
+    return $.Deferred().resolve().promise();
+  },
+
+  /**
+   * Store status of kerberos descriptor located in cluster artifacts.
+   * This status needed for Add Service Wizard to select appropriate method to create
+   * or update descriptor.
+   *
+   * @param  {Boolean} isExists <code>true</code> if cluster descriptor present
+   */
+  storeClusterDescriptorStatus: function(isExists) {
+    this.get('wizardController').setDBProperty('isClusterDescriptorExists', isExists);
+  },
+
+   /**
+   * Get all configs, that should be stored in kerberos_descriptor
+   * @returns {Array}
+   */
+  getDescriptorConfigs: function () {
+     return this.get('stepConfigs').reduce(function (allConfigs, service) {
+      return allConfigs.concat(service.get('configs').filterProperty('isSecureConfig'));
+    }, []);
+  },
+
+  selectService: function (event) {
+    this.set('selectedService', event.context);
+    this.get('tabs').findProperty('isActive', true).set('selectedServiceName', event.context.serviceName);
+  },
+
+  /**
+   * Set initial state for <code>tabs</code>
+   */
+  initTabs: function () {
+    var storedConfigs = this.get('content.serviceConfigProperties');
+    var tabs = [
+      Em.Object.create({
+        name: 'credentials',
+        displayName: 'Credentials',
+        icon: 'glyphicon-lock',
+        isActive: false,
+        isDisabled: false,
+        isSkipped: false,
+        tabView: App.CredentialsTabOnStep7View
+      }),
+      Em.Object.create({
+        name: 'databases',
+        displayName: 'Databases',
+        icon: 'glyphicon-align-justify',
+        isActive: false,
+        isDisabled: false,
+        isSkipped: false,
+        tabView: App.DatabasesTabOnStep7View
+      }),
+      Em.Object.create({
+        name: 'directories',
+        displayName: 'Directories',
+        icon: 'glyphicon-folder-open',
+        isActive: false,
+        isDisabled: false,
+        isSkipped: false,
+        selectedServiceName: null,
+        tabView: App.DirectoriesTabOnStep7View
+      }),
+      Em.Object.create({
+        name: 'accounts',
+        displayName: 'Accounts',
+        icon: 'glyphicon-user',
+        isActive: false,
+        isDisabled: false,
+        isSkipped: false,
+        tabView: App.AccountsTabOnStep7View
+      }),
+      Em.Object.create({
+        name: 'all-configurations',
+        displayName: 'All Configurations',
+        icon: 'glyphicon-wrench',
+        isActive: false,
+        isDisabled: false,
+        isSkipped: false,
+        selectedServiceName: null,
+        tabView: App.ServicesConfigView
+      })
+    ];
+
+    this.set('tabs', tabs);
+
+    this.setSkippedTabs();
+
+    if (storedConfigs && storedConfigs.length) {
+      tabs.findProperty('name', 'all-configurations').set('isActive', true);
+    } else {
+      tabs.findProperty('isDisabled', false).set('isActive', true);
+      this.disableTabs();
+    }
+
+  },
+
+  setSkippedTabs: function () {
+    var servicesWithCredentials = App.Tab.find().filterProperty('themeName', 'credentials').mapProperty('serviceName');
+    var servicesWithDatabase = App.Tab.find().filterProperty('themeName', 'database').mapProperty('serviceName');
+    var selectedServices = this.get('content.selectedServiceNames');
+    var tabs = this.get('tabs');
+    var disableCredentials = true;
+    var disableDatabases = true;
+
+    for (var i = 0; i < selectedServices.length; i++) {
+      var serviceName = selectedServices[i];
+      disableCredentials = disableCredentials && servicesWithCredentials.indexOf(serviceName) === -1;
+      disableDatabases = disableDatabases && servicesWithDatabase.indexOf(serviceName) === -1;
+      if (!disableCredentials && !disableDatabases) break;
+    }
+
+    tabs.findProperty('name', 'credentials').setProperties({
+      isDisabled: disableCredentials,
+      isSkipped: disableCredentials
+    });
+    tabs.findProperty('name', 'databases').setProperties({
+      isDisabled: disableDatabases,
+      isSkipped: disableDatabases
+    });
+  },
+
+  /**
+   * Get index of current (active) tab
+   */
+  currentTabIndex: function () {
+    return this.get('tabs').findIndex(function (tab) {
+      return tab.get('isActive');
+    });
+  }.property('tabs.@each.isActive'),
+
+  /**
+   * Get name of current (active) tab
+   */
+  currentTabName: function () {
+    var activeTab = this.get('tabs').findProperty('isActive');
+    return activeTab ? activeTab.get('name') : '';
+  }.property('tabs.@each.isActive'),
+
+  /**
+   * Make selected tab active, show tab's content
+   * @param event
+   * @returns {boolean}
+   */
+  selectTab: function (event) {
+    var tab = event.context;
+    if (!tab.get('isDisabled')) {
+      $('a[href=#' + tab.name + ']').tab('show');
+      this.get('tabs').setEach('isActive', false);
+      tab.set('isActive', true);
+    }
+    return false;
+  },
+
+  /**
+   * Get disabled state for next button
+   */
+  isNextDisabled: function () {
+    var tabName = this.get('currentTabName');
+    switch (tabName) {
+      case 'credentials':
+        return !this.get('credentialsTabNextEnabled');
+      case 'all-configurations':
+        return this.get('isSubmitDisabled');
+      default:
+        return false;
+    }
+  }.property('tabs.@each.isActive', 'isSubmitDisabled', 'credentialsTabNextEnabled'),
+
+  /**
+   * Set isDisabled state for tabs
+   */
+  disableTabs: function () {
+    this.get('tabs').rejectProperty('isSkipped').setEach('isDisabled', !this.get('tabs').findProperty('name', 'credentials').get('isDisabled') && !this.get('credentialsTabNextEnabled'));
+  }.observes('credentialsTabNextEnabled'),
+
+  /**
+   * Select specified service and put property name in filter input
+   * @param event - jQuery event
+   */
+  showConfigProperty: function (event) {
+    var serviceName = event.context.serviceName;
+    var propertyName = event.context.propertyName || event.context.name;
+    var stepConfig = this.get('stepConfigs').findProperty('serviceName', serviceName)
+      || this.get('stepConfigs').findProperty('displayName', serviceName);
+    this.set('selectedService', stepConfig);
+    this.get('filterColumns').setEach('selected', false);
+    Em.run.next(this, function () {
+      this.set('filter', propertyName);
+    });
+  },
+
+  /**
+   * Show bell animation
+   */
+  ringBell: function () {
+    $('#issues-bell').addClass('animated');
+    $('#issues-counter').addClass('animated');
+    setTimeout(function () {
+      $('#issues-bell').removeClass('animated');
+    }, 2000);
+    setTimeout(function () {
+      $('#issues-counter').removeClass('animated');
+    }, 300);
+  },
+
+  /**
+   * Set <code>issuesCounter</code> and run bell animation if needed
+   */
+  setIssues: function () {
+    var recommendations = this.get('changedProperties.length');
+    var validations = this.get('stepConfigs').mapProperty('configsWithErrors.length').reduce(Em.sum, 0);
+    var configErrorList = this.get('configErrorList');
+    this.set('issuesCounter', recommendations + validations + configErrorList.get('issues.length') + configErrorList.get('criticalIssues.length'));
+    if (validations > this.get('validationsCounter')) {
+      this.ringBell();
+    }
+    this.set('hasErrors', !!validations);
+    this.set('validationsCounter', validations);
+  }.observes('changedProperties.length', 'stepConfigs.@each.configsWithErrors.length', 'configErrorList.issues.length', 'configErrorList.criticalIssues.length'),
+
+  /**
+   * Next button action handler
+   */
+  next: function (index) {
+    var tabs = this.get('tabs');
+    var currentTabIndex = typeof(index) === 'number' ? index : this.get('currentTabIndex');
+    if (tabs.length - 1 > currentTabIndex) {
+      tabs[currentTabIndex].set('isActive', false);
+      if (tabs[currentTabIndex + 1].get('isDisabled')) {
+        this.next(++currentTabIndex);
+      } else {
+        tabs[currentTabIndex + 1].set('isActive', true);
       }
+    } else {
+      this.submit();
+    }
+  },
+
+  /**
+   * Back button action handler
+   */
+  back: function (index) {
+    var tabs = this.get('tabs');
+    var currentTabIndex = typeof(index) === 'number' ? index : this.get('currentTabIndex');
+    if (currentTabIndex > 0) {
+      tabs[currentTabIndex].set('isActive', false);
+      if (tabs[currentTabIndex - 1].get('isDisabled')) {
+        this.back(--currentTabIndex);
+      } else {
+        tabs[currentTabIndex - 1].set('isActive', true);
+      }
+    } else {
+      App.router.send('back');
     }
   }
 

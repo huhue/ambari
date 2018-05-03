@@ -29,6 +29,7 @@ import org.apache.ambari.view.pig.templeton.client.TempletonApiFactory;
 import org.apache.ambari.view.pig.utils.MisconfigurationFormattedException;
 import org.apache.ambari.view.pig.utils.ServiceFormattedException;
 import org.apache.ambari.view.pig.utils.UserLocalObjects;
+import org.apache.ambari.view.utils.ambari.AmbariApiException;
 import org.apache.ambari.view.utils.hdfs.HdfsApiException;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.slf4j.Logger;
@@ -168,12 +169,18 @@ public class JobResourceManager extends PersonalCRUDResourceManager<PigJob> {
       // content can be passed from front-end with substituted arguments
       if (job.getForcedContent() != null && !job.getForcedContent().isEmpty()) {
         String forcedContent = job.getForcedContent();
-        URI uri = new URI(context.getProperties().get("webhdfs.url"));
+        String defaultUrl = context.getProperties().get("webhdfs.url");
+        URI uri = new URI(defaultUrl);
+
         // variable for sourceFile can be passed from front-end
         // cannot use webhdfs url as webhcat does not support http authentication
         // using url hdfs://host/sourcefilepath
+        if(uri.getScheme().equals("webhdfs")){
+          defaultUrl = "hdfs://" + uri.getHost();
+        }
+
         forcedContent = forcedContent.replace("${sourceFile}",
-            "hdfs://" + uri.getHost() + newSourceFilePath);
+            defaultUrl + newSourceFilePath);
         job.setForcedContent(null); // we should not store content in DB
         save(job);
 
@@ -227,14 +234,17 @@ public class JobResourceManager extends PersonalCRUDResourceManager<PigJob> {
     TempletonApi.JobData data;
     try {
       data = UserLocalObjects.getTempletonApi(context).runPigQuery(new File(job.getPigScript()), statusdir, job.getTempletonArguments());
+      if (data.id != null) {
+        job.setJobId(data.id);
+        JobPolling.pollJob(this, job);
+      } else {
+        throw new AmbariApiException("Cannot get id for the Job.");
+      }
     } catch (IOException templetonBadResponse) {
       String msg = String.format("Templeton bad response: %s", templetonBadResponse.toString());
       LOG.debug(msg);
       throw new ServiceFormattedException(msg, templetonBadResponse);
     }
-    job.setJobId(data.id);
-
-    JobPolling.pollJob(this, job);
   }
 
   /**

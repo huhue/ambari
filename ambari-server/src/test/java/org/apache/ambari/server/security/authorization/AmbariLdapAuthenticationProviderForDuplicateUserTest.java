@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,9 +17,14 @@
  */
 package org.apache.ambari.server.security.authorization;
 
+import static org.easymock.EasyMock.expect;
+
 import java.util.Properties;
 
+import org.apache.ambari.server.configuration.AmbariServerConfigurationKey;
 import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.ldap.domain.AmbariLdapConfiguration;
+import org.apache.ambari.server.ldap.service.AmbariLdapConfigurationProvider;
 import org.apache.directory.server.annotations.CreateLdapServer;
 import org.apache.directory.server.annotations.CreateTransport;
 import org.apache.directory.server.core.annotations.ApplyLdifFiles;
@@ -38,11 +43,9 @@ import org.junit.runner.RunWith;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 
-import com.google.inject.Inject;
-
 @RunWith(FrameworkRunner.class)
 @CreateDS(allowAnonAccess = true,
-  name = "Test",
+  name = "AmbariLdapAuthenticationProviderForDuplicateUserTest",
   partitions = {
     @CreatePartition(name = "Root",
       suffix = "dc=apache,dc=org",
@@ -58,7 +61,7 @@ import com.google.inject.Inject;
             "objectClass: domain\n\n"))
   })
 @CreateLdapServer(allowAnonymousAccess = true,
-  transports = {@CreateTransport(protocol = "LDAP", port = 33389)})
+  transports = {@CreateTransport(protocol = "LDAP")})
 @ApplyLdifFiles("users_with_duplicate_uid.ldif")
 public class AmbariLdapAuthenticationProviderForDuplicateUserTest extends AmbariLdapAuthenticationProviderBaseTest {
 
@@ -71,29 +74,42 @@ public class AmbariLdapAuthenticationProviderForDuplicateUserTest extends Ambari
   @Mock(type = MockType.NICE)
   private AmbariLdapAuthoritiesPopulator authoritiesPopulator;
 
+  @Mock(type = MockType.NICE)
+  private Users users;
+
+  @Mock(type = MockType.NICE)
+  private AmbariLdapConfigurationProvider ldapConfigurationProvider;
+
+  private AmbariLdapConfiguration ldapConfiguration;
+
   private AmbariLdapAuthenticationProvider authenticationProvider;
 
   @Before
   public void setUp() {
     Properties properties = new Properties();
-    properties.setProperty(Configuration.CLIENT_SECURITY_KEY, "ldap");
-    properties.setProperty(Configuration.SERVER_PERSISTENCE_TYPE_KEY, "in-memory");
-    properties.setProperty(Configuration.METADATA_DIR_PATH,"src/test/resources/stacks");
-    properties.setProperty(Configuration.SERVER_VERSION_FILE,"src/test/resources/version");
-    properties.setProperty(Configuration.OS_VERSION_KEY,"centos5");
-    properties.setProperty(Configuration.SHARED_RESOURCES_DIR_KEY, "src/test/resources/");
-    properties.setProperty(Configuration.LDAP_BASE_DN_KEY, "dc=apache,dc=org");
-
+    properties.setProperty(Configuration.CLIENT_SECURITY.getKey(), "ldap");
+    properties.setProperty(Configuration.SERVER_PERSISTENCE_TYPE.getKey(), "in-memory");
+    properties.setProperty(Configuration.METADATA_DIR_PATH.getKey(),"src/test/resources/stacks");
+    properties.setProperty(Configuration.SERVER_VERSION_FILE.getKey(),"src/test/resources/version");
+    properties.setProperty(Configuration.OS_VERSION.getKey(),"centos5");
+    properties.setProperty(Configuration.SHARED_RESOURCES_DIR.getKey(), "src/test/resources/");
     Configuration configuration = new Configuration(properties);
 
-    authenticationProvider = new AmbariLdapAuthenticationProvider(configuration, authoritiesPopulator);
+    ldapConfiguration = new AmbariLdapConfiguration();
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.USER_SEARCH_BASE, "dc=apache,dc=org");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.SERVER_HOST, "localhost");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.SERVER_PORT, String.valueOf(getLdapServer().getPort()));
+    expect(ldapConfigurationProvider.get()).andReturn(ldapConfiguration).anyTimes();
+    replayAll();
+
+    authenticationProvider = new AmbariLdapAuthenticationProvider(users, configuration, ldapConfigurationProvider, authoritiesPopulator);
   }
 
   @Test
   public void testAuthenticateDuplicateUserAltUserSearchDisabled() throws Exception {
     // Given
     Authentication authentication = new UsernamePasswordAuthenticationToken("user_dup", "password");
-    authenticationProvider.configuration.setProperty(Configuration.LDAP_ALT_USER_SEARCH_ENABLED_KEY, "false");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.ALTERNATE_USER_SEARCH_ENABLED, "false");
 
     expectedException.expect(DuplicateLdapUserFoundAuthenticationException.class);
     expectedException.expectMessage("Login Failed: More than one user with that username found, please work with your Ambari Administrator to adjust your LDAP configuration");
@@ -111,7 +127,7 @@ public class AmbariLdapAuthenticationProviderForDuplicateUserTest extends Ambari
   public void testAuthenticateDuplicateUserAltUserSearchEnabled() throws Exception {
     // Given
     Authentication authentication = new UsernamePasswordAuthenticationToken("user_dup", "password");
-    authenticationProvider.configuration.setProperty(Configuration.LDAP_ALT_USER_SEARCH_ENABLED_KEY, "true");
+    ldapConfiguration.setValueFor(AmbariServerConfigurationKey.ALTERNATE_USER_SEARCH_ENABLED, "true");
 
     expectedException.expect(DuplicateLdapUserFoundAuthenticationException.class);
     expectedException.expectMessage("Login Failed: Please append your domain to your username and try again.  Example: user_dup@domain");

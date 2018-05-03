@@ -30,6 +30,7 @@
           <category>MASTER</category>
           <cardinality>1+</cardinality>
           <versionAdvertised>true</versionAdvertised>
+          <rollingRestartSupported>true</rollingRestartSupported>
           <dependencies>
             <dependency>
               <name>ZOOKEEPER/ZOOKEEPER_SERVER</name>
@@ -82,11 +83,12 @@
         <config-type>ranger-kafka-security</config-type>
         <config-type>zookeeper-env</config-type>
         <config-type>zoo.cfg</config-type>
-        <config-type>ams-ssl-client</config-type>
+        <config-type>kafka_jaas_conf</config-type>
+        <config-type>kafka_client_jaas_conf</config-type>
       </configuration-dependencies>
       <osSpecifics>
         <osSpecific>
-          <osFamily>redhat7,amazon2015,redhat6,suse11,suse12</osFamily>
+          <osFamily>redhat7,amazonlinux2,redhat6,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>kafka_${stack_version}</name>
@@ -94,7 +96,7 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>kafka-${stack_version}</name>
@@ -103,6 +105,14 @@
         </osSpecific>
       </osSpecifics>
       <restartRequiredAfterChange>true</restartRequiredAfterChange>
+
+      <themes>
+        <theme>
+          <fileName>directories.json</fileName>
+          <default>true</default>
+        </theme>
+      </themes>
+
     </service>
   </services>
 </metainfo>

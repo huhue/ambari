@@ -18,16 +18,24 @@
  * limitations under the License.
  */
 -->
-
 <configuration>
-
   <property>
     <name>ranger.ks.hsm.type</name>
     <display-name>HSM Type</display-name>
     <value>LunaProvider</value>
+    <value-attributes>
+      <overridable>false</overridable>
+      <type>value-list</type>
+      <entries>
+        <entry>
+          <value>LunaProvider</value>
+          <label>Luna Provider</label>
+        </entry>
+      </entries>
+    </value-attributes>
     <description>HSM type</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ks.hsm.enabled</name>
     <display-name>HSM Enabled</display-name>
@@ -49,15 +57,15 @@
       </entries>
       <selection-cardinality>1</selection-cardinality>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ks.hsm.partition.name</name>
-    <display-name>HSM partition name</display-name>
+    <display-name>HSM partition name. In case of HSM HA enter the group name</display-name>
     <value>par19</value>
-    <description></description>
+    <description/>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ks.hsm.partition.password</name>
     <value>_</value>
@@ -66,31 +74,31 @@
       <type>password</type>
     </value-attributes>
     <description>HSM partition password</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ks.hsm.partition.password.alias</name>
     <display-name>HSM partition password alias</display-name>
     <value>ranger.kms.hsm.partition.password</value>
     <description>HSM partition password alias</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ks.kerberos.principal</name>
-    <value></value>
-    <description></description>
+    <value/>
+    <description/>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.ks.kerberos.keytab</name>
-    <value></value>
-    <description></description>
+    <value/>
+    <description/>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
 </configuration>

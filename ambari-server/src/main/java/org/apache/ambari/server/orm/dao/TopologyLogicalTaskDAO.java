@@ -17,15 +17,20 @@
  */
 package org.apache.ambari.server.orm.dao;
 
+import java.util.List;
+import java.util.Set;
+
+import javax.persistence.EntityManager;
+import javax.persistence.TypedQuery;
+
+import org.apache.ambari.server.orm.RequiresSession;
+import org.apache.ambari.server.orm.entities.TopologyLogicalTaskEntity;
+
+import com.google.common.collect.Sets;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
 import com.google.inject.persist.Transactional;
-import org.apache.ambari.server.orm.RequiresSession;
-import org.apache.ambari.server.orm.entities.TopologyLogicalTaskEntity;
-
-import javax.persistence.EntityManager;
-import java.util.List;
 
 @Singleton
 public class TopologyLogicalTaskDAO {
@@ -38,6 +43,17 @@ public class TopologyLogicalTaskDAO {
   @RequiresSession
   public TopologyLogicalTaskEntity findById(Long id) {
     return entityManagerProvider.get().find(TopologyLogicalTaskEntity.class, id);
+  }
+
+  @RequiresSession
+  public Set<Long> findHostTaskIdsByPhysicalTaskIds(Set<Long> physicalTaskIds) {
+    EntityManager entityManager = entityManagerProvider.get();
+    TypedQuery<Long> topologyHostTaskQuery =
+            entityManager.createNamedQuery("TopologyLogicalTaskEntity.findHostTaskIdsByPhysicalTaskIds", Long.class);
+
+    topologyHostTaskQuery.setParameter("physicalTaskIds", physicalTaskIds);
+
+    return Sets.newHashSet(daoUtils.selectList(topologyHostTaskQuery));
   }
 
   @RequiresSession

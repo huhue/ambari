@@ -23,44 +23,48 @@ App.ClientComponent = DS.Model.extend({
   service: DS.belongsTo('App.Service'),
   componentName: DS.attr('string'),
   displayName: DS.attr('string'),
-  installedCount: DS.attr('number'),
-  startedCount: DS.attr('number'),
-  totalCount: DS.attr('number'),
+  installedCount: DS.attr('number', {defaultValue: 0}),
+  installedAndMaintenanceOffCount: DS.attr('number', {defaultValue: 0}),
+  installFailedCount: DS.attr('number', {defaultValue: 0}),
+  initCount: DS.attr('number', {defaultValue: 0}),
+  unknownCount: DS.attr('number', {defaultValue: 0}),
+  startedCount: DS.attr('number', {defaultValue: 0}),
+  totalCount: DS.attr('number', {defaultValue: 0}),
   stackInfo: DS.belongsTo('App.StackServiceComponent'),
   hostNames: DS.attr('array'),
-
-  /**
-   * Defines if all components are in 'INSTALLED' state
-   *
-   * @type {boolean}
-   */
-  allStopped: Em.computed.equalProperties('installedCount', 'totalCount'),
-
-  /**
-   * No stated and no installed component
-   *
-   * @type {boolean}
-   */
-  noOneInstalled: Em.computed.and('!installedCount', '!startedCount'),
+  staleConfigHosts: DS.attr('array'),
 
   /**
    * Determines if component may be deleted
    *
    * @type {boolean}
    */
-  allowToDelete: Em.computed.or('allStopped', 'noOneInstalled'),
+  allowToDelete: function () {
+    return this.get('totalCount') === (this.get('installedCount') + this.get('installFailedCount') + this.get('initCount') + this.get('unknownCount'));
+  }.property('totalCount', 'installedCount', 'installFailedCount', 'initCount', 'unknownCount'),
 
-  summaryLabelClassName:function(){
+  summaryLabelClassName: function () {
     return 'label_for_'+this.get('componentName').toLowerCase();
   }.property('componentName'),
 
-  summaryValueClassName:function(){
+  summaryValueClassName: function () {
     return 'value_for_'+this.get('componentName').toLowerCase();
   }.property('componentName'),
 
-  displayNamePluralized: function() {
+  displayNamePluralized: function () {
     return stringUtils.pluralize(this.get('installedCount'), this.get('displayName'));
   }.property('installedCount')
 });
+
+App.ClientComponent.getModelByComponentName = function(componentName) {
+  if (App.HostComponent.isMaster(componentName)) {
+    return App.MasterComponent.find(componentName)
+  } else if (App.HostComponent.isSlave(componentName)) {
+    return App.SlaveComponent.find(componentName)
+  } else if (App.HostComponent.isClient(componentName)) {
+    return App.ClientComponent.find(componentName)
+  }
+  return null;
+};
 
 App.ClientComponent.FIXTURES = [];

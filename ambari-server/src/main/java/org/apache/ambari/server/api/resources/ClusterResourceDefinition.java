@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -60,7 +60,7 @@ public class ClusterResourceDefinition extends BaseResourceDefinition {
 
   @Override
   public Set<SubResourceDefinition> getSubResourceDefinitions() {
-    Set<SubResourceDefinition> setChildren = new HashSet<SubResourceDefinition>();
+    Set<SubResourceDefinition> setChildren = new HashSet<>();
     setChildren.add(new SubResourceDefinition(Resource.Type.Service));
     setChildren.add(new SubResourceDefinition(Resource.Type.Host));
     setChildren.add(new SubResourceDefinition(Resource.Type.Configuration));
@@ -85,6 +85,9 @@ public class ClusterResourceDefinition extends BaseResourceDefinition {
     directives.add(KerberosHelper.DIRECTIVE_REGENERATE_KEYTABS);
     directives.add(KerberosHelper.DIRECTIVE_MANAGE_KERBEROS_IDENTITIES);
     directives.add(KerberosHelper.DIRECTIVE_FORCE_TOGGLE_KERBEROS);
+    directives.add(KerberosHelper.DIRECTIVE_HOSTS);
+    directives.add(KerberosHelper.DIRECTIVE_COMPONENTS);
+    directives.add(KerberosHelper.DIRECTIVE_IGNORE_CONFIGS);
     return directives;
   }
 

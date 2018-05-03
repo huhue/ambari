@@ -57,8 +57,15 @@ enableMetricsSink: True
 metrics_collector:
 
   reportInterval: {{metric_collector_report_interval}}
-  collector: "{{metric_collector_protocol}}://{{metric_collector_host}}:{{metric_collector_port}}"
+  collector.hosts: "{{ams_collector_hosts}}"
+  protocol: "{{metric_collector_protocol}}"
+  port: "{{metric_collector_port}}"
   appId: "{{metric_collector_app_id}}"
+  host_in_memory_aggregation: {{host_in_memory_aggregation}}
+  host_in_memory_aggregation_port: {{host_in_memory_aggregation_port}}
+  {% if is_aggregation_https_enabled %}
+    host_in_memory_aggregation_protocol: {{host_in_memory_aggregation_protocol}}
+  {% endif %}
 
   # HTTPS settings
   truststore.path : "{{metric_truststore_path}}"

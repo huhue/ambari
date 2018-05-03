@@ -24,76 +24,62 @@ var testHelpers = require('test/helpers');
 var installerStep7Controller,
   issuesFilterCases = [
     {
-      isSubmitDisabled: true,
-      submitButtonClicked: true,
-      isIssuesFilterActive: true,
-      issuesFilterText: '',
-      issuesFilterLinkText: Em.I18n.t('installer.step7.showAllProperties'),
-      title: 'issues filter on, submit button clicked'
-    },
-    {
-      isSubmitDisabled: true,
-      submitButtonClicked: false,
-      isIssuesFilterActive: true,
+      transitionInProgress: false,
+      hasStepConfigIssues: true,
+      issuesFilterSelected: true,
       issuesFilterText: Em.I18n.t('installer.step7.showingPropertiesWithIssues'),
       issuesFilterLinkText: Em.I18n.t('installer.step7.showAllProperties'),
-      title: 'issues filter on, submit button disabled'
+      title: 'issues filter on, has property issues, submit not clicked'
     },
     {
-      isSubmitDisabled: true,
-      submitButtonClicked: true,
-      isIssuesFilterActive: false,
+      transitionInProgress: true,
+      hasStepConfigIssues: true,
+      issuesFilterSelected: true,
       issuesFilterText: '',
       issuesFilterLinkText: '',
-      title: 'issues filter off, submit button clicked'
+      title: 'issues filter on, has property issues, submit clicked'
     },
     {
-      isSubmitDisabled: true,
-      submitButtonClicked: false,
-      isIssuesFilterActive: false,
+      transitionInProgress: false,
+      hasStepConfigIssues: false,
+      issuesFilterSelected: true,
+      issuesFilterText: Em.I18n.t('installer.step7.showingPropertiesWithIssues'),
+      issuesFilterLinkText: Em.I18n.t('installer.step7.showAllProperties'),
+      title: 'issues filter on, no property issues, submit not clicked'
+    },
+    {
+      transitionInProgress: false,
+      hasStepConfigIssues: true,
+      issuesFilterSelected: false,
       issuesFilterText: '',
       issuesFilterLinkText: Em.I18n.t('installer.step7.showPropertiesWithIssues'),
-      title: 'issues filter off, submit button disabled'
+      title: 'issues filter off, has property issues, submit not clicked'
     },
     {
-      isSubmitDisabled: false,
-      submitButtonClicked: false,
-      isIssuesFilterActive: true,
+      transitionInProgress: false,
+      hasStepConfigIssues: true,
+      issuesFilterSelected: false,
       issuesFilterText: '',
-      issuesFilterLinkText: Em.I18n.t('installer.step7.showAllProperties'),
-      title: 'issues filter on, submit button enabled'
+      issuesFilterLinkText: Em.I18n.t('installer.step7.showPropertiesWithIssues'),
+      title: 'issues filter off, has property issues, submit not clicked'
     },
     {
-      isSubmitDisabled: false,
-      submitButtonClicked: false,
-      isIssuesFilterActive: false,
+      transitionInProgress: false,
+      hasStepConfigIssues: true,
+      issuesFilterSelected: false,
       issuesFilterText: '',
-      issuesFilterLinkText: '',
-      title: 'issues filter off, submit button enabled'
-    },
-    {
-      isSubmitDisabled: false,
-      submitButtonClicked: false,
-      isIssuesFilterActive: true,
-      issuesFilterText: '',
-      issuesFilterLinkText: Em.I18n.t('installer.step7.showAllProperties'),
-      title: 'issues filter on, submit button not clicked but active'
-    },
-    {
-      isSubmitDisabled: false,
-      submitButtonClicked: true,
-      isIssuesFilterActive: true,
-      issuesFilterText: '',
-      issuesFilterLinkText: Em.I18n.t('installer.step7.showAllProperties'),
-      title: 'issues filter on, submit button clicked and active'
+      issuesFilterLinkText: Em.I18n.t('installer.step7.showPropertiesWithIssues'),
+      title: 'issues filter off, has property issues, submit not clicked'
     }
   ],
   issuesFilterTestSetup = function (controller, testCase) {
     controller.set('submitButtonClicked', testCase.submitButtonClicked);
     controller.reopen({
-      isSubmitDisabled: testCase.isSubmitDisabled
+      isSubmitDisabled: testCase.isSubmitDisabled,
+      transitionInProgress: testCase.transitionInProgress,
+      issuesFilterSelected: testCase.issuesFilterSelected,
+      hasStepConfigIssues: testCase.hasStepConfigIssues
     });
-    controller.get('filterColumns').findProperty('attributeName', 'hasIssues').set('selected', testCase.isIssuesFilterActive);
   };
 
 function getController() {
@@ -111,11 +97,11 @@ describe('App.InstallerStep7Controller', function () {
   beforeEach(function () {
     sinon.stub(App.config, 'setPreDefinedServiceConfigs', Em.K);
     installerStep7Controller = getController();
-    App.router.nextBtnClickInProgress = false;
+    App.set('router.nextBtnClickInProgress', false);
   });
 
   afterEach(function() {
-    App.router.nextBtnClickInProgress = false;
+    App.set('router.nextBtnClickInProgress', false);
     App.config.setPreDefinedServiceConfigs.restore();
     installerStep7Controller.destroy();
   });
@@ -386,6 +372,15 @@ describe('App.InstallerStep7Controller', function () {
   });
 
   describe('#clearStep', function () {
+
+    beforeEach(function () {
+      sinon.stub(installerStep7Controller, 'abortRequests');
+    });
+
+    afterEach(function () {
+      installerStep7Controller.abortRequests.restore();
+    });
+
     it('should clear stepConfigs', function () {
       installerStep7Controller.set('stepConfigs', [
         {},
@@ -407,6 +402,10 @@ describe('App.InstallerStep7Controller', function () {
       ]);
       installerStep7Controller.clearStep();
       expect(installerStep7Controller.get('filterColumns').everyProperty('selected', false)).to.equal(true);
+    });
+    it('should call abortRequests', function () {
+      installerStep7Controller.clearStep();
+      expect(installerStep7Controller.abortRequests.calledOnce).to.be.true;
     });
   });
 
@@ -604,7 +603,7 @@ describe('App.InstallerStep7Controller', function () {
         selectedService: {serviceName: 'abc'},
         selectedConfigGroup: Em.Object.create({isDefault: isDefault})
       });
-      var config = Em.Object.create({isEditable: null});
+      var config = Em.Object.create({isEditable: true});
       var updatedConfig = installerStep7Controller._setEditableValue(config);
       expect(updatedConfig.get('isEditable')).to.equal(isDefault);
       installerStep7Controller.toggleProperty('selectedConfigGroup.isDefault');
@@ -668,12 +667,12 @@ describe('App.InstallerStep7Controller', function () {
       var isDefault;
       beforeEach(function () {
         isDefault = true;
-        var name = 'n1',
-          config = Em.Object.create({overrides: null, name: name, flag: 'flag'}),
+        var id = 'n1',
+          config = Em.Object.create({overrides: null, id: id, flag: 'flag'}),
           overrides = Em.A([
-            Em.Object.create({name: name, value: 'v1'}),
-            Em.Object.create({name: name, value: 'v2'}),
-            Em.Object.create({name: 'n2', value: 'v3'})
+            Em.Object.create({id: id, value: 'v1'}),
+            Em.Object.create({id: id, value: 'v2'}),
+            Em.Object.create({id: 'n2', value: 'v3'})
           ]);
         installerStep7Controller.reopen({
           overrideToAdd: null,
@@ -698,19 +697,19 @@ describe('App.InstallerStep7Controller', function () {
     describe('overrideToAdd exists', function () {
       var isDefault = true;
       beforeEach(function () {
-        var name = 'n1',
-          config = Em.Object.create({overrides: null, name: name, flag: 'flag'}),
-          overrides = Em.A([
-            Em.Object.create({name: name, value: 'v1'}),
-            Em.Object.create({name: name, value: 'v2'}),
-            Em.Object.create({name: 'n2', value: 'v3'})
-          ]);
+        var id = 'n1',
+            config = Em.Object.create({overrides: null, id: id, flag: 'flag'}),
+            overrides = Em.A([
+              Em.Object.create({id: id, value: 'v1'}),
+              Em.Object.create({id: id, value: 'v2'}),
+              Em.Object.create({id: 'n2', value: 'v3'})
+            ]);
         installerStep7Controller.reopen({
-          overrideToAdd: Em.Object.create({name: name}),
-          selectedService: {configGroups: [Em.Object.create({name: 'n', properties: []})]},
+          overrideToAdd: Em.Object.create({id: id}),
+          selectedService: {configGroups: [Em.Object.create({id: 'n', properties: []})]},
           selectedConfigGroup: Em.Object.create({
             isDefault: isDefault,
-            name: 'n'
+            id: 'n'
           })
         });
         this.updatedConfig = installerStep7Controller._setOverrides(config, overrides);
@@ -748,8 +747,8 @@ describe('App.InstallerStep7Controller', function () {
       var configGroups = [
         Em.Object.create({
           properties: [
-            {name: 'g1', value: 'v1'},
-            {name: 'g2', value: 'v2'}
+            {id: 'g1', value: 'v1'},
+            {id: 'g2', value: 'v2'}
           ]
         })
       ];
@@ -765,8 +764,8 @@ describe('App.InstallerStep7Controller', function () {
         installerStep7Controller.reopen({
           selectedConfigGroup: Em.Object.create({isDefault: true, name: 'g1'}),
           content: {services: []},
-          selectedService: {configs: Em.A([Em.Object.create({name: 'g1', overrides: [], properties: []}), Em.Object.create({name: 'g2', overrides: []})])},
-          serviceConfigs: {configs: [Em.Object.create({name: 'g1'})]}
+          selectedService: {configs: Em.A([Em.Object.create({id: 'g1', overrides: [], properties: []}), Em.Object.create({id: 'g2', overrides: []})])},
+          serviceConfigs: {configs: [Em.Object.create({id: 'g1'})]}
         });
         installerStep7Controller.switchConfigGroupConfigs();
         this.configs = installerStep7Controller.get('selectedService.configs');
@@ -778,11 +777,11 @@ describe('App.InstallerStep7Controller', function () {
       });
 
       it('g1 has 1 override', function () {
-        expect(this.configs.findProperty('name', 'g1').get('overrides').length).to.equal(1);
+        expect(this.configs.findProperty('id', 'g1').get('overrides').length).to.equal(1);
       });
 
       it('g2 has 1 override', function () {
-        expect(this.configs.findProperty('name', 'g2').get('overrides').length).to.equal(1);
+        expect(this.configs.findProperty('id', 'g2').get('overrides').length).to.equal(1);
       });
 
       it('all configs are editable', function () {
@@ -802,6 +801,9 @@ describe('App.InstallerStep7Controller', function () {
             {selected: true, name: 'n2'},
             {selected: true, name: 'n3'}
           ],
+          tabs: [
+            Em.Object.create({isActive: true, selectedServiceName: null})
+          ],
           e: 'n2'
         },
         {
@@ -811,7 +813,34 @@ describe('App.InstallerStep7Controller', function () {
             {showConfig: false, name: 'n2'},
             {showConfig: true, name: 'n3'}
           ],
+          tabs: [
+            Em.Object.create({isActive: true, selectedServiceName: null})
+          ],
           e: 'n3'
+        },
+        {
+          name: 'addServiceController',
+          stepConfigs: [
+            {selected: true, name: 'n1'},
+            {selected: true, name: 'n2'},
+            {selected: true, name: 'n3'}
+          ],
+          tabs: [
+            Em.Object.create({isActive: true, selectedServiceName: 'n1'})
+          ],
+          e: 'n1'
+        },
+        {
+          name: 'installerController',
+          stepConfigs: [
+            {showConfig: true, name: 'n1'},
+            {showConfig: false, name: 'n2'},
+            {showConfig: true, name: 'n3'}
+          ],
+          tabs: [
+            Em.Object.create({isActive: true, selectedServiceName: 'n1'})
+          ],
+          e: 'n1'
         }
       ]).forEach(function (test) {
         describe(test.name, function () {
@@ -822,7 +851,8 @@ describe('App.InstallerStep7Controller', function () {
               wizardController: Em.Object.create({
                 name: test.name
               }),
-              stepConfigs: test.stepConfigs
+              stepConfigs: test.stepConfigs,
+              tabs: test.tabs
             });
             installerStep7Controller.selectProperService();
           });
@@ -1011,7 +1041,7 @@ describe('App.InstallerStep7Controller', function () {
               isSelected: false
             });
           },
-          filterProperty: function () {
+          filter: function () {
             return [];
           }
         }
@@ -1116,7 +1146,8 @@ describe('App.InstallerStep7Controller', function () {
         it(test.m, function () {
           installerStep7Controller.reopen({isHostsConfigsPage: test.isHostsConfigsPage});
           var serviceConfigProperty = Em.Object.create({
-            isReconfigurable: test.isReconfigurable
+            isReconfigurable: test.isReconfigurable,
+            isEditable: true
           });
           installerStep7Controller._updateIsEditableFlagForConfig(serviceConfigProperty, test.defaultGroupSelected);
           expect(serviceConfigProperty.get('isEditable')).to.equal(test.e);
@@ -1402,7 +1433,7 @@ describe('App.InstallerStep7Controller', function () {
       it(item.title, function () {
         issuesFilterTestSetup(installerStep7Controller, item);
         expect(installerStep7Controller.get('issuesFilterLinkText')).to.equal(item.issuesFilterLinkText);
-      })
+      });
     });
 
   });
@@ -1419,37 +1450,53 @@ describe('App.InstallerStep7Controller', function () {
     it('selected service should be changed', function () {
       installerStep7Controller.setProperties({
         selectedService: {
+          serviceName: 'service1',
           errorCount: 0,
-          configGroups: []
+          configGroups: [],
+          showConfig: true
         },
         stepConfigs: [
-          {
+          Em.Object.create({
+            serviceName: 'service2',
             errorCount: 1,
-            configGroups: []
-          },
-          {
+            configGroups: [],
+            showConfig: true
+          }),
+          Em.Object.create({
+            serviceName: 'service3',
             errorCount: 2,
-            configGroups: []
-          }
+            configGroups: [],
+            showConfig: true
+          })
         ]
       });
       installerStep7Controller.toggleIssuesFilter();
-      expect(installerStep7Controller.get('selectedService')).to.eql({
-        errorCount: 1,
-        configGroups: []
-      });
+      expect(installerStep7Controller.get('selectedService.serviceName')).to.be.equal('service2');
     });
   });
 
   describe('#addKerberosDescriptorConfigs', function() {
+
+    beforeEach(function() {
+      sinon.stub(App.config, 'kerberosIdentitiesDescription');
+      installerStep7Controller.set('content.services', [
+        {isSelected: true, serviceName: 's1'}
+      ]);
+    });
+
+    afterEach(function() {
+      App.config.kerberosIdentitiesDescription.restore();
+    });
+
     var configs = [
-      { name: 'prop1', displayName: 'Prop1' },
-      { name: 'prop2', displayName: 'Prop2' },
-      { name: 'prop3', displayName: 'Prop3' }
+      { name: 'prop1', displayName: 'Prop1', description: 'd1', serviceName: 's1' },
+      { name: 'prop2', displayName: 'Prop2', description: 'd1', serviceName: 's2' },
+      { name: 'prop3', displayName: 'Prop3', description: 'd1', serviceName: 's2' },
+      { name: 'prop4', displayName: 'Prop4', description: 'd1', serviceName: 's3' }
     ];
     var descriptor = [
-      Em.Object.create({ name: 'prop4', filename: 'file-1'}),
-      Em.Object.create({ name: 'prop1', filename: 'file-1'})
+      Em.Object.create({ name: 'prop4', filename: 'file-1', serviceName: 's2'}),
+      Em.Object.create({ name: 'prop1', filename: 'file-1', serviceName: 's1'})
     ];
     var propertiesAttrTests = [
       {
@@ -1599,12 +1646,12 @@ describe('App.InstallerStep7Controller', function () {
 
   describe('#errorsCount', function () {
 
-    it('should ignore configs with widgets (enhanced configs)', function () {
+    it('should ignore configs with isInDefaultTheme=false', function () {
 
       installerStep7Controller.reopen({selectedService: Em.Object.create({
           configsWithErrors: Em.A([
-            Em.Object.create({widget: {}}),
-            Em.Object.create({widget: null})
+            Em.Object.create({isInDefaultTheme: true}),
+            Em.Object.create({isInDefaultTheme: null})
           ])
         })
       });
@@ -2036,6 +2083,17 @@ describe('App.InstallerStep7Controller', function () {
         ]});
 
         expect(installerStep7Controller.allowUpdateProperty([], '', '')).to.be.false;
+      });
+
+      it('stackProperty was not customized', function () {
+        installerStep7Controller.reopen({installedServices: {s1: true}});
+        this.stub.returns({
+          serviceName: 's1',
+          propertyDependsOn: [],
+          recommendedValue: '1'
+        });
+
+        expect(installerStep7Controller.allowUpdateProperty([], '', '', null, '1')).to.be.true;
       });
 
     });

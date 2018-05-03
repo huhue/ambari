@@ -18,16 +18,18 @@
 
 package org.apache.ambari.server.orm.dao;
 
+import java.util.List;
+
+import javax.persistence.EntityManager;
+import javax.persistence.TypedQuery;
+
+import org.apache.ambari.server.orm.RequiresSession;
+import org.apache.ambari.server.orm.entities.RoleAuthorizationEntity;
+
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
 import com.google.inject.persist.Transactional;
-import org.apache.ambari.server.orm.RequiresSession;
-import org.apache.ambari.server.orm.entities.RoleAuthorizationEntity;
-
-import javax.persistence.EntityManager;
-import javax.persistence.TypedQuery;
-import java.util.List;
 
 /**
  * Authorization (definition) Data Access Object.
@@ -52,6 +54,16 @@ public class RoleAuthorizationDAO {
   @Transactional
   public void create(RoleAuthorizationEntity roleAuthorizationEntity) {
     entityManagerProvider.get().persist(roleAuthorizationEntity);
+  }
+
+  /**
+   * Create or updates a role authorization.
+   *
+   * @param roleAuthorizationEntity  entity to create or update
+   */
+  @Transactional
+  public RoleAuthorizationEntity merge(RoleAuthorizationEntity roleAuthorizationEntity) {
+    return entityManagerProvider.get().merge(roleAuthorizationEntity);
   }
 
   /**

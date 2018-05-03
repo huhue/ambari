@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,13 +18,23 @@
 
 package org.apache.ambari.server.api.predicate;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Stack;
+
 import org.apache.ambari.server.api.predicate.expressions.Expression;
 import org.apache.ambari.server.api.predicate.expressions.LogicalExpressionFactory;
 import org.apache.ambari.server.api.predicate.expressions.RelationalExpression;
-import org.apache.ambari.server.api.predicate.operators.*;
+import org.apache.ambari.server.api.predicate.operators.LogicalOperator;
+import org.apache.ambari.server.api.predicate.operators.LogicalOperatorFactory;
+import org.apache.ambari.server.api.predicate.operators.Operator;
+import org.apache.ambari.server.api.predicate.operators.RelationalOperator;
+import org.apache.ambari.server.api.predicate.operators.RelationalOperatorFactory;
 import org.apache.ambari.server.controller.spi.Predicate;
-
-import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Parser which produces a predicate instance from an array of tokens,
@@ -33,10 +43,16 @@ import java.util.*;
 public class QueryParser {
 
   /**
+   * The logger.
+   */
+  private final static Logger LOG =
+          LoggerFactory.getLogger(QueryParser.class);
+
+  /**
    * Map of token type to token handlers.
    */
   private static final Map<Token.TYPE, TokenHandler> TOKEN_HANDLERS =
-      new HashMap<Token.TYPE, TokenHandler>();
+    new HashMap<>();
 
   /**
    * Constructor.
@@ -77,10 +93,29 @@ public class QueryParser {
     ParseContext ctx = parseExpressions(tokens);
 
     List<Expression> listExpressions       = ctx.getExpressions();
+    changeHostNameToLowerCase(listExpressions);
     List<Expression> listMergedExpressions = mergeExpressions(listExpressions, ctx.getMaxPrecedence());
 
     return listMergedExpressions.isEmpty() ? null :
         listMergedExpressions.get(0).toPredicate();
+  }
+
+  private void changeHostNameToLowerCase(List<Expression> listExpressions) {
+    try {
+      for (Expression expression : listExpressions) {
+        Object keyObject = expression.getLeftOperand();
+        if (keyObject != null) {
+          String key = keyObject.toString();
+          if (key.endsWith("/host_name")) {
+            if (expression.getRightOperand() != null) {
+              expression.setRightOperand(expression.getRightOperand().toString().toLowerCase());
+            }
+          }
+        }
+      }
+    } catch(Exception e) {
+      LOG.error("Lowercase host_name value in expression failed with error:" + e);
+    }
   }
 
   /**
@@ -119,7 +154,7 @@ public class QueryParser {
    */
   private List<Expression> mergeExpressions(List<Expression> listExpressions, int precedenceLevel) {
     if (listExpressions.size() > 1) {
-      Stack<Expression> stack = new Stack<Expression>();
+      Stack<Expression> stack = new Stack<>();
 
       stack.push(listExpressions.remove(0));
       while (! listExpressions.isEmpty()) {
@@ -128,7 +163,7 @@ public class QueryParser {
         Expression right = listExpressions.remove(0);
         stack.addAll(exp.merge(left, right, precedenceLevel));
       }
-      return mergeExpressions(new ArrayList<Expression>(stack), precedenceLevel - 1);
+      return mergeExpressions(new ArrayList<>(stack), precedenceLevel - 1);
     }
     return listExpressions;
   }
@@ -160,7 +195,7 @@ public class QueryParser {
     /**
      * The list of expressions which are generated from the tokens.
      */
-    private List<Expression> m_listExpressions = new ArrayList<Expression>();
+    private List<Expression> m_listExpressions = new ArrayList<>();
 
     /**
      * Highest precedence level in expression.

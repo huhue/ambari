@@ -20,8 +20,8 @@ var App = require('app');
 
 App.CapschedQueuesconfView = Ember.View.extend({
   actions: {
-    showSaveConfigDialog: function() {
-      this.$('#configNoteModalDialog').modal('show');
+    showDeleteQueueDialog: function() {
+      this.$('#deleteQueueModalDialog').modal('show');
     }
   }
 });

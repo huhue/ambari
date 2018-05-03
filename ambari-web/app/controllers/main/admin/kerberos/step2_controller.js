@@ -46,7 +46,7 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
       type: Em.I18n.t('admin.kerberos.wizard.step1.option.kdc')
     },
     'ipa': {
-      configNames: ['group', 'set_password_expiry', 'password_chat_timeout'],
+      configNames: ['ipa_user_group'],
       type: Em.I18n.t('admin.kerberos.wizard.step1.option.ipa')
     }
   },
@@ -60,16 +60,17 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
    * Should Back-button be disabled
    * @type {boolean}
    */
-  isBackBtnDisabled: Em.computed.alias('testConnectionInProgress'),
+  isBackBtnDisabled: Em.computed.or('testConnectionInProgress', 'App.router.nextBtnClickInProgress'),
 
   /**
    * Should Next-button be disabled
    * @type {boolean}
    */
   isSubmitDisabled: function () {
-    if (!this.get('stepConfigs.length') || this.get('testConnectionInProgress') || this.get('submitButtonClicked')) return true;
+    if (!this.get('stepConfigs.length') || this.get('testConnectionInProgress')
+      || this.get('submitButtonClicked') || App.get('router.nextBtnClickInProgress')) return true;
     return (!this.get('stepConfigs').filterProperty('showConfig', true).everyProperty('errorCount', 0) || this.get("miscModalVisible"));
-  }.property('stepConfigs.@each.errorCount', 'miscModalVisible', 'submitButtonClicked', 'testConnectionInProgress'),
+  }.property('stepConfigs.@each.errorCount', 'miscModalVisible', 'submitButtonClicked', 'testConnectionInProgress', 'App.router.nextBtnClickInProgress'),
 
   hostNames: Em.computed.alias('App.allHostNames'),
 
@@ -97,7 +98,7 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
     App.config.setPreDefinedServiceConfigs(this.get('addMiscTabToPage'));
     var stored = this.get('content.serviceConfigProperties');
 
-    this.set('configs', stored || this.getKerberosConfigs());
+    this.set('configs', stored ? App.config.mergeStoredValue(this.getKerberosConfigs(), stored) : this.getKerberosConfigs());
 
     this.filterConfigs(this.get('configs'));
     if (!this.get('wizardController.skipClientInstall')) {
@@ -132,9 +133,11 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
     var kdcType = this.get('content.kerberosOption');
     var kerberosWizardController = this.get('controllers.kerberosWizardController');
     var manageIdentitiesConfig = configs.findProperty('name', 'manage_identities');
-
     configs.filterProperty('serviceName', 'KERBEROS').setEach('isVisible', true);
     this.setKDCTypeProperty(configs);
+    if (kdcType !== Em.I18n.t('admin.kerberos.wizard.step1.option.ad')) {
+        kerberosWizardController.overrideVisibility(configs, false, kerberosWizardController.get('exceptionsForNonAdOption'), true);
+    }
     if (kdcType === Em.I18n.t('admin.kerberos.wizard.step1.option.manual')) {
       if (kerberosWizardController.get('skipClientInstall')) {
         kerberosWizardController.overrideVisibility(configs, false, kerberosWizardController.get('exceptionsOnSkipClient'));
@@ -170,8 +173,8 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
 
   submit: function () {
     var self = this;
-
     if (this.get('isSubmitDisabled')) return false;
+    App.set('router.nextBtnClickInProgress', true);
     this.get('wizardController').deleteKerberosService().always(function () {
       self.configureKerberos();
     });
@@ -183,6 +186,7 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
     var callback = function () {
       self.createConfigurations().done(function () {
         self.createKerberosAdminSession().done(function () {
+          App.set('router.nextBtnClickInProgress', false);
           App.router.send('next');
         });
       });
@@ -197,13 +201,12 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
   createConfigurations: function () {
     var service = App.StackService.find().findProperty('serviceName', 'KERBEROS'),
         serviceConfigTags = [],
-        tag = 'version' + (new Date).getTime(),
         allConfigData = [],
         serviceConfigData = [];
 
     Object.keys(service.get('configTypes')).forEach(function (type) {
       if (!serviceConfigTags.someProperty('type', type)) {
-        var obj = this.createKerberosSiteObj(type, tag);
+        var obj = this.createKerberosSiteObj(type);
         obj.service_config_version_note = Em.I18n.t('admin.kerberos.wizard.configuration.note');
         serviceConfigTags.pushObject(obj);
       }
@@ -231,7 +234,7 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
     });
   },
 
-  createKerberosSiteObj: function (site, tag) {
+  createKerberosSiteObj: function (site) {
     var properties = {};
     var content = this.get('stepConfigs')[0].get('configs');
     var configs = content.filterProperty('filename', site + '.xml');
@@ -251,7 +254,7 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
     this.tweakKdcTypeValue(properties);
     this.tweakManualKdcProperties(properties);
     this.tweakIpaKdcProperties(properties);
-    return {"type": site, "tag": tag, "properties": properties};
+    return {"type": site, "properties": properties};
   },
 
   tweakKdcTypeValue: function (properties) {
@@ -340,5 +343,12 @@ App.KerberosWizardStep2Controller = App.WizardStep7Controller.extend(App.KDCCred
     if (kdcTypeProperty) {
       Em.set(kdcTypeProperty, 'value', kdcValuesMap[kdcTypeValue]);
     }
-  }
+  },
+
+  /**
+   * Override App.WizardStep7Controller#overrideConfigIsRequired
+   *
+   * @override
+   */
+  overrideConfigIsRequired: function() {}
 });

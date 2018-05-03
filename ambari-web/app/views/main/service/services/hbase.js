@@ -50,8 +50,6 @@ App.MainDashboardServiceHbaseView = App.MainDashboardServiceView.extend({
 
   phoenixServersText: Em.computed.countBasedMessage('service.phoenixServersTotal', '', Em.I18n.t('services.service.summary.viewHost'), Em.I18n.t('services.service.summary.viewHosts')),
 
-  showPhoenixInfo: Em.computed.bool('service.phoenixServersTotal'),
-
   /**
    * One(!) active master component
    */
@@ -60,7 +58,7 @@ App.MainDashboardServiceHbaseView = App.MainDashboardServiceView.extend({
   activeMasterTitle: Em.I18n.t('service.hbase.activeMaster'),
 
   masterServerHeapSummary: App.MainDashboardServiceView.formattedHeap('dashboard.services.hbase.masterServerHeap.summary', 'service.heapMemoryUsed', 'service.heapMemoryMax'),
-
+  masterServerHeapSummaryPercent: App.MainDashboardServiceView.formattedHeapPercent('dashboard.services.hbase.masterServerHeap.percent', 'service.heapMemoryUsed', 'service.heapMemoryMax'),
   summaryHeader: function () {
     var avgLoad = this.get('service.averageLoad');
     if (isNaN(avgLoad)) {
@@ -68,12 +66,6 @@ App.MainDashboardServiceHbaseView = App.MainDashboardServiceView.extend({
     }
     return this.t("dashboard.services.hbase.summary").format(this.get('service.regionServersTotal'), avgLoad);
   }.property('service.regionServersTotal', 'service.averageLoad'),
-
-  hbaseMasterWebUrl: function () {
-    if (this.get('activeMaster.host.publicHostName')) {
-      return "http://" + (App.singleNodeInstall ? App.singleNodeAlias : this.get('activeMaster.host.publicHostName')) + ":60010";
-    }
-  }.property('activeMaster'),
 
   averageLoad: function () {
     var avgLoad = this.get('service.averageLoad');
@@ -93,5 +85,13 @@ App.MainDashboardServiceHbaseView = App.MainDashboardServiceView.extend({
 
   phoenixServerComponent: Em.Object.create({
     componentName: 'PHOENIX_QUERY_SERVER'
-  })
+  }),
+
+  isRegionServerCreated: function () {
+    return this.isServiceComponentCreated('HBASE_REGIONSERVER');
+  }.property('App.router.clusterController.isComponentsStateLoaded'),
+
+  isPhoenixQueryServerCreated: function () {
+    return this.isServiceComponentCreated('PHOENIX_QUERY_SERVER');
+  }.property('App.router.clusterController.isComponentsStateLoaded')
 });

@@ -32,6 +32,9 @@ class TestPhoenixQueryServer(RMFTestCase):
   STACK_VERSION = "2.3"
   TMP_PATH = "/hadoop"
 
+  CONFIG_OVERRIDES = {"serviceName":"HBASE", "role":"PHOENIX_QUERY_SERVER"}
+
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_configure_default(self):
     self.executeScript(
       self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/phoenix_queryserver.py",
@@ -46,6 +49,7 @@ class TestPhoenixQueryServer(RMFTestCase):
     self.assert_configure_default()
     self.assertNoMoreResources()
 
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_start_default(self):
     self.executeScript(
       self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/phoenix_queryserver.py",
@@ -65,6 +69,7 @@ class TestPhoenixQueryServer(RMFTestCase):
     )
     self.assertNoMoreResources()
 
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_stop_default(self):
     self.executeScript(
       self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/phoenix_queryserver.py",
@@ -76,12 +81,8 @@ class TestPhoenixQueryServer(RMFTestCase):
       call_mocks = [(0, None, None)]
     )
 
-    self.assert_call_to_get_hadoop_conf_dir()
-
     self.assertResourceCalled('Execute',
       '/usr/hdp/current/phoenix-server/bin/queryserver.py stop',
-      on_timeout = '! ( ls /var/run/hbase/phoenix-hbase-server.pid >/dev/null 2>&1 && ps -p `cat /var/run/hbase/phoenix-hbase-server.pid` >/dev/null 2>&1 ) || ambari-sudo.sh -H -E kill -9 `cat /var/run/hbase/phoenix-hbase-server.pid`',
-      timeout = 30,
       environment = {'JAVA_HOME':'/usr/jdk64/jdk1.8.0_40',
       'HBASE_CONF_DIR':'/usr/hdp/current/hbase-regionserver/conf'},
       user = 'hbase'
@@ -92,6 +93,7 @@ class TestPhoenixQueryServer(RMFTestCase):
     )
     self.assertNoMoreResources()
 
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_configure_secured(self):
     self.executeScript(
       self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/phoenix_queryserver.py",
@@ -106,6 +108,7 @@ class TestPhoenixQueryServer(RMFTestCase):
     self.assert_configure_secured()
     self.assertNoMoreResources()
 
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_start_secured(self):
     self.executeScript(
       self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/phoenix_queryserver.py",
@@ -125,6 +128,7 @@ class TestPhoenixQueryServer(RMFTestCase):
     )
     self.assertNoMoreResources()
 
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_stop_secured(self):
     self.executeScript(
       self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/phoenix_queryserver.py",
@@ -136,12 +140,8 @@ class TestPhoenixQueryServer(RMFTestCase):
       call_mocks = [(0, None, None)]
     )
 
-    self.assert_call_to_get_hadoop_conf_dir()
-
     self.assertResourceCalled('Execute',
       '/usr/hdp/current/phoenix-server/bin/queryserver.py stop',
-      on_timeout = '! ( ls /var/run/hbase/phoenix-hbase-server.pid >/dev/null 2>&1 && ps -p `cat /var/run/hbase/phoenix-hbase-server.pid` >/dev/null 2>&1 ) || ambari-sudo.sh -H -E kill -9 `cat /var/run/hbase/phoenix-hbase-server.pid`',
-      timeout = 30,
       environment = {'JAVA_HOME':'/usr/jdk64/jdk1.8.0_40',
       'HBASE_CONF_DIR':'/usr/hdp/current/hbase-regionserver/conf'},
       user = 'hbase'
@@ -181,14 +181,14 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'hbase-site'])
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'core-site']
     )
     self.assertResourceCalled('File',
@@ -221,18 +221,7 @@ class TestPhoenixQueryServer(RMFTestCase):
 
     self.assertNoMoreResources()
 
-  def assert_call_to_get_hadoop_conf_dir(self):
-    # From call to conf_select.get_hadoop_conf_dir()
-    self.assertResourceCalled("Execute", ("cp", "-R", "-p", "/etc/hadoop/conf", "/etc/hadoop/conf.backup"),
-                              not_if = "test -e /etc/hadoop/conf.backup",
-                              sudo = True)
-    self.assertResourceCalled("Directory", "/etc/hadoop/conf",
-                              action = ["delete"])
-    self.assertResourceCalled("Link", "/etc/hadoop/conf", to="/etc/hadoop/conf.backup")
-
   def assert_configure_default(self):
-    self.assert_call_to_get_hadoop_conf_dir()
-
     self.assertResourceCalled('Directory', '/etc/hbase',
       mode = 0755
     )
@@ -258,7 +247,7 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'hbase-site']
     )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
@@ -266,7 +255,7 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'core-site']
     )
     self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
@@ -274,15 +263,7 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
-        'hdfs-site']
-    )
-    self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
-      owner = 'hdfs',
-      group = 'hadoop',
-      conf_dir = '/usr/hdp/current/hadoop-client/conf',
-      configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'hdfs-site']
     )
     self.assertResourceCalled('XmlConfig', 'hbase-policy.xml',
@@ -290,7 +271,7 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-policy'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'hbase-policy']
     )
     self.assertResourceCalled('File',
@@ -338,12 +319,10 @@ class TestPhoenixQueryServer(RMFTestCase):
       mode = 0644,
       group = 'hadoop',
       owner = 'hbase',
-      content = 'log4jproperties\nline2'
+      content = InlineTemplate('log4jproperties\nline2')
     )
 
   def assert_configure_secured(self):
-    self.assert_call_to_get_hadoop_conf_dir()
-
     self.assertResourceCalled('Directory', '/etc/hbase',
       mode = 0755
     )
@@ -369,7 +348,7 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'hbase-site']
     )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
@@ -377,7 +356,7 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'core-site']
     )
     self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
@@ -385,15 +364,7 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
-        'hdfs-site']
-    )
-    self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
-      owner = 'hdfs',
-      group = 'hadoop',
-      conf_dir = '/usr/hdp/current/hadoop-client/conf',
-      configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'hdfs-site']
     )
     self.assertResourceCalled('XmlConfig', 'hbase-policy.xml',
@@ -401,7 +372,7 @@ class TestPhoenixQueryServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-policy'],
-      configuration_attributes = self.getConfig()['configuration_attributes'][
+      configuration_attributes = self.getConfig()['configurationAttributes'][
         'hbase-policy']
     )
     self.assertResourceCalled('File',
@@ -454,9 +425,10 @@ class TestPhoenixQueryServer(RMFTestCase):
       mode = 0644,
       group = 'hadoop',
       owner = 'hbase',
-      content = 'log4jproperties\nline2'
+      content = InlineTemplate('log4jproperties\nline2')
     )
 
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_upgrade_restart(self):
     config_file = self.get_src_folder()+"/test/python/stacks/2.3/configs/hbase_default.json"
     with open(config_file, "r") as f:
@@ -469,20 +441,10 @@ class TestPhoenixQueryServer(RMFTestCase):
       classname = "PhoenixQueryServer",
       command = "pre_upgrade_restart",
       config_dict = json_content,
+      config_overrides = self.CONFIG_OVERRIDES,
       call_mocks = [(0, "/etc/hbase/2.3.0.0-1234/0", ''), (0, None, None), (0, None, None)],
       stack_version = self.STACK_VERSION,
       target = RMFTestCase.TARGET_COMMON_SERVICES)
 
-    self.assertResourceCalled('Directory', '/etc/hbase/2.3.0.0-1234/0',
-        create_parents = True,
-        mode = 0755,
-        cd_access = 'a',
-    )
     self.assertResourceCalledIgnoreEarlier('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'phoenix-server', '2.3.0.0-1234'), sudo=True)
-
-    self.assertResourceCalled("Execute", ("cp", "-R", "-p", "/etc/hadoop/conf", "/etc/hadoop/conf.backup"),
-                              not_if = "test -e /etc/hadoop/conf.backup",
-                              sudo = True)
-    self.assertResourceCalled("Directory", "/etc/hadoop/conf", action = ["delete"])
-    self.assertResourceCalled("Link", "/etc/hadoop/conf", to="/etc/hadoop/conf.backup")
     self.assertNoMoreResources()

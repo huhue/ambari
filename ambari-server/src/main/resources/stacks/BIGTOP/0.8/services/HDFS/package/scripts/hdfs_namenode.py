@@ -112,7 +112,8 @@ def format_namenode(force=None):
       ExecuteHadoop('namenode -format',
                     kinit_override=True,
                     bin_dir=params.hadoop_bin_dir,
-                    conf_dir=hadoop_conf_dir)
+                    conf_dir=hadoop_conf_dir,
+                    logoutput=True)
     else:
       File(format("{tmp_dir}/checkForFormat.sh"),
            content=StaticFile("checkForFormat.sh"),
@@ -142,8 +143,16 @@ def decommission():
        owner=hdfs_user,
        group=user_group
   )
-  
-  if not params.update_exclude_file_only:
+
+  if params.hdfs_include_file:
+    File(params.include_file_path,
+         content=Template("include_hosts_list.j2"),
+         owner=params.hdfs_user,
+         group=params.user_group
+         )
+    pass
+
+  if not params.update_files_only:
     Execute(nn_kinit_cmd,
             user=hdfs_user
     )

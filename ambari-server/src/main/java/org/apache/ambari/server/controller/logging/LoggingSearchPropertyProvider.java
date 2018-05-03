@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,110 +17,128 @@
  */
 package org.apache.ambari.server.controller.logging;
 
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.controller.AmbariManagementController;
-import org.apache.ambari.server.controller.AmbariServer;
 import org.apache.ambari.server.controller.spi.Predicate;
 import org.apache.ambari.server.controller.spi.PropertyProvider;
 import org.apache.ambari.server.controller.spi.Request;
 import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.SystemException;
 import org.apache.ambari.server.controller.utilities.PropertyHelper;
+import org.apache.ambari.server.security.authorization.AuthorizationHelper;
+import org.apache.ambari.server.security.authorization.ResourceType;
+import org.apache.ambari.server.security.authorization.RoleAuthorization;
+import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.ComponentInfo;
 import org.apache.ambari.server.state.LogDefinition;
+import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.StackId;
-import org.apache.log4j.Logger;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
+import com.google.inject.Inject;
 
 public class LoggingSearchPropertyProvider implements PropertyProvider {
 
-  private static final Logger LOG = Logger.getLogger(LoggingSearchPropertyProvider.class);
+  private static final Logger LOG = LoggerFactory.getLogger(LoggingSearchPropertyProvider.class);
 
   private static final String CLUSTERS_PATH = "/api/v1/clusters";
 
   private static final String PATH_TO_SEARCH_ENGINE = "/logging/searchEngine";
 
+  /**
+   * The user of authorizations for which a user must have one of in order to access LogSearch data
+   */
+  private static final Set<RoleAuthorization> REQUIRED_AUTHORIZATIONS = EnumSet.of(RoleAuthorization.SERVICE_VIEW_OPERATIONAL_LOGS);
+
   private static AtomicInteger errorLogCounterForLogSearchConnectionExceptions = new AtomicInteger(0);
 
-  private final LoggingRequestHelperFactory requestHelperFactory;
+  @Inject
+  private AmbariManagementController ambariManagementController;
 
-  private final ControllerFactory controllerFactory;
+  @Inject
+  private LogSearchDataRetrievalService logSearchDataRetrievalService;
 
-  public LoggingSearchPropertyProvider() {
-    this(new LoggingRequestHelperFactoryImpl(), new DefaultControllerFactory());
-  }
-
-  protected LoggingSearchPropertyProvider(LoggingRequestHelperFactory requestHelperFactory, ControllerFactory controllerFactory) {
-    this.requestHelperFactory = requestHelperFactory;
-    this.controllerFactory = controllerFactory;
-  }
+  @Inject
+  private LoggingRequestHelperFactory loggingRequestHelperFactory;
 
   @Override
   public Set<Resource> populateResources(Set<Resource> resources, Request request, Predicate predicate) throws SystemException {
-
-    AmbariManagementController controller =
-      controllerFactory.getAmbariManagementController();
-
+    Map<String, Boolean> isLogSearchRunning = new HashMap<>();
     for (Resource resource : resources) {
       // obtain the required identifying properties on the host component resource
       final String componentName = (String)resource.getPropertyValue(PropertyHelper.getPropertyId("HostRoles", "component_name"));
       final String hostName = (String) resource.getPropertyValue(PropertyHelper.getPropertyId("HostRoles", "host_name"));
       final String clusterName = (String) resource.getPropertyValue(PropertyHelper.getPropertyId("HostRoles", "cluster_name"));
 
+      // Test to see if the authenticated user is authorized to view this data... if not, skip it.
+      if(!AuthorizationHelper.isAuthorized(ResourceType.CLUSTER, getClusterResourceID(clusterName), REQUIRED_AUTHORIZATIONS)) {
+        if(LOG.isDebugEnabled()) {
+          LOG.debug("The authenticated user ({}) is not authorized to access LogSearch data for the cluster named {}",
+              AuthorizationHelper.getAuthenticatedName(),
+              clusterName);
+        }
+        continue;
+      }
+
+      Boolean isLogSearchRunningForSpecifiedCluster = isLogSearchRunning.get(clusterName);
+      if (isLogSearchRunningForSpecifiedCluster == null) {
+        isLogSearchRunningForSpecifiedCluster = logSearchServerRunning(clusterName);
+        isLogSearchRunning.put(clusterName, isLogSearchRunningForSpecifiedCluster);
+      }
+      if (!isLogSearchRunningForSpecifiedCluster) {
+        continue;
+      }
+
       // query the stack definitions to find the correct component name (stack name mapped to LogSearch-defined name)
       final String mappedComponentNameForLogSearch =
-        getMappedComponentNameForSearch(clusterName, componentName, controller);
+        getMappedComponentNameForSearch(clusterName, componentName, ambariManagementController);
 
       if (mappedComponentNameForLogSearch != null) {
-        HostComponentLoggingInfo loggingInfo =
-          new HostComponentLoggingInfo();
+        // send query to obtain logging metadata
+        Set<String> logFileNames =
+          logSearchDataRetrievalService.getLogFileNames(mappedComponentNameForLogSearch, hostName, clusterName);
 
-        // make query to LogSearch server to find the associated file names
-        // create helper instance using factory
-        LoggingRequestHelper requestHelper =
-          requestHelperFactory.getHelper(controller, clusterName);
+        if ((logFileNames != null) && (!logFileNames.isEmpty())) {
+          HostComponentLoggingInfo loggingInfo = new HostComponentLoggingInfo();
+          loggingInfo.setComponentName(mappedComponentNameForLogSearch);
+          List<LogFileDefinitionInfo> listOfFileDefinitions =
+            new LinkedList<>();
 
-        // if LogSearch service is available
-        if (requestHelper != null) {
-          // send query to obtain logging metadata
-          Set<String> logFileNames =
-            requestHelper.sendGetLogFileNamesRequest(mappedComponentNameForLogSearch, hostName);
-
-          LogLevelQueryResponse levelQueryResponse =
-            requestHelper.sendLogLevelQueryRequest(mappedComponentNameForLogSearch, hostName);
-
-          if ((logFileNames != null) && (!logFileNames.isEmpty())) {
-            loggingInfo.setComponentName(mappedComponentNameForLogSearch);
-            List<LogFileDefinitionInfo> listOfFileDefinitions =
-              new LinkedList<LogFileDefinitionInfo>();
-
-            for (String fileName : logFileNames) {
-              // generate the URIs that can be used by clients to obtain search results/tail log results/etc
-              final String searchEngineURI = controller.getAmbariServerURI(getFullPathToSearchEngine(clusterName));
-              final String logFileTailURI = requestHelper.createLogFileTailURI(searchEngineURI, mappedComponentNameForLogSearch, hostName);
+          for (String fileName : logFileNames) {
+            // generate the URIs that can be used by clients to obtain search results/tail log results/etc
+            final String searchEngineURI = ambariManagementController.getAmbariServerURI(getFullPathToSearchEngine(clusterName));
+            final String logFileTailURI = logSearchDataRetrievalService.getLogFileTailURI(searchEngineURI, mappedComponentNameForLogSearch, hostName, clusterName);
+            if (logFileTailURI != null) {
               // all log files are assumed to be service types for now
               listOfFileDefinitions.add(new LogFileDefinitionInfo(fileName, LogFileType.SERVICE, searchEngineURI, logFileTailURI));
             }
+          }
 
-            loggingInfo.setListOfLogFileDefinitions(listOfFileDefinitions);
+          loggingInfo.setListOfLogFileDefinitions(listOfFileDefinitions);
 
-            // add the log levels for this host component to the logging structure
-            if (levelQueryResponse != null) {
-              loggingInfo.setListOfLogLevels(levelQueryResponse.getNameValueList());
-            }
+          LOG.debug("Adding logging info for component name = " + componentName + " on host name = " + hostName);
+          // add the logging metadata for this host component
+          resource.setProperty("logging", loggingInfo);
+        } else {
+          if (LOG.isDebugEnabled()) {
+            String debugMessage =
+              String.format("Error occurred while making request to LogSearch service, unable to populate logging properties on this resource, component = %s, host = %s",
+                            componentName, hostName);
 
-            LOG.debug("Adding logging info for component name = " + componentName + " on host name = " + hostName);
-            // add the logging metadata for this host component
-            resource.setProperty("logging", loggingInfo);
-          } else {
-            Utils.logErrorMessageWithCounter(LOG, errorLogCounterForLogSearchConnectionExceptions,
-              "Error occurred while making request to LogSearch service, unable to populate logging properties on this resource");
+            Utils.logDebugMessageWithCounter(LOG, errorLogCounterForLogSearchConnectionExceptions,
+                                             debugMessage);
           }
         }
       }
@@ -130,15 +148,52 @@ public class LoggingSearchPropertyProvider implements PropertyProvider {
     return resources;
   }
 
+  /**
+   * Get the relevant cluster's resource ID.
+   *
+   * @param clusterName a cluster name
+   * @return a resource ID or <code>null</code> if the cluster is not found
+   */
+  private Long getClusterResourceID(String clusterName) {
+    Long clusterResourceId = null;
+
+    if(!StringUtils.isEmpty(clusterName)) {
+      try {
+        Cluster cluster = ambariManagementController.getClusters().getCluster(clusterName);
+
+        if(cluster == null) {
+          LOG.warn(String.format("No cluster found with the name %s, assuming null resource id", clusterName));
+        }
+        else {
+          clusterResourceId = cluster.getResourceId();
+        }
+
+      } catch (AmbariException e) {
+        LOG.warn(String.format("An exception occurred looking up the cluster named %s, assuming null resource id: %s",
+            clusterName, e.getLocalizedMessage()));
+      }
+    }
+    else {
+      LOG.debug("The cluster name is not set, assuming null resource id");
+    }
+
+    return clusterResourceId;
+  }
+
+  private boolean logSearchServerRunning(String clusterName) {
+    return loggingRequestHelperFactory.getHelper(ambariManagementController, clusterName) != null;
+  }
+
   private String getMappedComponentNameForSearch(String clusterName, String componentName, AmbariManagementController controller) {
     try {
       AmbariMetaInfo metaInfo = controller.getAmbariMetaInfo();
-      StackId stackId =
-        controller.getClusters().getCluster(clusterName).getCurrentStackVersion();
+      Cluster cluster = controller.getClusters().getCluster(clusterName);
+      String serviceName = controller.findServiceName(cluster, componentName);
+      Service service = cluster.getService(serviceName);
+      StackId stackId = service.getDesiredStackId();
+
       final String stackName = stackId.getStackName();
       final String stackVersion = stackId.getStackVersion();
-      final String serviceName =
-        metaInfo.getComponentToService(stackName, stackVersion, componentName);
 
       ComponentInfo componentInfo =
         metaInfo.getComponent(stackName, stackVersion, serviceName, componentName);
@@ -170,18 +225,16 @@ public class LoggingSearchPropertyProvider implements PropertyProvider {
     return Collections.emptySet();
   }
 
-  /**
-   * Internal interface used to control how the AmbariManagementController
-   * instance is obtained.  This is useful for unit testing as well.
-   */
-  interface ControllerFactory {
-    AmbariManagementController getAmbariManagementController();
+  protected void setAmbariManagementController(AmbariManagementController ambariManagementController) {
+    this.ambariManagementController = ambariManagementController;
   }
 
-  private static class DefaultControllerFactory implements ControllerFactory {
-    @Override
-    public AmbariManagementController getAmbariManagementController() {
-      return AmbariServer.getController();
-    }
+  void setLogSearchDataRetrievalService(LogSearchDataRetrievalService logSearchDataRetrievalService) {
+    this.logSearchDataRetrievalService = logSearchDataRetrievalService;
   }
+
+  void setLoggingRequestHelperFactory(LoggingRequestHelperFactory loggingRequestHelperFactory) {
+    this.loggingRequestHelperFactory = loggingRequestHelperFactory;
+  }
+
 }

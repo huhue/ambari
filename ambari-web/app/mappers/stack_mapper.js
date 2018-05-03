@@ -27,6 +27,8 @@ App.stackMapper = App.QuickDataMapper.create({
     id: 'id',
     stack_name: 'stack_name',
     stack_version: 'stack_version',
+    stack_default: 'stack_default',
+    stack_repo_update_link_exists: 'stack_repo_update_link_exists',
     show_available: 'show_available',
     type: 'type',
     repository_version: 'repository_version',
@@ -74,6 +76,7 @@ App.stackMapper = App.QuickDataMapper.create({
   configRepository: {
     id: 'id',
     base_url: 'base_url',
+    base_url_init: 'base_url',
     default_base_url: 'default_base_url',
     latest_base_url: 'latest_base_url',
     mirrors_list: 'mirrors_list',
@@ -82,7 +85,10 @@ App.stackMapper = App.QuickDataMapper.create({
     repo_name: 'repo_name',
     stack_name: 'stack_name',
     stack_version: 'stack_version',
-    operating_system_id: 'os_id'
+    operating_system_id: 'os_id',
+    components: 'components',
+    distribution: 'distribution',
+    tags: 'tags'
   },
   
   map: function(json) {
@@ -96,6 +102,9 @@ App.stackMapper = App.QuickDataMapper.create({
 
     var item = json;
     var stack = item.VersionDefinition;
+    if (!stack.id) {
+      stack.id = stack.stack_name + '-' + stack.stack_version + '-' + stack.repository_version; //HDP-2.5-2.5.0.0
+    }
     var operatingSystemsArray = [];
     var servicesArray = [];
 
@@ -106,7 +115,7 @@ App.stackMapper = App.QuickDataMapper.create({
       ops.repositories.forEach(function(repo) {
         repo.Repositories.id = [stack.id, repo.Repositories.os_type, repo.Repositories.repo_id].join('-');
         repo.Repositories.os_id = [stack.id, repo.Repositories.os_type].join('-');
-        if (!repo.Repositories.latest_base_url)  repo.Repositories.latest_base_url = repo.Repositories.base_url;
+        if (!repo.Repositories.latest_base_url) repo.Repositories.latest_base_url = repo.Repositories.base_url;
         resultRepo.push(this.parseIt(repo.Repositories, this.get('configRepository')));
         repositoriesArray.pushObject(repo.Repositories);
       }, this);
@@ -114,7 +123,7 @@ App.stackMapper = App.QuickDataMapper.create({
       operatingSystems.id = stack.id + "-" + operatingSystems.os_type;
       operatingSystems.stack_id = operatingSystems.stack_name + "-" + operatingSystems.stack_version;
       operatingSystems.repositories = repositoriesArray;
-      operatingSystems.is_selected = (ops.isSelected == true || ops.isSelected == undefined);
+      operatingSystems.is_selected = ops.isSelected == true || ops.isSelected == undefined;
       resultOS.push(this.parseIt(operatingSystems, this.get('configOS')));
       operatingSystemsArray.pushObject(operatingSystems);
         
@@ -135,11 +144,9 @@ App.stackMapper = App.QuickDataMapper.create({
     stack.use_redhat_satellite = item.operating_systems[0].OperatingSystems.ambari_managed_repositories === false;
     stack.stack_services = servicesArray;
     stack.operating_systems = operatingSystemsArray;
-
-    App.store.commit();
-    App.store.loadMany(modelRepo, resultRepo);
-    App.store.loadMany(modelOS, resultOS);
-    App.store.loadMany(modelServices, resultServices);
-    App.store.load(modelStack, this.parseIt(stack, this.get('configStack')));
+    App.store.safeLoadMany(modelRepo, resultRepo);
+    App.store.safeLoadMany(modelOS, resultOS);
+    App.store.safeLoadMany(modelServices, resultServices);
+    App.store.safeLoad(modelStack, this.parseIt(stack, this.get('configStack')));
   }
 });

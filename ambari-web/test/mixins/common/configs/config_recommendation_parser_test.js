@@ -194,7 +194,10 @@ describe('App.ConfigRecommendationParser', function() {
         'result': {
           'recommendedValue': 'recommendedValue',
           'value': 'recommendedValue',
-          'initialValue': 'recommendedValue'
+          'initialValue': 'recommendedValue',
+          'errorMessage': '',
+          'warnMessage': '',
+          'isVisible': true
         }
       },
       {
@@ -204,7 +207,10 @@ describe('App.ConfigRecommendationParser', function() {
         'result': {
           'recommendedValue': 'recommendedValue',
           'value': 'recommendedValue',
-          'initialValue': null
+          'initialValue': null,
+          'errorMessage': '',
+          'warnMessage': '',
+          'isVisible': true
         }
       },
       {
@@ -508,13 +514,13 @@ describe('App.ConfigRecommendationParser', function() {
     it('add new file name', function() {
       instanceObject.set('modifiedFileNames', ['someFile']);
       instanceObject.addModifiedFileName('otherFile');
-      expect(instanceObject.get('modifiedFileNames').join(',')).to.eql('someFile,otherFile');
+      expect(instanceObject.get('modifiedFileNames').join(',')).to.be.equal('someFile,otherFile');
     });
 
     it('do not add file that already in list', function() {
       instanceObject.set('modifiedFileNames', ['someFile']);
       instanceObject.addModifiedFileName('someFile');
-      expect(instanceObject.get('modifiedFileNames').join(',')).to.eql('someFile');
+      expect(instanceObject.get('modifiedFileNames').join(',')).to.be.equal('someFile');
     });
   });
 });

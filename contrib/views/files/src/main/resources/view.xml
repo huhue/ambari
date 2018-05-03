@@ -80,6 +80,22 @@
         <cluster-config>fake</cluster-config>
     </parameter>
     <parameter>
+        <name>webhdfs.ha.namenode.https-address.nn1</name>
+        <description>WebHDFS Https address for first name node.
+            Value of hdfs-site/dfs.namenode.https-address.[nameservice].[namenode1] property</description>
+        <label>First NameNode HTTPS (WebHDFS) Address</label>
+        <required>false</required>
+        <cluster-config>fake</cluster-config>
+    </parameter>
+    <parameter>
+        <name>webhdfs.ha.namenode.https-address.nn2</name>
+        <description>WebHDFS Https address for second name node.
+            Value of hdfs-site/dfs.namenode.https-address.[nameservice].[namenode2] property</description>
+        <label>Second NameNode HTTPS (WebHDFS) Address</label>
+        <required>false</required>
+        <cluster-config>fake</cluster-config>
+    </parameter>
+    <parameter>
         <name>webhdfs.client.failover.proxy.provider</name>
         <description>The Java class that HDFS clients use to contact the Active NameNode
             Value of hdfs-site/dfs.client.failover.proxy.provider.[nameservice] property</description>
@@ -125,6 +141,13 @@
         <default-value>/user/${username}/files-view/tmp</default-value>
         <required>true</required>
     </parameter>
+    <parameter>
+        <name>view.conf.keyvalues</name>
+        <description>The key values that will be copied to hdfs connection configuration verbatim. Format : key1=value1;
+          key2=value2</description>
+        <label>View Configs</label>
+        <required>false</required>
+    </parameter>
 
     <resource>
         <name>files</name>
@@ -135,9 +158,16 @@
         <name>AUTO_FILES_INSTANCE</name>
         <label>Files View</label>
         <description>This view instance is auto created when the HDFS service is added to a cluster.</description>
-        <stack-id>HDP-2.*</stack-id>
+        <stack-id>HDP-*</stack-id>
         <services>
           <service>HDFS</service>
         </services>
+        <roles>
+            <role>CLUSTER.ADMINISTRATOR</role>
+            <role>CLUSTER.OPERATOR</role>
+            <role>SERVICE.ADMINISTRATOR</role>
+            <role>SERVICE.OPERATOR</role>
+            <role>CLUSTER.USER</role>
+        </roles>
     </auto-instance>
 </view>

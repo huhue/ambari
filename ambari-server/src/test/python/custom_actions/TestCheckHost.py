@@ -22,7 +22,7 @@ from stacks.utils.RMFTestCase import *
 import json
 import os
 import socket
-import subprocess
+from ambari_commons import subprocess32
 from ambari_commons import inet_utils, OSCheck
 from resource_management import Script, ConfigDictionary
 from resource_management.core.exceptions import Fail
@@ -88,8 +88,8 @@ class TestCheckHost(TestCase):
                                                    "user_name" : "test_user_name",
                                                    "user_passwd" : "test_user_passwd",
                                                    "jdk_name" : "test_jdk_name"},
-                                "hostLevelParams": { "agentCacheDir": "/nonexistent_tmp",
-                                                     "custom_mysql_jdbc_name" : "mysql-connector-java.jar"}
+                                "ambariLevelParams": {"custom_mysql_jdbc_name" : "mysql-connector-java.jar"},
+                                "agentLevelParams":{"agentCacheDir": "/nonexistent_tmp"}
                                 }
     get_tmp_dir_mock.return_value = "/tmp"
     download_file_mock.side_effect = Exception("test exception")
@@ -116,8 +116,8 @@ class TestCheckHost(TestCase):
                                                    "user_name" : "test_user_name",
                                                    "user_passwd" : "test_user_passwd",
                                                    "jdk_name" : "test_jdk_name"},
-                                "hostLevelParams": { "agentCacheDir": "/nonexistent_tmp",
-                                                     "custom_oracle_jdbc_name" : "oracle-jdbc-driver.jar"}}
+                                "agentLevelParams": { "agentCacheDir": "/nonexistent_tmp"},
+                                "ambariLevelParams": { "custom_oracle_jdbc_name" : "oracle-jdbc-driver.jar"}}
     format_mock.reset_mock()
     download_file_mock.reset_mock()
     p = MagicMock()
@@ -146,8 +146,8 @@ class TestCheckHost(TestCase):
                                                    "user_name" : "test_user_name",
                                                    "user_passwd" : "test_user_passwd",
                                                    "jdk_name" : "test_jdk_name"},
-                                "hostLevelParams": { "agentCacheDir": "/nonexistent_tmp",
-                                                     "custom_postgres_jdbc_name" : "test-postgres-jdbc.jar"}}
+                                "agentLevelParams": { "agentCacheDir": "/nonexistent_tmp"},
+                                "ambariLevelParams": { "custom_postgres_jdbc_name" : "oracle-jdbc-driver.jar"}}
     format_mock.reset_mock()
     download_file_mock.reset_mock()
     download_file_mock.side_effect = [p, p]
@@ -184,8 +184,8 @@ class TestCheckHost(TestCase):
                                                    "user_name" : "test_user_name",
                                                    "user_passwd" : "test_user_passwd",
                                                    "db_name" : "postgres"},
-                                "hostLevelParams": { "agentCacheDir": "/nonexistent_tmp",
-                                                     "custom_postgres_jdbc_name" : "test-postgres-jdbc.jar"}}
+                                "agentLevelParams": { "agentCacheDir": "/nonexistent_tmp"},
+                                "ambariLevelParams": { "custom_postgres_jdbc_name" : "test-postgres-jdbc.jar"}}
 
     isfile_mock.return_value = False
 
@@ -225,7 +225,8 @@ class TestCheckHost(TestCase):
        'message': 'All hosts resolved to an IP address.', 
        'failed_count': 0, 
        'success_count': 5, 
-       'exit_code': 0}})
+       'exit_code': 0,
+       'hosts_with_failures': []}})
     
     # try it now with errors
     mock_socket.side_effect = socket.error
@@ -239,7 +240,10 @@ class TestCheckHost(TestCase):
                     {'cause': (), 'host': u'foobar', 'type': 'FORWARD_LOOKUP'}, 
                     {'cause': (), 'host': u'!!!', 'type': 'FORWARD_LOOKUP'}], 
        'message': 'There were 5 host(s) that could not resolve to an IP address.', 
-       'failed_count': 5, 'success_count': 0, 'exit_code': 0}})
+       'failed_count': 5, 'success_count': 0, 'exit_code': 0, 'hosts_with_failures': [u'c6401.ambari.apache.org',
+                                                                                      u'c6402.ambari.apache.org',
+                                                                                      u'c6403.ambari.apache.org',
+                                                                                      u'foobar', u'!!!']}})
     pass
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
@@ -409,4 +413,46 @@ class TestCheckHost(TestCase):
     self.assertEquals(structured_out_mock.call_args[0][0], {'transparentHugePage' : {'message': '', 'exit_code': 0}})
 
 
+  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  @patch("tempfile.mkdtemp", new = MagicMock(return_value='/tmp/jdk_tmp_dir'))
+  @patch.object(Script, 'get_config')
+  @patch.object(Script, 'get_tmp_dir')
+  @patch("check_host.download_file")
+  @patch("resource_management.libraries.script.Script.put_structured_out")
+  @patch("os.path.isfile")
+  @patch("resource_management.core.shell.call")
+  def testUnsupportedDatabaseType(self, isfile_mock, format_mock, structured_out_mock, download_file_mock, get_tmp_dir_mock, mock_config):
+    mock_config.return_value = {"commandParams" : {"check_execute_list" : "db_connection_check",
+                                                   "java_home" : "test_java_home",
+                                                   "ambari_server_host" : "test_host",
+                                                   "jdk_location" : "test_jdk_location",
+                                                   "db_name" : "unsupported_db",
+                                                   "db_connection_url" : "test_db_connection_url",
+                                                   "user_name" : "test_user_name",
+                                                   "user_passwd" : "test_user_passwd",
+                                                   "jdk_name" : "test_jdk_name"},
+                                "hostLevelParams": { "agentCacheDir": "/nonexistent_tmp",
+                                                     "custom_mysql_jdbc_name" : "mysql-connector-java.jar"}
+                                }
+    get_tmp_dir_mock.return_value = "/tmp"
+    download_file_mock.side_effect = Exception("test exception")
+    isfile_mock.return_value = True
+    checkHost = CheckHost()
 
+    try:
+      checkHost.actionexecute(None)
+      self.fail("DB Check should be failed")
+    except Fail:
+      pass
+
+    self.assertEquals(structured_out_mock.call_args[0][0], {'db_connection_check': {'message': '\'unsupported_db\' database type not supported.', 'exit_code': 1}})
+
+
+  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  def testBuildUrl(self, ):
+    checkHost = CheckHost()
+
+    self.assertEquals('base_url/path', checkHost.build_url('base_url', 'path'))
+    self.assertEquals('base_url/path', checkHost.build_url('base_url/', 'path'))
+    self.assertEquals('base_url/path', checkHost.build_url('base_url/', '/path'))
+    self.assertEquals('base_url/path', checkHost.build_url('base_url', '/path'))

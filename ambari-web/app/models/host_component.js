@@ -29,8 +29,11 @@ App.HostComponent = DS.Model.extend({
   host: DS.belongsTo('App.Host'),
   componentLogs: DS.belongsTo('App.HostComponentLog'),
   hostName: DS.attr('string'),
+  publicHostName: DS.attr('string'),
   service: DS.belongsTo('App.Service'),
   adminState: DS.attr('string'),
+  haNameSpace: DS.attr('string'),
+  clusterIdValue: DS.attr('string'),
 
   serviceDisplayName: Em.computed.truncate('service.displayName', 14, 11),
 
@@ -50,7 +53,7 @@ App.HostComponent = DS.Model.extend({
    * @returns {bool}
    */
   isClient: function () {
-    return App.get('components.clients').contains(this.get('componentName'));
+    return App.HostComponent.isClient(this.get('componentName'));
   }.property('componentName'),
   /**
    * Determine if component is running now
@@ -72,7 +75,7 @@ App.HostComponent = DS.Model.extend({
    * @returns {bool}
    */
   isMaster: function () {
-    return App.get('components.masters').contains(this.get('componentName'));
+    return App.HostComponent.isMaster(this.get('componentName'));
   }.property('componentName', 'App.components.masters'),
 
   /**
@@ -80,7 +83,7 @@ App.HostComponent = DS.Model.extend({
    * @returns {bool}
    */
   isSlave: function () {
-    return App.get('components.slaves').contains(this.get('componentName'));
+    return App.HostComponent.isSlave(this.get('componentName'));
   }.property('componentName'),
   /**
    * Only certain components can be deleted.
@@ -157,12 +160,26 @@ App.HostComponent = DS.Model.extend({
   },
 
   componentTextStatus: function () {
+    if (this.get('isClient') && this.get("workStatus") === 'INSTALLED') {
+      return Em.I18n.t('common.installed');
+    }
     return App.HostComponentStatus.getTextStatus(this.get("workStatus"));
   }.property('workStatus', 'isDecommissioning')
 });
 
 App.HostComponent.FIXTURES = [];
 
+App.HostComponent.isClient = function(componentName) {
+  return App.get('components.clients').contains(componentName);
+};
+
+App.HostComponent.isMaster = function(componentName) {
+  return App.get('components.masters').contains(componentName);
+};
+
+App.HostComponent.isSlave = function(componentName) {
+  return App.get('components.slaves').contains(componentName);
+};
 
 /**
  * get particular counter of host-component by name
@@ -181,6 +198,15 @@ App.HostComponent.getCount = function (componentName, type) {
     default:
       return 0;
   }
+};
+
+/**
+ * @param {string} componentName
+ * @param {string} hostName
+ * @returns {string}
+ */
+App.HostComponent.getId = function(componentName, hostName) {
+  return componentName + '_' + hostName;
 };
 
 App.HostComponentStatus = {
@@ -249,7 +275,7 @@ App.HostComponentStatus = {
       case this.disabled:
         return 'Disabled';
       case this.init:
-        return 'Install Pending...';
+        return 'Install Pending';
     }
     return 'Unknown';
   },
@@ -270,47 +296,87 @@ App.HostComponentStatus = {
 };
 
 App.HostComponentActionMap = {
-  getMap: function(ctx) {
-    var NN = ctx.get('controller.content.hostComponents').findProperty('componentName', 'NAMENODE');
-    var RM = ctx.get('controller.content.hostComponents').findProperty('componentName', 'RESOURCEMANAGER');
-    var RA = ctx.get('controller.content.hostComponents').findProperty('componentName', 'RANGER_ADMIN');
-    var HM = ctx.get('controller.content.hostComponents').findProperty('componentName', 'HAWQMASTER');
-    var HS = ctx.get('controller.content.hostComponents').findProperty('componentName', 'HAWQSTANDBY');
-    var HMComponent = App.MasterComponent.find('HAWQMASTER');
-    var HSComponent = App.MasterComponent.find('HAWQSTANDBY');
+  getMap: function (ctx) {
+    const NN = ctx.get('controller.content.hostComponents').findProperty('componentName', 'NAMENODE'),
+      RM = ctx.get('controller.content.hostComponents').findProperty('componentName', 'RESOURCEMANAGER'),
+      RA = ctx.get('controller.content.hostComponents').findProperty('componentName', 'RANGER_ADMIN'),
+      HM = ctx.get('controller.content.hostComponents').findProperty('componentName', 'HAWQMASTER'),
+      HS = ctx.get('controller.content.hostComponents').findProperty('componentName', 'HAWQSTANDBY'),
+      HMComponent = App.MasterComponent.find('HAWQMASTER'),
+      HSComponent = App.MasterComponent.find('HAWQSTANDBY'),
+      hasMultipleMasterComponentGroups = ctx.get('service.hasMultipleMasterComponentGroups'),
+      isClientsOnlyService = ctx.get('controller.isClientsOnlyService'),
+      isStartDisabled = ctx.get('controller.isStartDisabled'),
+      isStopDisabled = ctx.get('controller.isStopDisabled');
+
     return {
+      START_ALL: {
+        action: hasMultipleMasterComponentGroups ? '' : 'startService',
+        label: Em.I18n.t('services.service.start'),
+        cssClass: `glyphicon glyphicon-play ${isStartDisabled ? 'disabled' : 'enabled'}`,
+        isHidden: isClientsOnlyService,
+        disabled: isStartDisabled,
+        hasSubmenu: !isStartDisabled && hasMultipleMasterComponentGroups,
+        submenuOptions: !isStartDisabled && hasMultipleMasterComponentGroups ? this.getMastersSubmenu(ctx, 'startCertainHostComponents') : []
+      },
+      STOP_ALL: {
+        action: hasMultipleMasterComponentGroups ? '' : 'stopService',
+        label: Em.I18n.t('services.service.stop'),
+        cssClass: `glyphicon glyphicon-stop ${isStopDisabled ? 'disabled' : 'enabled'}`,
+        isHidden: isClientsOnlyService,
+        disabled: isStopDisabled,
+        hasSubmenu: !isStopDisabled && hasMultipleMasterComponentGroups,
+        submenuOptions: !isStopDisabled && hasMultipleMasterComponentGroups ? this.getMastersSubmenu(ctx, 'stopCertainHostComponents') : []
+      },
       RESTART_ALL: {
-        action: 'restartAllHostComponents',
+        action: hasMultipleMasterComponentGroups ? '' : 'restartAllHostComponents',
         context: ctx.get('serviceName'),
-        label: Em.I18n.t('restart.service.all'),
-        cssClass: 'icon-repeat',
-        disabled: false
+        label: hasMultipleMasterComponentGroups ? Em.I18n.t('common.restart') : Em.I18n.t('restart.service.all'),
+        cssClass: 'glyphicon glyphicon-time',
+        disabled: false,
+        hasSubmenu: hasMultipleMasterComponentGroups,
+        submenuOptions: hasMultipleMasterComponentGroups ? this.getMastersSubmenu(ctx, 'restartCertainHostComponents') : []
+      },
+      RESTART_NAMENODES: {
+        action: '',
+        label: Em.I18n.t('rollingrestart.dialog.title').format(pluralize(App.format.role('NAMENODE', false))),
+        cssClass: 'glyphicon glyphicon-time',
+        isHidden: !hasMultipleMasterComponentGroups,
+        disabled: false,
+        hasSubmenu: true,
+        submenuOptions: this.getMastersSubmenu(ctx, 'restartCertainHostComponents', ['NAMENODE'])
       },
       RUN_SMOKE_TEST: {
         action: 'runSmokeTest',
         label: Em.I18n.t('services.service.actions.run.smoke'),
-        cssClass: 'icon-thumbs-up-alt',
-        disabled: ctx.get('controller.isClientsOnlyService') ? false : ctx.get('controller.isStopDisabled')
+        cssClass: 'glyphicon glyphicon-thumbs-up',
+        disabled: ctx.get('controller.isSmokeTestDisabled')
       },
       REFRESH_CONFIGS: {
         action: 'refreshConfigs',
         label: Em.I18n.t('hosts.host.details.refreshConfigs'),
-        cssClass: 'icon-refresh',
+        cssClass: 'glyphicon glyphicon-refresh',
         disabled: false
+      },
+      REGENERATE_KEYTAB_FILE_OPERATIONS: {
+        action: 'regenerateKeytabFileOperations',
+        label: Em.I18n.t('admin.kerberos.button.regenerateKeytabs'),
+        cssClass: 'glyphicon glyphicon-repeat',
+        isHidden: !App.get('isKerberosEnabled')
       },
       REFRESHQUEUES: {
         action: 'refreshYarnQueues',
         customCommand: 'REFRESHQUEUES',
         context : Em.I18n.t('services.service.actions.run.yarnRefreshQueues.context'),
         label: Em.I18n.t('services.service.actions.run.yarnRefreshQueues.menu'),
-        cssClass: 'icon-refresh',
+        cssClass: 'glyphicon glyphicon-refresh',
         disabled: false
       },
       ROLLING_RESTART: {
         action: 'rollingRestart',
         context: ctx.get('rollingRestartComponent'),
         label: Em.I18n.t('rollingrestart.dialog.title'),
-        cssClass: 'icon-time',
+        cssClass: 'glyphicon glyphicon-time',
         disabled: false
       },
       TOGGLE_PASSIVE: {
@@ -320,24 +386,31 @@ App.HostComponentActionMap = {
         cssClass: 'icon-medkit',
         disabled: false
       },
+      MANAGE_JN: {
+        action: 'manageJournalNode',
+        label: Em.I18n.t('admin.manageJournalNode.label'),
+        cssClass: 'icon-cog',
+        isHidden: !App.get('supports.manageJournalNode') || !App.get('isHaEnabled')
+        || (App.router.get('mainHostController.totalCount') == 3 && App.HostComponent.find().filterProperty('componentName', 'JOURNALNODE').get('length') == 3)
+      },
       TOGGLE_NN_HA: {
         action: App.get('isHaEnabled') ? 'disableHighAvailability' : 'enableHighAvailability',
         label: App.get('isHaEnabled') ? Em.I18n.t('admin.highAvailability.button.disable') : Em.I18n.t('admin.highAvailability.button.enable'),
-        cssClass: App.get('isHaEnabled') ? 'icon-arrow-down' : 'icon-arrow-up',
+        cssClass: App.get('isHaEnabled') ? 'glyphicon glyphicon-arrow-down' : 'glyphicon glyphicon-arrow-up',
         isHidden: App.get('isHaEnabled'),
         disabled: App.get('isSingleNode') || !NN || NN.get('isNotInstalled')
       },
       TOGGLE_RM_HA: {
         action: 'enableRMHighAvailability',
-        label: Em.I18n.t('admin.rm_highAvailability.button.enable'),
-        cssClass: 'icon-arrow-up',
+        label: App.get('isRMHaEnabled') ? Em.I18n.t('admin.rm_highAvailability.button.disable') : Em.I18n.t('admin.rm_highAvailability.button.enable'),
+        cssClass: App.get('isRMHaEnabled') ? 'glyphicon glyphicon-arrow-down' : 'glyphicon glyphicon-arrow-up',
         isHidden: App.get('isRMHaEnabled'),
         disabled: App.get('isSingleNode') || !RM || RM.get('isNotInstalled')
       },
       TOGGLE_RA_HA: {
         action: 'enableRAHighAvailability',
         label: Em.I18n.t('admin.ra_highAvailability.button.enable'),
-        cssClass: 'icon-arrow-up',
+        cssClass: 'glyphicon glyphicon-arrow-up',
         isHidden: App.get('isRAHaEnabled'),
         disabled: App.get('isSingleNode') || !RA || RA.get('isNotInstalled')
       },
@@ -346,14 +419,14 @@ App.HostComponentActionMap = {
         context: '',
         isHidden: !App.isAuthorized('SERVICE.MOVE'),
         label: Em.I18n.t('services.service.actions.reassign.master'),
-        cssClass: 'icon-share-alt'
+        cssClass: 'glyphicon glyphicon-share-alt'
       },
       STARTDEMOLDAP: {
         action: 'startLdapKnox',
         customCommand: 'STARTDEMOLDAP',
         context: Em.I18n.t('services.service.actions.run.startLdapKnox.context'),
         label: Em.I18n.t('services.service.actions.run.startLdapKnox.context'),
-        cssClass: 'icon-play-sign',
+        cssClass: 'glyphicon glyphicon-play-sign',
         disabled: false
       },
       STOPDEMOLDAP: {
@@ -361,7 +434,7 @@ App.HostComponentActionMap = {
         customCommand: 'STOPDEMOLDAP',
         context: Em.I18n.t('services.service.actions.run.stopLdapKnox.context'),
         label: Em.I18n.t('services.service.actions.run.stopLdapKnox.context'),
-        cssClass: 'icon-stop',
+        cssClass: 'glyphicon glyphicon-stop',
         disabled: false
       },
       RESTART_LLAP: {
@@ -369,27 +442,20 @@ App.HostComponentActionMap = {
         customCommand: 'RESTART_LLAP',
         context: Em.I18n.t('services.service.actions.run.restartLLAP'),
         label: Em.I18n.t('services.service.actions.run.restartLLAP') + ' ∞',
-        cssClass: 'icon-refresh'
-      },
-      CREATE_YARN_DIRECTORIES: {
-        action: 'createYARNDirectories',
-        customCommand: 'CREATE_YARN_DIRECTORIES',
-        context: Em.I18n.t('services.service.actions.run.createYARNDirectories'),
-        label: Em.I18n.t('services.service.actions.run.createYARNDirectories'),
-        cssClass: 'icon-refresh'
+        cssClass: 'glyphicon glyphicon-refresh'
       },
       REBALANCEHDFS: {
         action: 'rebalanceHdfsNodes',
         customCommand: 'REBALANCEHDFS',
         context: Em.I18n.t('services.service.actions.run.rebalanceHdfsNodes.context'),
         label: Em.I18n.t('services.service.actions.run.rebalanceHdfsNodes'),
-        cssClass: 'icon-refresh',
+        cssClass: 'glyphicon glyphicon-refresh',
         disabled: false
       },
       DOWNLOAD_CLIENT_CONFIGS: {
         action: ctx.get('controller.isSeveralClients') ? '' : 'downloadClientConfigs',
         label: Em.I18n.t('services.service.actions.downloadClientConfigs'),
-        cssClass: 'icon-download-alt',
+        cssClass: 'glyphicon glyphicon-download-alt',
         isHidden: !!ctx.get('controller.content.clientComponents') ? ctx.get('controller.content.clientComponents').rejectProperty('totalCount', 0).length == 0 : false,
         disabled: false,
         hasSubmenu: ctx.get('controller.isSeveralClients'),
@@ -398,36 +464,37 @@ App.HostComponentActionMap = {
       DELETE_SERVICE: {
         action: 'deleteService',
         context: ctx.get('serviceName'),
-        label: Em.I18n.t('common.delete'),
-        cssClass: 'icon-remove'
+        label: Em.I18n.t('services.service.actions.deleteService'),
+        cssClass: 'glyphicon glyphicon-remove',
+        isHidden: !App.get('services.supportsDeleteViaUI').contains(ctx.get('serviceName')) //hide the menu item when the service has a custom behavior setting in its metainfo.xml to disallow Delete Services via UI
       },
       IMMEDIATE_STOP_HAWQ_SERVICE: {
         action: 'executeHawqCustomCommand',
         customCommand: 'IMMEDIATE_STOP_HAWQ_SERVICE',
         context: Em.I18n.t('services.service.actions.run.immediateStopHawqService.context'),
         label: Em.I18n.t('services.service.actions.run.immediateStopHawqService.label'),
-        cssClass: 'icon-stop',
+        cssClass: 'glyphicon glyphicon-stop',
         disabled: !HM || HM.get('workStatus') != App.HostComponentStatus.started
       },
       IMMEDIATE_STOP_HAWQ_SEGMENT: {
         customCommand: 'IMMEDIATE_STOP_HAWQ_SEGMENT',
         context: Em.I18n.t('services.service.actions.run.immediateStopHawqSegment.context'),
         label: Em.I18n.t('services.service.actions.run.immediateStopHawqSegment.label'),
-        cssClass: 'icon-stop'
+        cssClass: 'glyphicon glyphicon-stop'
       },
       RESYNC_HAWQ_STANDBY: {
         action: 'executeHawqCustomCommand',
         customCommand: 'RESYNC_HAWQ_STANDBY',
         context: Em.I18n.t('services.service.actions.run.resyncHawqStandby.context'),
         label: Em.I18n.t('services.service.actions.run.resyncHawqStandby.label'),
-        cssClass: 'icon-refresh',
+        cssClass: 'glyphicon glyphicon-refresh',
         isHidden : App.get('isSingleNode') || !HS ,
         disabled: !((!!HMComponent && HMComponent.get('startedCount') === 1) && (!!HSComponent && HSComponent.get('startedCount') === 1))
       },
       TOGGLE_ADD_HAWQ_STANDBY: {
         action: 'addHawqStandby',
         label: Em.I18n.t('admin.addHawqStandby.button.enable'),
-        cssClass: 'icon-plus',
+        cssClass: 'glyphicon glyphicon-plus',
         isHidden: App.get('isSingleNode') || HS,
         disabled: false
       },
@@ -435,7 +502,7 @@ App.HostComponentActionMap = {
         action: 'removeHawqStandby',
         context: Em.I18n.t('admin.removeHawqStandby.button.enable'),
         label: Em.I18n.t('admin.removeHawqStandby.button.enable'),
-        cssClass: 'icon-minus',
+        cssClass: 'glyphicon glyphicon-minus',
         isHidden: App.get('isSingleNode') || !HS,
         disabled: !HM || HM.get('workStatus') != App.HostComponentStatus.started,
         hideFromComponentView: true
@@ -444,7 +511,7 @@ App.HostComponentActionMap = {
         action: 'activateHawqStandby',
         label: Em.I18n.t('admin.activateHawqStandby.button.enable'),
         context: Em.I18n.t('admin.activateHawqStandby.button.enable'),
-        cssClass: 'icon-arrow-up',
+        cssClass: 'glyphicon glyphicon-arrow-up',
         isHidden: App.get('isSingleNode') || !HS,
         disabled: false,
         hideFromComponentView: true
@@ -454,7 +521,7 @@ App.HostComponentActionMap = {
         customCommand: 'HAWQ_CLEAR_CACHE',
         context: Em.I18n.t('services.service.actions.run.clearHawqCache.label'),
         label: Em.I18n.t('services.service.actions.run.clearHawqCache.label'),
-        cssClass: 'icon-refresh',
+        cssClass: 'glyphicon glyphicon-refresh',
         isHidden : false,
         disabled: !HM || HM.get('workStatus') != App.HostComponentStatus.started
       },
@@ -463,16 +530,53 @@ App.HostComponentActionMap = {
         customCommand: 'RUN_HAWQ_CHECK',
         context: Em.I18n.t('services.service.actions.run.runHawqCheck.label'),
         label: Em.I18n.t('services.service.actions.run.runHawqCheck.label'),
-        cssClass: 'icon-thumbs-up-alt',
+        cssClass: 'glyphicon glyphicon-thumbs-up',
         isHidden : false,
         disabled: false
       },
       MASTER_CUSTOM_COMMAND: {
         action: 'executeCustomCommand',
-        cssClass: 'icon-play-circle',
+        cssClass: 'glyphicon glyphicon-play-circle',
         isHidden: false,
         disabled: false
+      },
+      TOGGLE_NN_FEDERATION: {
+        action: 'openNameNodeFederationWizard',
+        label: Em.I18n.t('admin.nameNodeFederation.button.enable'),
+        cssClass: 'icon icon-sitemap',
+        disabled: !App.get('isHaEnabled')
       }
     };
+  },
+
+  getMastersSubmenu: function (context, action, components) {
+    const serviceName = context.get('service.serviceName'),
+      groups = context.get('service.masterComponentGroups') || [],
+      allItem = {
+        action,
+        context: Object.assign({
+          label: Em.I18n.t('services.service.allComponents')
+        }, components ? {
+          components,
+          hosts: groups.mapProperty('hosts').reduce((acc, groupHosts) => [...acc, ...groupHosts], []).uniq()
+        } : {
+          serviceName
+        }),
+        disabled: false
+      },
+      groupItems = groups.map(group => {
+        return {
+          action,
+          context: {
+            label: group.title,
+            hosts: group.hosts,
+            components: components || group.components,
+            serviceName
+          },
+          disabled: false,
+          tooltip: group.title
+        };
+      });
+    return [allItem, ...groupItems];
   }
 };

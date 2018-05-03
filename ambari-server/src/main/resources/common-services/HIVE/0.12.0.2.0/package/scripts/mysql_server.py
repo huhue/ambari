@@ -21,8 +21,7 @@ limitations under the License.
 import sys
 import os
 import mysql_users
-from resource_management import *
-
+from resource_management.libraries.script.script import Script
 from mysql_service import mysql_service
 from mysql_utils import mysql_configure
 
@@ -46,18 +45,18 @@ class MysqlServer(Script):
   def start(self, env, rolling_restart=False):
     import params
     env.set_params(params)
-    mysql_service(daemon_name=params.daemon_name, action='start')
+    mysql_service(action='start')
 
   def stop(self, env, rolling_restart=False):
     import params
     env.set_params(params)
-    mysql_service(daemon_name=params.daemon_name, action='stop')
+    mysql_service(action='stop')
 
   def status(self, env):
     import status_params
     env.set_params(status_params)
 
-    mysql_service(daemon_name=status_params.daemon_name, action='status')
+    mysql_service(action='status')
 
 
 if __name__ == "__main__":

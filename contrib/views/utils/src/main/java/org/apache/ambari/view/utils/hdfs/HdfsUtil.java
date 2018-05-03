@@ -27,7 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.HashMap;
+import java.security.PrivilegedExceptionAction;
 import java.util.Map;
 
 public class HdfsUtil {
@@ -39,13 +39,19 @@ public class HdfsUtil {
    * @param filePath path to file
    * @param content new content of file
    */
-  public static void putStringToFile(HdfsApi hdfs, String filePath, String content) throws HdfsApiException {
-    FSDataOutputStream stream;
+  public static void putStringToFile(final HdfsApi hdfs,final String filePath, final String content) throws HdfsApiException {
+
     try {
       synchronized (hdfs) {
-        stream = hdfs.create(filePath, true);
-        stream.writeBytes(content);
-        stream.close();
+        hdfs.execute(new PrivilegedExceptionAction<Void>() {
+          @Override
+          public Void run() throws Exception {
+            final FSDataOutputStream stream = hdfs.create(filePath, true);
+            stream.write(content.getBytes());
+            stream.close();
+            return null;
+          }
+        }, true);
       }
     } catch (IOException e) {
       throw new HdfsApiException("HDFS020 Could not write file " + filePath, e);
@@ -108,28 +114,55 @@ public class HdfsUtil {
   }
 
   /**
+   * takes any custom properties that a view wants to be included into the config
+   * @param context
+   * @param customViewProperties
+   * @return
+   * @throws HdfsApiException
+   */
+  public static synchronized HdfsApi connectToHDFSApi(ViewContext context, Map<String, String> customViewProperties)
+    throws HdfsApiException {
+    ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
+    Thread.currentThread().setContextClassLoader(HdfsUtil.class.getClassLoader());
+    try {
+      ConfigurationBuilder configurationBuilder = new ConfigurationBuilder(context, customViewProperties);
+      return getHdfsApi(context, configurationBuilder);
+    } finally {
+      Thread.currentThread().setContextClassLoader(currentClassLoader);
+    }
+  }
+
+  /**
    * Factory of HdfsApi for specific ViewContext
    * @param context ViewContext that contains connection credentials
    * @return HdfsApi object
    */
   public static synchronized HdfsApi connectToHDFSApi(ViewContext context) throws HdfsApiException {
+    ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
+    Thread.currentThread().setContextClassLoader(HdfsUtil.class.getClassLoader());
+    try {
+      ConfigurationBuilder configurationBuilder = new ConfigurationBuilder(context);
+      return getHdfsApi(context, configurationBuilder);
+    } finally {
+      Thread.currentThread().setContextClassLoader(currentClassLoader);
+    }
+  }
+
+  private static HdfsApi getHdfsApi(ViewContext context, ConfigurationBuilder configurationBuilder) throws HdfsApiException {
     HdfsApi api = null;
-    Thread.currentThread().setContextClassLoader(null);
-
-    ConfigurationBuilder configurationBuilder = new ConfigurationBuilder(context);
     AuthConfigurationBuilder authConfigurationBuilder = new AuthConfigurationBuilder(context);
-
     Map<String, String> authParams = authConfigurationBuilder.build();
     configurationBuilder.setAuthParams(authParams);
-
     try {
       api = new HdfsApi(configurationBuilder, getHdfsUsername(context));
       LOG.info("HdfsApi connected OK");
     } catch (IOException e) {
+      LOG.error("exception occurred while creating hdfsApi objcet : {}", e.getMessage(), e);
       String message = "HDFS040 Couldn't open connection to HDFS";
       LOG.error(message);
       throw new HdfsApiException(message, e);
     } catch (InterruptedException e) {
+      LOG.error("exception occurred while creating hdfsApi objcet : {}", e.getMessage(), e);
       String message = "HDFS041 Couldn't open connection to HDFS";
       LOG.error(message);
       throw new HdfsApiException(message, e);

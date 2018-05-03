@@ -18,12 +18,14 @@ limitations under the License.
 
 """
 
-from resource_management import *
+from resource_management.libraries.script.script import Script
 from resource_management.libraries.functions.copy_tarball import copy_to_hdfs
-from ambari_commons import OSConst
-from resource_management.libraries.functions import StackFeature
+from resource_management.libraries.functions.constants import StackFeature
 from resource_management.libraries.functions.stack_features import check_stack_feature
+from resource_management.libraries.functions.format import format
+from resource_management.core.resources.system import Execute
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
+from ambari_commons import OSConst
 
 class SliderServiceCheck(Script):
 
@@ -39,9 +41,9 @@ class SliderServiceCheck(Script):
   def service_check(self, env):
     import params
     env.set_params(params)
-    
+
     if params.stack_version_formatted and check_stack_feature(StackFeature.COPY_TARBALL_TO_HDFS, params.stack_version_formatted):
-      copy_to_hdfs("slider", params.user_group, params.hdfs_user, host_sys_prepped=params.host_sys_prepped)
+      copy_to_hdfs("slider", params.user_group, params.hdfs_user, skip=params.sysprep_skip_copy_tarballs_hdfs)
     
     smokeuser_kinit_cmd = format(
       "{kinit_path_local} -kt {smokeuser_keytab} {smokeuser_principal};") if params.security_enabled else ""
@@ -52,7 +54,7 @@ class SliderServiceCheck(Script):
             tries=3,
             try_sleep=5,
             user=params.smokeuser,
-            logoutput=True
+            logoutput=True,
     )
 
 

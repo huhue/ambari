@@ -61,6 +61,12 @@
              </auto-deploy>
            </dependency>
           </dependencies>
+          <logs>
+            <log>
+              <logId>spark_jobhistory_server</logId>
+              <primary>true</primary>
+            </log>
+          </logs>
           <commandScript>
             <script>scripts/job_history_server.py</script>
             <scriptType>PYTHON</scriptType>
@@ -131,6 +137,7 @@
         <config-type>spark-env</config-type>
         <config-type>spark-log4j-properties</config-type>
         <config-type>spark-metrics-properties</config-type>
+        <config-type>spark-javaopts-properties</config-type>
       </configuration-dependencies>
 
       <commandScript>
@@ -146,7 +153,7 @@
 
       <osSpecifics>
         <osSpecific>
-          <osFamily>redhat7,amazon2015,redhat6,suse11,suse12</osFamily>
+          <osFamily>redhat7,amazonlinux2,redhat6,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>spark_${stack_version}</name>
@@ -157,7 +164,7 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>spark-${stack_version}</name>
@@ -174,6 +181,13 @@
           <default>true</default>
         </quickLinksConfiguration>
       </quickLinksConfigurations>
+
+      <themes>
+        <theme>
+          <fileName>directories.json</fileName>
+          <default>true</default>
+        </theme>
+      </themes>
 
     </service>
   </services>

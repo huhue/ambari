@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -31,6 +31,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.apache.ambari.server.AmbariException;
@@ -45,6 +46,7 @@ import org.apache.ambari.server.state.CommandScriptDefinition;
 import org.apache.ambari.server.state.ComponentInfo;
 import org.apache.ambari.server.state.Config;
 import org.apache.ambari.server.state.ConfigHelper;
+import org.apache.ambari.server.state.DesiredConfig;
 import org.apache.ambari.server.state.Host;
 import org.apache.ambari.server.state.HostState;
 import org.apache.ambari.server.state.Service;
@@ -56,8 +58,8 @@ import org.apache.ambari.server.state.StackInfo;
 import org.apache.ambari.server.state.State;
 import org.apache.ambari.server.state.fsm.InvalidStateTransitionException;
 import org.apache.ambari.server.state.host.HostHeartbeatLostEvent;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.inject.Injector;
 
@@ -65,9 +67,8 @@ import com.google.inject.Injector;
  * Monitors the node state and heartbeats.
  */
 public class HeartbeatMonitor implements Runnable {
-  private static Log LOG = LogFactory.getLog(HeartbeatMonitor.class);
+  private static final Logger LOG = LoggerFactory.getLogger(HeartbeatMonitor.class);
   private Clusters clusters;
-  private ActionQueue actionQueue;
   private ActionManager actionManager;
   private final int threadWakeupInterval; //1 minute
   private volatile boolean shouldRun = true;
@@ -78,10 +79,9 @@ public class HeartbeatMonitor implements Runnable {
   private final Configuration configuration;
   private final AgentRequests agentRequests;
 
-  public HeartbeatMonitor(Clusters clusters, ActionQueue aq, ActionManager am,
+  public HeartbeatMonitor(Clusters clusters, ActionManager am,
                           int threadWakeupInterval, Injector injector) {
     this.clusters = clusters;
-    actionQueue = aq;
     actionManager = am;
     this.threadWakeupInterval = threadWakeupInterval;
     configHelper = injector.getInstance(ConfigHelper.class);
@@ -110,7 +110,7 @@ public class HeartbeatMonitor implements Runnable {
   }
 
   public AgentRequests getAgentRequests() {
-    return this.agentRequests;
+    return agentRequests;
   }
 
   @Override
@@ -118,8 +118,7 @@ public class HeartbeatMonitor implements Runnable {
     while (shouldRun) {
       try {
         doWork();
-        LOG.trace("Putting monitor to sleep for " + threadWakeupInterval + " " +
-          "milliseconds");
+        LOG.trace("Putting monitor to sleep for {} milliseconds", threadWakeupInterval);
         Thread.sleep(threadWakeupInterval);
       } catch (InterruptedException ex) {
         LOG.warn("Scheduler thread is interrupted going to stop", ex);
@@ -170,13 +169,14 @@ public class HeartbeatMonitor implements Runnable {
               !sch.getState().equals(State.UNINSTALLED) &&
               !sch.getState().equals(State.DISABLED)) {
               LOG.warn("Setting component state to UNKNOWN for component " + sc.getName() + " on " + host);
+              State oldState = sch.getState();
               sch.setState(State.UNKNOWN);
+              sch.setLastValidState(oldState);
             }
           }
         }
 
         //Purge action queue
-        actionQueue.dequeueAll(host);
         //notify action manager
         actionManager.handleLostHost(host);
       }
@@ -188,18 +188,6 @@ public class HeartbeatMonitor implements Runnable {
           hostObj.setState(HostState.INIT);
         }
       }
-
-      // Get status of service components
-      List<StatusCommand> cmds = generateStatusCommands(hostname);
-      LOG.trace("Generated " + cmds.size() + " status commands for host: " +
-        hostname);
-      if (cmds.isEmpty()) {
-        // Nothing to do
-      } else {
-        for (StatusCommand command : cmds) {
-          actionQueue.enqueue(hostname, command);
-        }
-      }
     }
   }
 
@@ -208,9 +196,10 @@ public class HeartbeatMonitor implements Runnable {
    * @return list of commands to get status of service components on a concrete host
    */
   public List<StatusCommand> generateStatusCommands(String hostname) throws AmbariException {
-    List<StatusCommand> cmds = new ArrayList<StatusCommand>();
+    List<StatusCommand> cmds = new ArrayList<>();
 
     for (Cluster cl : clusters.getClustersForHost(hostname)) {
+      Map<String, DesiredConfig> desiredConfigs = cl.getDesiredConfigs();
       for (ServiceComponentHost sch : cl.getServiceComponentHosts(hostname)) {
         switch (sch.getState()) {
           case INIT:
@@ -220,7 +209,7 @@ public class HeartbeatMonitor implements Runnable {
             //don't send commands until component is installed at least
             continue;
           default:
-            StatusCommand statusCmd = createStatusCommand(hostname, cl, sch);
+            StatusCommand statusCmd = createStatusCommand(hostname, cl, sch, desiredConfigs);
             cmds.add(statusCmd);
         }
 
@@ -234,10 +223,12 @@ public class HeartbeatMonitor implements Runnable {
    * @throws AmbariException
    */
   private StatusCommand createStatusCommand(String hostname, Cluster cluster,
-                               ServiceComponentHost sch) throws AmbariException {
+      ServiceComponentHost sch, Map<String, DesiredConfig> desiredConfigs) throws AmbariException {
     String serviceName = sch.getServiceName();
     String componentName = sch.getServiceComponentName();
-    StackId stackId = cluster.getDesiredStackVersion();
+
+    StackId stackId = sch.getDesiredStackId();
+
     ServiceInfo serviceInfo = ambariMetaInfo.getService(stackId.getStackName(),
         stackId.getStackVersion(), serviceName);
     ComponentInfo componentInfo = ambariMetaInfo.getComponent(
@@ -246,20 +237,24 @@ public class HeartbeatMonitor implements Runnable {
     StackInfo stackInfo = ambariMetaInfo.getStack(stackId.getStackName(),
         stackId.getStackVersion());
 
-    Map<String, Map<String, String>> configurations = new TreeMap<String, Map<String, String>>();
-    Map<String, Map<String,  Map<String, String>>> configurationAttributes = new TreeMap<String, Map<String, Map<String, String>>>();
+    Map<String, Map<String, String>> configurations = new TreeMap<>();
+    Map<String, Map<String,  Map<String, String>>> configurationAttributes = new TreeMap<>();
 
     // get the cluster config for type '*-env'
     // apply config group overrides
     //Config clusterConfig = cluster.getDesiredConfigByType(GLOBAL);
     Collection<Config> clusterConfigs = cluster.getAllConfigs();
 
+    // creating list with desired config types to validate if cluster config actual
+    Set<String> desiredConfigTypes = desiredConfigs.keySet();
+
     // Apply global properties for this host from all config groups
     Map<String, Map<String, String>> allConfigTags = configHelper
         .getEffectiveDesiredTags(cluster, hostname);
 
     for(Config clusterConfig: clusterConfigs) {
-      if(!clusterConfig.getType().endsWith("-env")) {
+      String configType = clusterConfig.getType();
+      if(!configType.endsWith("-env") || !desiredConfigTypes.contains(configType)) {
         continue;
       }
 
@@ -306,7 +301,7 @@ public class HeartbeatMonitor implements Runnable {
 
     // If Agent wants the command and the States differ
     statusCmd.setDesiredState(sch.getDesiredState());
-    statusCmd.setHasStaleConfigs(configHelper.isStaleConfigs(sch));
+    statusCmd.setHasStaleConfigs(configHelper.isStaleConfigs(sch, desiredConfigs));
     if (getAgentRequests().shouldSendExecutionDetails(hostname, componentName)) {
       LOG.info(componentName + " is at " + sch.getState() + " adding more payload per agent ask");
       statusCmd.setPayloadLevel(StatusCommand.StatusCommandPayload.EXECUTION_COMMAND);
@@ -333,7 +328,7 @@ public class HeartbeatMonitor implements Runnable {
     commandParams.put(COMMAND_TIMEOUT, commandTimeout);
     commandParams.put(SERVICE_PACKAGE_FOLDER,
        serviceInfo.getServicePackageFolder());
-    commandParams.put(HOOKS_FOLDER, stackInfo.getStackHooksFolder());
+    commandParams.put(HOOKS_FOLDER, configuration.getProperty(Configuration.HOOKS_FOLDER));
     // Fill host level params
     Map<String, String> hostLevelParams = statusCmd.getHostLevelParams();
     hostLevelParams.put(JDK_LOCATION, ambariManagementController.getJdkResourceUrl());
@@ -343,7 +338,7 @@ public class HeartbeatMonitor implements Runnable {
     if (statusCmd.getPayloadLevel() == StatusCommand.StatusCommandPayload.EXECUTION_COMMAND) {
       ExecutionCommand ec = ambariManagementController.getExecutionCommand(cluster, sch, RoleCommand.START);
       statusCmd.setExecutionCommand(ec);
-      LOG.debug(componentName + " has more payload for execution command");
+      LOG.debug("{} has more payload for execution command", componentName);
     }
 
     return statusCmd;

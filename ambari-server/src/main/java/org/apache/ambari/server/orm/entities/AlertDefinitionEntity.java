@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,6 +20,7 @@ package org.apache.ambari.server.orm.entities;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.Set;
 
 import javax.persistence.Basic;
@@ -70,9 +71,10 @@ import org.apache.ambari.server.state.alert.SourceType;
     }),
   @NamedQuery(name = "AlertDefinitionEntity.findByService", query = "SELECT ad FROM AlertDefinitionEntity ad WHERE ad.serviceName = :serviceName AND ad.clusterId = :clusterId"),
   @NamedQuery(name = "AlertDefinitionEntity.findByServiceAndComponent", query = "SELECT ad FROM AlertDefinitionEntity ad WHERE ad.serviceName = :serviceName AND ad.componentName = :componentName AND ad.clusterId = :clusterId"),
-  @NamedQuery(name = "AlertDefinitionEntity.findByServiceMaster", query = "SELECT ad FROM AlertDefinitionEntity ad WHERE ad.serviceName IN :services AND ad.scope = :scope AND ad.clusterId = :clusterId AND ad.componentName IS NULL"),
-  @NamedQuery(name = "AlertDefinitionEntity.findByIds", query = "SELECT ad FROM AlertDefinitionEntity ad WHERE ad.definitionId IN :definitionIds")})
-
+  @NamedQuery(name = "AlertDefinitionEntity.findByServiceMaster", query = "SELECT ad FROM AlertDefinitionEntity ad WHERE ad.serviceName IN :services AND ad.scope = :scope AND ad.clusterId = :clusterId AND ad.componentName IS NULL" +
+      " AND ad.sourceType <> org.apache.ambari.server.state.alert.SourceType.AGGREGATE"),
+  @NamedQuery(name = "AlertDefinitionEntity.findByIds", query = "SELECT ad FROM AlertDefinitionEntity ad WHERE ad.definitionId IN :definitionIds"),
+  @NamedQuery(name = "AlertDefinitionEntity.findBySourceType", query = "SELECT ad FROM AlertDefinitionEntity ad WHERE ad.clusterId = :clusterId AND ad.sourceType = :sourceType")})
 public class AlertDefinitionEntity {
 
   @Id
@@ -537,7 +539,7 @@ public class AlertDefinitionEntity {
    * value from {@link #getRepeatTolerance()} should be used to calculate retry
    * tolerance.
    *
-   * @param repeatToleranceEnabled
+   * @param enabled
    *          {@code true} to override the defautlt value and use the value
    *          returned from {@link #getRepeatTolerance()}.
    */
@@ -554,7 +556,7 @@ public class AlertDefinitionEntity {
    */
   protected void addAlertGroup(AlertGroupEntity alertGroup) {
     if (null == alertGroups) {
-      alertGroups = new HashSet<AlertGroupEntity>();
+      alertGroups = new HashSet<>();
     }
 
     alertGroups.add(alertGroup);
@@ -593,7 +595,17 @@ public class AlertDefinitionEntity {
   }
 
   /**
-   *
+   * Gets the equality to another historical alert entry based on the following criteria:
+   * <ul>
+   * <li>{@link #definitionId}
+   * <li>{@link #clusterId}
+   * <li>{@link #definitionName}
+   * </ul>
+   * <p/>
+   * However, since we're guaranteed that {@link #definitionId} is unique among persisted entities, we
+   * can return the hashCode based on this value if it is set.
+   * <p/>
+   * {@inheritDoc}
    */
   @Override
   public boolean equals(Object object) {
@@ -607,21 +619,31 @@ public class AlertDefinitionEntity {
 
     AlertDefinitionEntity that = (AlertDefinitionEntity) object;
 
-    if (definitionId != null ? !definitionId.equals(that.definitionId)
-      : that.definitionId != null) {
-      return false;
+    // use the unique ID if it exists
+    if( null != definitionId ){
+      return Objects.equals(definitionId, that.definitionId);
     }
 
-    return true;
+    return Objects.equals(definitionId, that.definitionId) &&
+        Objects.equals(clusterId, that.clusterId) &&
+        Objects.equals(definitionName, that.definitionName);
   }
 
   /**
-   *
+   * Gets a hash to uniquely identify this alert definition. Since we're
+   * guaranteed that {@link #definitionId} is unique among persisted entities,
+   * we can return the hashCode based on this value if it is set.
+   * <p/>
+   * {@inheritDoc}
    */
   @Override
   public int hashCode() {
-    int result = null != definitionId ? definitionId.hashCode() : 0;
-    return result;
+    // use the unique ID if it exists
+    if( null != definitionId ){
+      return definitionId.hashCode();
+    }
+
+    return Objects.hash(definitionId, clusterId, definitionName);
   }
 
   /**

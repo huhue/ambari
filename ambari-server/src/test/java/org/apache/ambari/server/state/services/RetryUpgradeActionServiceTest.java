@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,9 +17,13 @@
  */
 package org.apache.ambari.server.state.services;
 
-import com.google.inject.Guice;
-import com.google.inject.Injector;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.HostRoleStatus;
@@ -29,7 +33,6 @@ import org.apache.ambari.server.orm.OrmTestHelper;
 import org.apache.ambari.server.orm.dao.HostRoleCommandDAO;
 import org.apache.ambari.server.orm.dao.RepositoryVersionDAO;
 import org.apache.ambari.server.orm.dao.RequestDAO;
-import org.apache.ambari.server.orm.dao.StackDAO;
 import org.apache.ambari.server.orm.dao.StageDAO;
 import org.apache.ambari.server.orm.dao.UpgradeDAO;
 import org.apache.ambari.server.orm.entities.HostRoleCommandEntity;
@@ -37,21 +40,20 @@ import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.orm.entities.RequestEntity;
 import org.apache.ambari.server.orm.entities.StackEntity;
 import org.apache.ambari.server.orm.entities.StageEntity;
+import org.apache.ambari.server.orm.entities.StageEntityPK;
 import org.apache.ambari.server.orm.entities.UpgradeEntity;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
-import org.apache.ambari.server.state.RepositoryVersionState;
 import org.apache.ambari.server.state.StackId;
 import org.apache.ambari.server.state.stack.upgrade.Direction;
 import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
 
 /**
  * Tests {@link org.apache.ambari.server.state.services.RetryUpgradeActionService}.
@@ -60,7 +62,6 @@ public class RetryUpgradeActionServiceTest {
 
   private Injector injector;
 
-  private StackDAO stackDAO;
   private Clusters clusters;
   private RepositoryVersionDAO repoVersionDAO;
   private UpgradeDAO upgradeDAO;
@@ -72,17 +73,16 @@ public class RetryUpgradeActionServiceTest {
   // Instance variables shared by all tests
   String clusterName = "c1";
   Cluster cluster;
+  StackId stack220 = new StackId("HDP-2.2.0");
   StackEntity stackEntity220;
-  StackId stack220;
   Long upgradeRequestId = 1L;
   Long stageId = 1L;
 
   @Before
-  public void before() throws NoSuchFieldException, IllegalAccessException {
+  public void before() throws Exception {
     injector = Guice.createInjector(new InMemoryDefaultTestModule());
     injector.getInstance(GuiceJpaInitializer.class);
 
-    stackDAO = injector.getInstance(StackDAO.class);
     clusters = injector.getInstance(Clusters.class);
     repoVersionDAO = injector.getInstance(RepositoryVersionDAO.class);
     upgradeDAO = injector.getInstance(UpgradeDAO.class);
@@ -90,6 +90,12 @@ public class RetryUpgradeActionServiceTest {
     stageDAO = injector.getInstance(StageDAO.class);
     hostRoleCommandDAO = injector.getInstance(HostRoleCommandDAO.class);
     helper = injector.getInstance(OrmTestHelper.class);
+    stackEntity220 = helper.createStack(stack220);
+  }
+
+  @After
+  public void teardown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
   /**
@@ -100,10 +106,12 @@ public class RetryUpgradeActionServiceTest {
    * Case 4: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED that
    * does NOT meet conditions to be retried => no-op
    * Case 5: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED that
-   * DOES meet conditions to be retried => retries the task
-   * Case 6: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED that
+   * DOES meet conditions to be retried and has values for start time and original start time => retries the task
+   * * Case 6: Cluster with an active upgrade that contains a failed task in HOLDING_TIMEDOUT that
+   * DOES meet conditions to be retriedand does not have values for start time or original start time => retries the task
+   * Case 7: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED that
    * was already retried and has now expired => no-op
-   * Case 7: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED, but it is a critical task
+   * Case 8: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED, but it is a critical task
    * during Finalize Cluster, which should not be retried => no-op
    * @throws Exception
    */
@@ -137,9 +145,11 @@ public class RetryUpgradeActionServiceTest {
     }
 
     // Case 4: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED that does NOT meet conditions to be retried.
-    List<StageEntity> stages = stageDAO.findByStageIds(upgradeRequestId, new HashSet<Long>(){{ add(stageId); }});
-    Assert.assertTrue(!stages.isEmpty() && stages.size() == 1);
-    StageEntity stageEntity = stages.get(0);
+    StageEntityPK primaryKey = new StageEntityPK();
+    primaryKey.setRequestId(upgradeRequestId);
+    primaryKey.setStageId(stageId);
+
+    StageEntity stageEntity = stageDAO.findByPK(primaryKey);
 
     HostRoleCommandEntity hrc2 = new HostRoleCommandEntity();
     hrc2.setStage(stageEntity);
@@ -176,7 +186,23 @@ public class RetryUpgradeActionServiceTest {
     // Ensure that task 2 transitioned from HOLDING_FAILED to PENDING
     Assert.assertEquals(HostRoleStatus.PENDING, hostRoleCommandDAO.findByPK(hrc2.getTaskId()).getStatus());
 
-    // Case 6: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED that was already retried and has now expired.
+    // Case 6: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED that DOES meet conditions to be retried.
+    hrc2.setStatus(HostRoleStatus.HOLDING_TIMEDOUT);
+    hrc2.setRetryAllowed(true);
+    hrc2.setOriginalStartTime(-1L);
+    hrc2.setStartTime(-1L);
+    hrc2.setLastAttemptTime(-1L);
+    hrc2.setEndTime(-1L);
+    hrc2.setAttemptCount((short) 0);
+    hostRoleCommandDAO.merge(hrc2);
+
+    // Run the service
+    service.runOneIteration();
+
+    // Ensure that task 2 transitioned from HOLDING_TIMEDOUT to PENDING
+    Assert.assertEquals(HostRoleStatus.PENDING, hostRoleCommandDAO.findByPK(hrc2.getTaskId()).getStatus());
+
+    // Case 7: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED that was already retried and has now expired.
     now = System.currentTimeMillis();
     hrc2.setOriginalStartTime(now - (timeoutMins * 60000) - 1);
     hrc2.setStatus(HostRoleStatus.HOLDING_FAILED);
@@ -187,7 +213,7 @@ public class RetryUpgradeActionServiceTest {
 
     Assert.assertEquals(HostRoleStatus.HOLDING_FAILED, hostRoleCommandDAO.findByPK(hrc2.getTaskId()).getStatus());
 
-    // Case 7: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED, but it is a critical task
+    // Case 8: Cluster with an active upgrade that contains a failed task in HOLDING_FAILED, but it is a critical task
     // during Finalize Cluster, which should not be retried.
     now = System.currentTimeMillis();
     hrc2.setOriginalStartTime(now);
@@ -206,23 +232,18 @@ public class RetryUpgradeActionServiceTest {
    * @throws AmbariException
    */
   private void createCluster() throws AmbariException {
-    stackEntity220 = stackDAO.find("HDP", "2.2.0");
-    stack220 = new StackId("HDP-2.2.0");
 
     clusters.addCluster(clusterName, stack220);
     cluster = clusters.getCluster("c1");
 
     RepositoryVersionEntity repoVersionEntity = new RepositoryVersionEntity();
     repoVersionEntity.setDisplayName("Initial Version");
-    repoVersionEntity.setOperatingSystems("");
+    repoVersionEntity.addRepoOsEntities(new ArrayList<>());
     repoVersionEntity.setStack(stackEntity220);
     repoVersionEntity.setVersion("2.2.0.0");
     repoVersionDAO.create(repoVersionEntity);
 
     helper.getOrCreateRepositoryVersion(stack220, stack220.getStackVersion());
-
-    cluster.createClusterVersion(stack220, stack220.getStackVersion(), "admin", RepositoryVersionState.INSTALLING);
-    cluster.transitionClusterVersion(stack220, stack220.getStackVersion(), RepositoryVersionState.CURRENT);
   }
 
   /**
@@ -232,7 +253,7 @@ public class RetryUpgradeActionServiceTest {
   private void prepareUpgrade() throws AmbariException {
     RepositoryVersionEntity repoVersionEntity = new RepositoryVersionEntity();
     repoVersionEntity.setDisplayName("Version to Upgrade To");
-    repoVersionEntity.setOperatingSystems("");
+    repoVersionEntity.addRepoOsEntities(new ArrayList<>());
     repoVersionEntity.setStack(stackEntity220);
     repoVersionEntity.setVersion("2.2.0.1");
     repoVersionDAO.create(repoVersionEntity);
@@ -242,7 +263,6 @@ public class RetryUpgradeActionServiceTest {
     RequestEntity requestEntity = new RequestEntity();
     requestEntity.setRequestId(upgradeRequestId);
     requestEntity.setClusterId(cluster.getClusterId());
-    requestEntity.setStatus(HostRoleStatus.PENDING);
     requestDAO.create(requestEntity);
 
     // Create the stage and add it to the request
@@ -257,13 +277,12 @@ public class RetryUpgradeActionServiceTest {
 
     UpgradeEntity upgrade = new UpgradeEntity();
     upgrade.setId(1L);
-    upgrade.setRequestId(upgradeRequestId);
+    upgrade.setRequestEntity(requestEntity);
     upgrade.setClusterId(cluster.getClusterId());
     upgrade.setUpgradePackage("some-name");
     upgrade.setUpgradeType(UpgradeType.ROLLING);
     upgrade.setDirection(Direction.UPGRADE);
-    upgrade.setFromVersion("2.2.0.0");
-    upgrade.setToVersion("2.2.0.1");
+    upgrade.setRepositoryVersion(repoVersionEntity);
     upgradeDAO.create(upgrade);
 
     cluster.setUpgradeEntity(upgrade);
@@ -276,7 +295,7 @@ public class RetryUpgradeActionServiceTest {
     hrc1.setRole(Role.ZOOKEEPER_SERVER);
     hrc1.setRoleCommand(RoleCommand.RESTART);
 
-    stageEntity.setHostRoleCommands(new ArrayList<HostRoleCommandEntity>());
+    stageEntity.setHostRoleCommands(new ArrayList<>());
     stageEntity.getHostRoleCommands().add(hrc1);
     hostRoleCommandDAO.create(hrc1);
     stageDAO.merge(stageEntity);

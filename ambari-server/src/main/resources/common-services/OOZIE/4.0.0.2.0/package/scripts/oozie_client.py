@@ -19,20 +19,18 @@ limitations under the License.
 """
 
 import sys
-from resource_management import *
-from resource_management.libraries.functions import conf_select
+from resource_management.libraries.script.script import Script
 from resource_management.libraries.functions import stack_select
-from resource_management.libraries.functions import StackFeature
+from resource_management.libraries.functions.constants import StackFeature
 from resource_management.libraries.functions.stack_features import check_stack_feature
+from resource_management.core.logger import Logger
+from resource_management.core.exceptions import ClientComponentHasNoStatus
 
 from oozie import oozie
 from oozie_service import oozie_service
 
 
 class OozieClient(Script):
-
-  def get_component_name(self):
-    return "oozie-client"
 
   def install(self, env):
     self.install_packages(env)
@@ -59,8 +57,7 @@ class OozieClient(Script):
       return
 
     Logger.info("Executing Oozie Client Stack Upgrade pre-restart")
-    conf_select.select(params.stack_name, "oozie", params.version)
-    stack_select.select("oozie-client", params.version)
+    stack_select.select_packages(params.version)
 
   # We substitute some configs (oozie.authentication.kerberos.principal) before generation (see oozie.py and params.py).
   # This function returns changed configs (it's used for config generation before config download)
@@ -69,7 +66,7 @@ class OozieClient(Script):
       import params
       config = self.get_config()
       return {'configurations': params.oozie_site,
-              'configuration_attributes': config['configuration_attributes'][dictionary]}
+              'configurationAttributes': config['configurationAttributes'][dictionary]}
     else:
       return super(OozieClient, self).generate_configs_get_xml_file_content(filename, dictionary)
 

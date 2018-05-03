@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,18 +17,19 @@
  */
 package org.apache.ambari.server.controller.internal;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.reflect.Type;
+import java.util.Map;
+
 import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.SystemException;
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.Type;
-import java.util.Map;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
 /**
  * Represents an HTTP request to another server for properties to be used to populate an Ambari resource.
@@ -36,7 +37,7 @@ import java.util.Map;
  * instance.
  */
 public abstract class JsonHttpPropertyRequest extends HttpPropertyProvider.HttpPropertyRequest {
-  protected final static Logger LOG = LoggerFactory.getLogger(JsonHttpPropertyRequest.class);
+  private static final Logger LOG = LoggerFactory.getLogger(JsonHttpPropertyRequest.class);
 
   private static final Type MAP_TYPE = new TypeToken<Map<String, Object>>() {}.getType();
 
@@ -62,7 +63,9 @@ public abstract class JsonHttpPropertyRequest extends HttpPropertyProvider.HttpP
 
     try {
       Map<String, Object> responseMap = GSON.fromJson(IOUtils.toString(inputStream, "UTF-8"), MAP_TYPE);
-
+      if (responseMap == null){
+        LOG.error("Properties map from HTTP response is null");
+      }
       for (Map.Entry<String, String> entry : getPropertyMappings().entrySet()) {
         Object propertyValueToSet = getPropertyValue(responseMap, entry.getKey());
         resource.setProperty(entry.getValue(), propertyValueToSet);
@@ -77,7 +80,7 @@ public abstract class JsonHttpPropertyRequest extends HttpPropertyProvider.HttpP
 
   // get the property value from the response map for the given property name
   private Object getPropertyValue(Map<String, Object> responseMap, String property) throws SystemException {
-    if (property == null) {
+    if (property == null || responseMap == null) {
       return null;
     }
 

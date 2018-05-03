@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,11 +17,9 @@
  */
 package com.google.inject.persist.jpa;
 
+import java.util.Map;
 
 import com.google.inject.Inject;
-import com.google.inject.internal.util.$Nullable;
-
-import java.util.Properties;
 
 /**
  * Override non-public class limitations as we need non-interface method
@@ -29,7 +27,7 @@ import java.util.Properties;
 public class AmbariJpaPersistService extends JpaPersistService {
 
   @Inject
-  public AmbariJpaPersistService(@Jpa String persistenceUnitName, @$Nullable @Jpa Properties persistenceProperties) {
+  public AmbariJpaPersistService(@Jpa String persistenceUnitName, @Jpa Map<?, ?> persistenceProperties) {
     super(persistenceUnitName, persistenceProperties);
   }
 

@@ -21,11 +21,13 @@ require('utils/db');
 require('views/common/filter_view');
 require('views/common/sort_view');
 require('mixins');
-require('mixins/common/userPref');
+require('mixins/common/persist');
 require('views/common/table_view');
 
 function getView() {
-  return App.TableView.create();
+  return App.TableView.create({
+    controller: Em.Object.create()
+  });
 }
 
 describe('App.TableView', function () {
@@ -58,7 +60,7 @@ describe('App.TableView', function () {
   describe('#updatePaging', function() {
 
     beforeEach(function() {
-      view = App.TableView.create(App.UserPref, {
+      view = App.TableView.create(App.Persist, {
         controller: Em.Object.create({}),
         displayLength: 10,
         startIndex: 1,
@@ -86,7 +88,7 @@ describe('App.TableView', function () {
   describe('#endIndex', function() {
 
     beforeEach(function() {
-      view = App.TableView.create(App.UserPref, {
+      view = App.TableView.create(App.Persist, {
         controller: Em.Object.create({}),
         displayLength: 10,
         startIndex: 1,
@@ -128,7 +130,7 @@ describe('App.TableView', function () {
   describe('#pageContent', function() {
 
     beforeEach(function() {
-      view = App.TableView.create(App.UserPref, {
+      view = App.TableView.create(App.Persist, {
         controller: Em.Object.create({}),
         displayLength: 10,
         startIndex: 1,
@@ -173,7 +175,7 @@ describe('App.TableView', function () {
   describe('#filtersUsedCalc', function() {
 
     beforeEach(function() {
-      view = App.TableView.create(App.UserPref, {
+      view = App.TableView.create(App.Persist, {
         controller: Em.Object.create({}),
         displayLength: 10,
         startIndex: 1,
@@ -207,7 +209,7 @@ describe('App.TableView', function () {
   describe('#nextPage', function() {
 
     beforeEach(function() {
-      view = App.TableView.create(App.UserPref, {
+      view = App.TableView.create(App.Persist, {
         controller: Em.Object.create({}),
         displayLength: 10,
         startIndex: 1,
@@ -247,7 +249,7 @@ describe('App.TableView', function () {
   describe('#previousPage', function() {
 
     beforeEach(function() {
-      view = App.TableView.create(App.UserPref, {
+      view = App.TableView.create(App.Persist, {
         controller: Em.Object.create({}),
         displayLength: 10,
         startIndex: 50,
@@ -391,6 +393,27 @@ describe('App.TableView', function () {
       });
     });
 
+  });
+
+  describe('#clearStartIndex', function() {
+
+    beforeEach(function() {
+      view = getView();
+    });
+
+    it('should reset start index', function() {
+      view.set('controller.resetStartIndex', false);
+      view.set('controller.startIndex', 11);
+      expect(view.clearStartIndex()).to.be.true;
+      expect(view.get('controller.resetStartIndex')).to.be.true;
+    });
+
+    it('should not reset start index', function() {
+      view.set('controller.resetStartIndex', false);
+      view.set('controller.startIndex', 1);
+      expect(view.clearStartIndex()).to.be.false;
+      expect(view.get('controller.resetStartIndex')).to.be.false;
+    });
   });
 
 });

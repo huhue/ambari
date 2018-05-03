@@ -18,6 +18,7 @@
 
 package org.apache.ambari.server.audit.request.eventcreator;
 
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.ambari.server.api.services.Request;
@@ -26,6 +27,7 @@ import org.apache.ambari.server.api.services.ResultStatus;
 import org.apache.ambari.server.audit.event.AuditEvent;
 import org.apache.ambari.server.audit.event.request.AddRequestRequestAuditEvent;
 import org.apache.ambari.server.controller.internal.RequestOperationLevel;
+import org.apache.ambari.server.controller.internal.RequestResourceProvider;
 import org.apache.ambari.server.controller.spi.Resource;
 
 import com.google.common.collect.ImmutableSet;
@@ -87,10 +89,33 @@ public class RequestEventCreator implements RequestAuditEventCreator {
           .withUrl(request.getURI())
           .withRemoteIp(request.getRemoteAddress())
           .withCommand(request.getBody().getRequestInfoProperties().get("command"))
-          .withClusterName(request.getBody().getRequestInfoProperties().get(RequestOperationLevel.OPERATION_CLUSTER_ID))
-          .build();
+          .withClusterName(getClusterName(request, RequestOperationLevel.OPERATION_CLUSTER_ID))
+	  .build();
       default:
         return null;
     }
+  }
+  /**
+   *Returns clusterName from the request based on the propertyName parameter
+   *@param request
+   *@param propertyName
+   *@return
+   */
+  private String getClusterName(Request request ,String propertyName) {
+    Map<String, String> requestInfoProps = request.getBody().getRequestInfoProperties();
+    return requestInfoProps.containsKey(propertyName)?requestInfoProps.get(propertyName):getProperty(request, RequestResourceProvider.REQUEST_CLUSTER_NAME_PROPERTY_ID);
+  }
+
+  /**
+   *Returns property from the request based on the propertyName parameter
+   *@param request
+   *@param propertyName
+   *@return
+   */
+  private String getProperty(Request request, String propertyName) {
+    if (!request.getBody().getPropertySets().isEmpty()) {
+      return String.valueOf(request.getBody().getPropertySets().iterator().next().get(propertyName));
+    }
+    return null;
   }
 }

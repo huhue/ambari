@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,9 +18,10 @@
 package org.apache.ambari.server.agent;
 
 
+import static org.apache.ambari.server.controller.KerberosHelperImpl.CHECK_KEYTABS;
+import static org.apache.ambari.server.controller.KerberosHelperImpl.SET_KEYTAB;
+
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,21 +51,21 @@ import org.apache.ambari.server.events.publishers.AlertEventPublisher;
 import org.apache.ambari.server.events.publishers.AmbariEventPublisher;
 import org.apache.ambari.server.events.publishers.VersionEventPublisher;
 import org.apache.ambari.server.metadata.ActionMetadata;
-import org.apache.ambari.server.orm.dao.KerberosPrincipalHostDAO;
+import org.apache.ambari.server.orm.dao.KerberosKeytabDAO;
+import org.apache.ambari.server.orm.dao.KerberosKeytabPrincipalDAO;
+import org.apache.ambari.server.orm.entities.KerberosKeytabPrincipalEntity;
 import org.apache.ambari.server.state.Alert;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
-import org.apache.ambari.server.state.ComponentInfo;
 import org.apache.ambari.server.state.Host;
 import org.apache.ambari.server.state.HostHealthStatus;
-import org.apache.ambari.server.state.MaintenanceState;
-import org.apache.ambari.server.state.SecurityState;
+import org.apache.ambari.server.state.HostState;
 import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.ServiceComponent;
 import org.apache.ambari.server.state.ServiceComponentHost;
-import org.apache.ambari.server.state.StackId;
 import org.apache.ambari.server.state.UpgradeState;
 import org.apache.ambari.server.state.fsm.InvalidStateTransitionException;
+import org.apache.ambari.server.state.host.HostStatusUpdatesReceivedEvent;
 import org.apache.ambari.server.state.scheduler.RequestExecution;
 import org.apache.ambari.server.state.stack.upgrade.Direction;
 import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
@@ -73,6 +74,7 @@ import org.apache.ambari.server.state.svccomphost.ServiceComponentHostOpInProgre
 import org.apache.ambari.server.state.svccomphost.ServiceComponentHostOpSucceededEvent;
 import org.apache.ambari.server.state.svccomphost.ServiceComponentHostStartedEvent;
 import org.apache.ambari.server.state.svccomphost.ServiceComponentHostStoppedEvent;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,7 +89,6 @@ import com.google.inject.Injector;
 
 /**
  * HeartbeatProcessor class is used for bulk processing data retrieved from agents in background
- *
  */
 public class HeartbeatProcessor extends AbstractService{
   private static final Logger LOG = LoggerFactory.getLogger(HeartbeatProcessor.class);
@@ -131,7 +132,10 @@ public class HeartbeatProcessor extends AbstractService{
   AmbariMetaInfo ambariMetaInfo;
 
   @Inject
-  KerberosPrincipalHostDAO kerberosPrincipalHostDAO;
+  KerberosKeytabPrincipalDAO kerberosKeytabPrincipalDAO;
+
+  @Inject
+  KerberosKeytabDAO kerberosKeytabDAO;
 
   @Inject
   Gson gson;
@@ -152,7 +156,7 @@ public class HeartbeatProcessor extends AbstractService{
   @Override
   protected void doStart() {
     LOG.info("**** Starting heartbeats processing threads ****");
-    for (int i=0; i< poolSize; i++) {
+    for (int i = 0; i < poolSize; i++) {
       executor.scheduleAtFixedRate(new HeartbeatProcessingTask(), delay, period, TimeUnit.MILLISECONDS);
     }
   }
@@ -200,6 +204,7 @@ public class HeartbeatProcessor extends AbstractService{
 
   /**
    * Incapsulates logic for processing data from agent heartbeat
+   *
    * @param heartbeat Agent heartbeat object
    * @throws AmbariException
    */
@@ -216,29 +221,27 @@ public class HeartbeatProcessor extends AbstractService{
   }
 
 
-
   /**
    * Extracts all of the {@link Alert}s from the heartbeat and fires
    * {@link AlertEvent}s for each one. If there is a problem looking up the
    * cluster, then alerts will not be processed.
    *
-   * @param heartbeat
-   *          the heartbeat to process.
+   * @param heartbeat the heartbeat to process.
    */
   protected void processAlerts(HeartBeat heartbeat) {
-    if (heartbeat == null) {
-      return;
+    if (heartbeat != null) {
+      processAlerts(heartbeat.getHostname(), heartbeat.getAlerts());
     }
+  }
 
-    String hostname = heartbeat.getHostname();
-
-    if (null != heartbeat.getAlerts()) {
-      AlertEvent event = new AlertReceivedEvent(heartbeat.getAlerts());
-      for (Alert alert : event.getAlerts()) {
+  public void processAlerts(String hostname, List<Alert> alerts) {
+    if (alerts != null && !alerts.isEmpty()) {
+      for (Alert alert : alerts) {
         if (alert.getHostName() == null) {
           alert.setHostName(hostname);
         }
       }
+      AlertEvent event = new AlertReceivedEvent(alerts);
       alertEventPublisher.publish(event);
 
     }
@@ -246,32 +249,36 @@ public class HeartbeatProcessor extends AbstractService{
 
   /**
    * Update host status basing on components statuses
+   *
    * @param heartbeat heartbeat to process
    * @throws AmbariException
    */
   protected void processHostStatus(HeartBeat heartbeat) throws AmbariException {
+    processHostStatus(heartbeat.getComponentStatus(), heartbeat.getReports(), heartbeat.getHostname());
+  }
 
-    String hostname = heartbeat.getHostname();
-    Host host = clusterFsm.getHost(hostname);
+
+  protected void processHostStatus(List<ComponentStatus> componentStatuses, List<CommandReport> reports,
+                                   String hostName) throws AmbariException {
+
+    Host host = clusterFsm.getHost(hostName);
     HostHealthStatus.HealthStatus healthStatus = host.getHealthStatus().getHealthStatus();
 
     if (!healthStatus.equals(HostHealthStatus.HealthStatus.UNKNOWN)) {
 
-      List<ComponentStatus> componentStatuses = heartbeat.getComponentStatus();
       //Host status info could be calculated only if agent returned statuses in heartbeat
       //Or, if a command is executed that can change component status
       boolean calculateHostStatus = false;
-      String clusterName = null;
-      if (componentStatuses.size() > 0) {
+      Long clusterId = null;
+      if (CollectionUtils.isNotEmpty(componentStatuses)) {
         calculateHostStatus = true;
         for (ComponentStatus componentStatus : componentStatuses) {
-          clusterName = componentStatus.getClusterName();
+          clusterId = componentStatus.getClusterId();
           break;
         }
       }
 
-      if (!calculateHostStatus) {
-        List<CommandReport> reports = heartbeat.getReports();
+      if (!calculateHostStatus && CollectionUtils.isNotEmpty(reports)) {
         for (CommandReport report : reports) {
           if (RoleCommand.ACTIONEXECUTE.toString().equals(report.getRoleCommand())) {
             continue;
@@ -283,59 +290,14 @@ public class HeartbeatProcessor extends AbstractService{
           }
           if (report.getStatus().equals("COMPLETED")) {
             calculateHostStatus = true;
-            clusterName = report.getClusterName();
+            clusterId = Long.parseLong(report.getClusterId());
             break;
           }
         }
       }
 
       if (calculateHostStatus) {
-        //Use actual component status to compute the host status
-        int masterCount = 0;
-        int mastersRunning = 0;
-        int slaveCount = 0;
-        int slavesRunning = 0;
-
-        StackId stackId;
-        Cluster cluster = clusterFsm.getCluster(clusterName);
-        stackId = cluster.getDesiredStackVersion();
-
-
-        List<ServiceComponentHost> scHosts = cluster.getServiceComponentHosts(heartbeat.getHostname());
-        for (ServiceComponentHost scHost : scHosts) {
-          ComponentInfo componentInfo =
-              ambariMetaInfo.getComponent(stackId.getStackName(),
-                  stackId.getStackVersion(), scHost.getServiceName(),
-                  scHost.getServiceComponentName());
-
-          String status = scHost.getState().name();
-
-          String category = componentInfo.getCategory();
-
-          if (MaintenanceState.OFF == maintenanceStateHelper.getEffectiveState(scHost, host)) {
-            if (category.equals("MASTER")) {
-              ++masterCount;
-              if (status.equals("STARTED")) {
-                ++mastersRunning;
-              }
-            } else if (category.equals("SLAVE")) {
-              ++slaveCount;
-              if (status.equals("STARTED")) {
-                ++slavesRunning;
-              }
-            }
-          }
-        }
-
-        if (masterCount == mastersRunning && slaveCount == slavesRunning) {
-          healthStatus = HostHealthStatus.HealthStatus.HEALTHY;
-        } else if (masterCount > 0 && mastersRunning < masterCount) {
-          healthStatus = HostHealthStatus.HealthStatus.UNHEALTHY;
-        } else {
-          healthStatus = HostHealthStatus.HealthStatus.ALERT;
-        }
-
-        host.setStatus(healthStatus.name());
+        host.calculateHostStatus(clusterId);
       }
 
       //If host doesn't belong to any cluster
@@ -348,42 +310,35 @@ public class HeartbeatProcessor extends AbstractService{
 
   /**
    * Process reports of tasks executed on agents
+   *
    * @param heartbeat heartbeat to process
-   * @param now cached current time
+   * @param now       cached current time
    * @throws AmbariException
    */
-  protected void processCommandReports(
-      HeartBeat heartbeat, long now)
+  protected void processCommandReports(HeartBeat heartbeat, long now) throws AmbariException {
+    processCommandReports(heartbeat.getReports(), heartbeat.getHostname(), now);
+  }
+
+  protected void processCommandReports(List<CommandReport> reports, String hostName, Long now)
       throws AmbariException {
-    String hostname = heartbeat.getHostname();
-    List<CommandReport> reports = heartbeat.getReports();
 
     // Cache HostRoleCommand entities because we will need them few times
-    List<Long> taskIds = new ArrayList<Long>();
+    List<Long> taskIds = new ArrayList<>();
     for (CommandReport report : reports) {
       taskIds.add(report.getTaskId());
     }
-    Collection<HostRoleCommand> commands = actionManager.getTasks(taskIds);
+    Map<Long, HostRoleCommand> commands = actionManager.getTasksMap(taskIds);
 
-    Iterator<HostRoleCommand> hostRoleCommandIterator = commands.iterator();
     for (CommandReport report : reports) {
 
-      Long clusterId = null;
-      if (report.getClusterName() != null) {
-        try {
-          Cluster cluster = clusterFsm.getCluster(report.getClusterName());
-          clusterId = cluster.getClusterId();
-        } catch (AmbariException e) {
-        }
-      }
+      Long clusterId = Long.parseLong(report.getClusterId());
 
-      LOG.debug("Received command report: " + report);
-      // Fetch HostRoleCommand that corresponds to a given task ID
-      HostRoleCommand hostRoleCommand = hostRoleCommandIterator.next();
-      Host host = clusterFsm.getHost(hostname);
-//      HostEntity hostEntity = hostDAO.findByName(hostname); //don't touch database
+      LOG.debug("Received command report: {}", report);
+
+      // get this locally; don't touch the database
+      Host host = clusterFsm.getHost(hostName);
       if (host == null) {
-        LOG.error("Received a command report and was unable to retrieve Host for hostname = " + hostname);
+        LOG.error("Received a command report and was unable to retrieve Host for hostname = " + hostName);
         continue;
       }
 
@@ -391,21 +346,27 @@ public class HeartbeatProcessor extends AbstractService{
       if (RoleCommand.valueOf(report.getRoleCommand()) == RoleCommand.ACTIONEXECUTE &&
           HostRoleStatus.valueOf(report.getStatus()).isCompletedState()) {
         ActionFinalReportReceivedEvent event = new ActionFinalReportReceivedEvent(
-            clusterId, hostname, report, false);
+            clusterId, hostName, report, false);
         ambariEventPublisher.publish(event);
       }
 
-      // Skip sending events for command reports for ABORTed commands
-      if (hostRoleCommand.getStatus() == HostRoleStatus.ABORTED) {
-        continue;
-      }
-      if (hostRoleCommand.getStatus() == HostRoleStatus.QUEUED &&
-          report.getStatus().equals("IN_PROGRESS")) {
-        hostRoleCommand.setStartTime(now);
+      // Fetch HostRoleCommand that corresponds to a given task ID
+      HostRoleCommand hostRoleCommand = commands.get(report.getTaskId());
+      if (hostRoleCommand == null) {
+        LOG.warn("Can't fetch HostRoleCommand with taskId = " + report.getTaskId());
+      } else {
+        // Skip sending events for command reports for ABORTed commands
+        if (hostRoleCommand.getStatus() == HostRoleStatus.ABORTED) {
+          continue;
+        }
+        if (hostRoleCommand.getStatus() == HostRoleStatus.QUEUED &&
+            report.getStatus().equals("IN_PROGRESS")) {
+          hostRoleCommand.setStartTime(now);
 
-        // Because the task may be retried several times, set the original start time only once.
-        if (hostRoleCommand.getOriginalStartTime() == -1) {
-          hostRoleCommand.setOriginalStartTime(now);
+          // Because the task may be retried several times, set the original start time only once.
+          if (hostRoleCommand.getOriginalStartTime() == -1) {
+            hostRoleCommand.setOriginalStartTime(now);
+          }
         }
       }
 
@@ -418,8 +379,7 @@ public class HeartbeatProcessor extends AbstractService{
 
         String customCommand = report.getCustomCommand();
 
-        boolean adding = "SET_KEYTAB".equalsIgnoreCase(customCommand);
-        if (adding || "REMOVE_KEYTAB".equalsIgnoreCase(customCommand)) {
+        if (SET_KEYTAB.equalsIgnoreCase(customCommand)) {
           WriteKeytabsStructuredOut writeKeytabsStructuredOut;
           try {
             writeKeytabsStructuredOut = gson.fromJson(report.getStructuredOut(), WriteKeytabsStructuredOut.class);
@@ -429,19 +389,27 @@ public class HeartbeatProcessor extends AbstractService{
           }
 
           if (writeKeytabsStructuredOut != null) {
-            Map<String, String> keytabs = writeKeytabsStructuredOut.getKeytabs();
-            if (keytabs != null) {
-              for (Map.Entry<String, String> entry : keytabs.entrySet()) {
-                String principal = entry.getKey();
-                if (!kerberosPrincipalHostDAO.exists(principal, host.getHostId())) {
-                  if (adding) {
-                    kerberosPrincipalHostDAO.create(principal, host.getHostId());
-                  } else if ("_REMOVED_".equalsIgnoreCase(entry.getValue())) {
-                    kerberosPrincipalHostDAO.remove(principal, host.getHostId());
+            if (SET_KEYTAB.equalsIgnoreCase(customCommand)) {
+              Map<String, String> keytabs = writeKeytabsStructuredOut.getKeytabs();
+              if (keytabs != null) {
+                for (Map.Entry<String, String> entry : keytabs.entrySet()) {
+                  String principal = entry.getKey();
+                  String keytabPath = entry.getValue();
+                  for (KerberosKeytabPrincipalEntity kkpe: kerberosKeytabPrincipalDAO.findByHostAndKeytab(host.getHostId(), keytabPath)) {
+                    kkpe.setDistributed(true);
+                    kerberosKeytabPrincipalDAO.merge(kkpe);
                   }
                 }
               }
             }
+          }
+        } else if (CHECK_KEYTABS.equalsIgnoreCase(customCommand)) {
+          ListKeytabsStructuredOut structuredOut = gson.fromJson(report.getStructuredOut(), ListKeytabsStructuredOut.class);
+          for (MissingKeytab each : structuredOut.missingKeytabs) {
+            LOG.info("Missing principal: {} for keytab: {} on host: {}", each.principal, each.keytabFilePath, hostName);
+            KerberosKeytabPrincipalEntity kkpe = kerberosKeytabPrincipalDAO.findByHostKeytabAndPrincipal(host.getHostId(), each.keytabFilePath, each.principal);
+            kkpe.setDistributed(false);
+            kerberosKeytabPrincipalDAO.merge(kkpe);
           }
         }
       }
@@ -455,24 +423,25 @@ public class HeartbeatProcessor extends AbstractService{
         continue;
       }
 
-      Cluster cl = clusterFsm.getCluster(report.getClusterName());
+      Cluster cl = clusterFsm.getCluster(Long.parseLong(report.getClusterId()));
       String service = report.getServiceName();
       if (service == null || service.isEmpty()) {
         throw new AmbariException("Invalid command report, service: " + service);
       }
       if (actionMetadata.getActions(service.toLowerCase()).contains(report.getRole())) {
-        LOG.debug(report.getRole() + " is an action - skip component lookup");
+        LOG.debug("{} is an action - skip component lookup", report.getRole());
       } else {
         try {
           Service svc = cl.getService(service);
           ServiceComponent svcComp = svc.getServiceComponent(report.getRole());
-          ServiceComponentHost scHost = svcComp.getServiceComponentHost(hostname);
+          ServiceComponentHost scHost = svcComp.getServiceComponentHost(hostName);
           String schName = scHost.getServiceComponentName();
 
           if (report.getStatus().equals(HostRoleStatus.COMPLETED.toString())) {
 
             // Reading component version if it is present
-            if (StringUtils.isNotBlank(report.getStructuredOut())) {
+            if (StringUtils.isNotBlank(report.getStructuredOut())
+                && !StringUtils.equals("{}", report.getStructuredOut())) {
               ComponentVersionStructuredOut structuredOutput = null;
               try {
                 structuredOutput = gson.fromJson(report.getStructuredOut(), ComponentVersionStructuredOut.class);
@@ -490,27 +459,21 @@ public class HeartbeatProcessor extends AbstractService{
               versionEventPublisher.publish(event);
             }
 
-            // Updating stack version, if needed (this is not actually for express/rolling upgrades!)
-            if (scHost.getState().equals(org.apache.ambari.server.state.State.UPGRADING)) {
-              scHost.setStackVersion(scHost.getDesiredStackVersion());
-            } else if ((report.getRoleCommand().equals(RoleCommand.START.toString()) ||
+            if (!scHost.getState().equals(org.apache.ambari.server.state.State.UPGRADING) &&
+                (report.getRoleCommand().equals(RoleCommand.START.toString()) ||
                 (report.getRoleCommand().equals(RoleCommand.CUSTOM_COMMAND.toString()) &&
                     ("START".equals(report.getCustomCommand()) ||
-                        "RESTART".equals(report.getCustomCommand()))))
-                && null != report.getConfigurationTags()
-                && !report.getConfigurationTags().isEmpty()) {
-              LOG.info("Updating applied config on service " + scHost.getServiceName() +
-                  ", component " + scHost.getServiceComponentName() + ", host " + scHost.getHostName());
-              scHost.updateActualConfigs(report.getConfigurationTags());
+                        "RESTART".equals(report.getCustomCommand()))))) {
               scHost.setRestartRequired(false);
             }
+
             // Necessary for resetting clients stale configs after starting service
             if ((RoleCommand.INSTALL.toString().equals(report.getRoleCommand()) ||
                 (RoleCommand.CUSTOM_COMMAND.toString().equals(report.getRoleCommand()) &&
                     "INSTALL".equals(report.getCustomCommand()))) && svcComp.isClientComponent()){
-              scHost.updateActualConfigs(report.getConfigurationTags());
               scHost.setRestartRequired(false);
             }
+
             if (RoleCommand.CUSTOM_COMMAND.toString().equals(report.getRoleCommand()) &&
                 !("START".equals(report.getCustomCommand()) ||
                     "STOP".equals(report.getCustomCommand()))) {
@@ -523,16 +486,16 @@ public class HeartbeatProcessor extends AbstractService{
                 (RoleCommand.CUSTOM_COMMAND.toString().equals(report.getRoleCommand()) &&
                     "START".equals(report.getCustomCommand()))) {
               scHost.handleEvent(new ServiceComponentHostStartedEvent(schName,
-                  hostname, now));
+                  hostName, now));
               scHost.setRestartRequired(false);
             } else if (RoleCommand.STOP.toString().equals(report.getRoleCommand()) ||
                 (RoleCommand.CUSTOM_COMMAND.toString().equals(report.getRoleCommand()) &&
                     "STOP".equals(report.getCustomCommand()))) {
               scHost.handleEvent(new ServiceComponentHostStoppedEvent(schName,
-                  hostname, now));
+                  hostName, now));
             } else {
               scHost.handleEvent(new ServiceComponentHostOpSucceededEvent(schName,
-                  hostname, now));
+                  hostName, now));
             }
           } else if (report.getStatus().equals("FAILED")) {
 
@@ -549,16 +512,16 @@ public class HeartbeatProcessor extends AbstractService{
             }
 
             LOG.error("Operation failed - may be retried. Service component host: "
-                + schName + ", host: " + hostname + " Action id " + report.getActionId() + " and Task id " + report.getTaskId());
+                + schName + ", host: " + hostName + " Action id " + report.getActionId() + " and taskId " + report.getTaskId());
             if (actionManager.isInProgressCommand(report)) {
               scHost.handleEvent(new ServiceComponentHostOpFailedEvent
-                  (schName, hostname, now));
+                  (schName, hostName, now));
             } else {
               LOG.info("Received report for a command that is no longer active. " + report);
             }
           } else if (report.getStatus().equals("IN_PROGRESS")) {
             scHost.handleEvent(new ServiceComponentHostOpInProgressEvent(schName,
-                hostname, now));
+                hostName, now));
           }
         } catch (ServiceComponentNotFoundException scnex) {
           LOG.warn("Service component not found ", scnex);
@@ -573,20 +536,28 @@ public class HeartbeatProcessor extends AbstractService{
     }
 
     //Update state machines from reports
-    actionManager.processTaskResponse(hostname, reports, commands);
+    actionManager.processTaskResponse(hostName, reports, commands);
   }
 
   /**
    * Process reports of status commands
+   *
    * @param heartbeat heartbeat to process
    * @throws AmbariException
    */
   protected void processStatusReports(HeartBeat heartbeat) throws AmbariException {
-    String hostname = heartbeat.getHostname();
+    processStatusReports(heartbeat.getComponentStatus(), heartbeat.getHostname());
+  }
+
+  /**
+   * Process reports of status commands
+   * @throws AmbariException
+   */
+  public void processStatusReports(List<ComponentStatus> componentStatuses, String hostname) throws AmbariException {
     Set<Cluster> clusters = clusterFsm.getClustersForHost(hostname);
     for (Cluster cl : clusters) {
-      for (ComponentStatus status : heartbeat.componentStatus) {
-        if (status.getClusterName().equals(cl.getClusterName())) {
+      for (ComponentStatus status : componentStatuses) {
+        if (status.getClusterId().equals(cl.getClusterId())) {
           try {
             Service svc = cl.getService(status.getServiceName());
 
@@ -596,50 +567,25 @@ public class HeartbeatProcessor extends AbstractService{
                   componentName);
               ServiceComponentHost scHost = svcComp.getServiceComponentHost(
                   hostname);
-              org.apache.ambari.server.state.State prevState = scHost.getState();
-              org.apache.ambari.server.state.State liveState =
-                  org.apache.ambari.server.state.State.valueOf(org.apache.ambari.server.state.State.class,
-                      status.getStatus());
-              //ignore reports from status commands if component is in INIT or any "in progress" state
-              if (prevState.equals(org.apache.ambari.server.state.State.INSTALLED)
-                  || prevState.equals(org.apache.ambari.server.state.State.STARTED)
-                  || prevState.equals(org.apache.ambari.server.state.State.UNKNOWN)) {
-                scHost.setState(liveState);
-                if (!prevState.equals(liveState)) {
-                  LOG.info("State of service component " + componentName
-                      + " of service " + status.getServiceName()
-                      + " of cluster " + status.getClusterName()
-                      + " has changed from " + prevState + " to " + liveState
-                      + " at host " + hostname
-                      + " according to STATUS_COMMAND report");
+              if (status.getStatus() != null) {
+                org.apache.ambari.server.state.State prevState = scHost.getState();
+                org.apache.ambari.server.state.State liveState =
+                    org.apache.ambari.server.state.State.valueOf(org.apache.ambari.server.state.State.class,
+                        status.getStatus());
+                //ignore reports from status commands if component is in INIT or any "in progress" state
+                if (prevState.equals(org.apache.ambari.server.state.State.INSTALLED)
+                    || prevState.equals(org.apache.ambari.server.state.State.STARTED)
+                    || prevState.equals(org.apache.ambari.server.state.State.UNKNOWN)) {
+                  scHost.setState(liveState);
+                  if (!prevState.equals(liveState)) {
+                    LOG.info("State of service component " + componentName
+                        + " of service " + status.getServiceName()
+                        + " of cluster " + status.getClusterId()
+                        + " has changed from " + prevState + " to " + liveState
+                        + " at host " + hostname
+                        + " according to STATUS_COMMAND report");
+                  }
                 }
-              }
-
-              SecurityState prevSecurityState = scHost.getSecurityState();
-              SecurityState currentSecurityState = SecurityState.valueOf(status.getSecurityState());
-              if((prevSecurityState != currentSecurityState)) {
-                if(prevSecurityState.isEndpoint()) {
-                  scHost.setSecurityState(currentSecurityState);
-                  LOG.info(String.format("Security of service component %s of service %s of cluster %s " +
-                          "has changed from %s to %s on host %s",
-                      componentName, status.getServiceName(), status.getClusterName(), prevSecurityState,
-                      currentSecurityState, hostname));
-                }
-                else {
-                  LOG.debug(String.format("Security of service component %s of service %s of cluster %s " +
-                          "has changed from %s to %s on host %s but will be ignored since %s is a " +
-                          "transitional state",
-                      componentName, status.getServiceName(), status.getClusterName(),
-                      prevSecurityState, currentSecurityState, hostname, prevSecurityState));
-                }
-              }
-
-              if (null != status.getStackVersion() && !status.getStackVersion().isEmpty()) {
-                scHost.setStackVersion(gson.fromJson(status.getStackVersion(), StackId.class));
-              }
-
-              if (null != status.getConfigTags()) {
-                scHost.updateActualConfigs(status.getConfigTags());
               }
 
               Map<String, Object> extra = status.getExtra();
@@ -673,14 +619,14 @@ public class HeartbeatProcessor extends AbstractService{
           } catch (ServiceNotFoundException e) {
             LOG.warn("Received a live status update for a non-initialized"
                 + " service"
-                + ", clusterName=" + status.getClusterName()
+                + ", clusterId=" + status.getClusterId()
                 + ", serviceName=" + status.getServiceName());
             // FIXME ignore invalid live update and continue for now?
             continue;
           } catch (ServiceComponentNotFoundException e) {
             LOG.warn("Received a live status update for a non-initialized"
                 + " servicecomponent"
-                + ", clusterName=" + status.getClusterName()
+                + ", clusterId=" + status.getClusterId()
                 + ", serviceName=" + status.getServiceName()
                 + ", componentName=" + status.getComponentName());
             // FIXME ignore invalid live update and continue for now?
@@ -688,7 +634,7 @@ public class HeartbeatProcessor extends AbstractService{
           } catch (ServiceComponentHostNotFoundException e) {
             LOG.warn("Received a live status update for a non-initialized"
                 + " service"
-                + ", clusterName=" + status.getClusterName()
+                + ", clusterId=" + status.getClusterId()
                 + ", serviceName=" + status.getServiceName()
                 + ", componentName=" + status.getComponentName()
                 + ", hostname=" + hostname);
@@ -697,7 +643,7 @@ public class HeartbeatProcessor extends AbstractService{
           } catch (RuntimeException e) {
             LOG.warn("Received a live status with invalid payload"
                 + " service"
-                + ", clusterName=" + status.getClusterName()
+                + ", clusterId=" + status.getClusterId()
                 + ", serviceName=" + status.getServiceName()
                 + ", componentName=" + status.getComponentName()
                 + ", hostname=" + hostname
@@ -707,6 +653,19 @@ public class HeartbeatProcessor extends AbstractService{
         }
       }
     }
+
+    Host host = clusterFsm.getHost(hostname);
+    long now = System.currentTimeMillis();
+    // If the host is waiting for component status updates, notify it
+    if (componentStatuses.size() > 0
+        && host.getState().equals(HostState.WAITING_FOR_HOST_STATUS_UPDATES)) {
+      try {
+        LOG.debug("Got component status updates for host {}", hostname);
+        host.handleEvent(new HostStatusUpdatesReceivedEvent(hostname, now));
+      } catch (InvalidStateTransitionException e) {
+        LOG.warn("Failed to notify the host about component status updates for host {}", hostname, e);
+      }
+    }
   }
 
   /**
@@ -714,7 +673,10 @@ public class HeartbeatProcessor extends AbstractService{
    */
   private static class WriteKeytabsStructuredOut {
     @SerializedName("keytabs")
-    private Map<String,String> keytabs;
+    private Map<String, String> keytabs;
+
+    @SerializedName("removedKeytabs")
+    private Map<String, String> removedKeytabs;
 
     public Map<String, String> getKeytabs() {
       return keytabs;
@@ -723,8 +685,36 @@ public class HeartbeatProcessor extends AbstractService{
     public void setKeytabs(Map<String, String> keytabs) {
       this.keytabs = keytabs;
     }
+
+    public Map<String, String> getRemovedKeytabs() {
+      return removedKeytabs;
+    }
+
+    public void setRemovedKeytabs(Map<String, String> removedKeytabs) {
+      this.removedKeytabs = removedKeytabs;
+    }
   }
 
+  private static class ListKeytabsStructuredOut {
+    @SerializedName("missing_keytabs")
+    private final List<MissingKeytab> missingKeytabs;
+
+    public ListKeytabsStructuredOut(List<MissingKeytab> missingKeytabs) {
+      this.missingKeytabs = missingKeytabs;
+    }
+  }
+
+  private static class MissingKeytab {
+    @SerializedName("principal")
+    private final String principal;
+    @SerializedName("keytab_file_path")
+    private final String keytabFilePath;
+
+    public MissingKeytab(String principal, String keytabFilePath) {
+      this.principal = principal;
+      this.keytabFilePath = keytabFilePath;
+    }
+  }
 
   /**
    * This class is used for mapping json of structured output for component START action.

@@ -49,7 +49,7 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
       {
         type: 'ams-hbase-site',
         properties: {
-          'hbase.rootdir': 'file:///var/lib/ambari-metrics-collector/hbase'
+          'hbase.rootdir': 'hdfs://h1:8020/user/ams/hbase'
         }
       },
       {
@@ -61,15 +61,22 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
       {
         type: 'hawq-site',
         properties: {
-          'hawq_dfs_url': 'localhost:8020/hawq_default'
+          'hawq_dfs_url': 'localhost:8020/hawq_data'
+        }
+      },
+      {
+        type: 'ranger-env',
+        properties: {
+          'xasecure.audit.destination.hdfs.dir': 'hdfs://c6401.ambari.apache.org/ranger/audit'
         }
       }
     ]
   };
 
   beforeEach(function () {
-    controller = App.HighAvailabilityWizardStep3Controller.create();
-    controller.set('serverConfigData', serverConfigData);
+    controller = App.HighAvailabilityWizardStep3Controller.create({
+      serverConfigData: serverConfigData
+    });
   });
 
   afterEach(function () {
@@ -208,6 +215,7 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
     var masterComponentHosts = [
       {component: 'NAMENODE', isInstalled: true, hostName: 'h1'},
       {component: 'NAMENODE', isInstalled: false, hostName: 'h2'},
+      {component: 'RANGER_ADMIN', isInstalled: true, hostName: 'h1'},
       {component: 'JOURNALNODE', hostName: 'h1'},
       {component: 'JOURNALNODE', hostName: 'h2'},
       {component: 'JOURNALNODE', hostName: 'h3'},
@@ -226,7 +234,7 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
       var get = sinon.stub(App, 'get');
       get.withArgs('isHadoopWindowsStack').returns(true);
       sinon.stub(App.Service, 'find', function () {
-        return [{serviceName: 'HDFS'}, {serviceName: 'HBASE'}, {serviceName: 'AMBARI_METRICS'}, {serviceName: 'ACCUMULO'}, {serviceName: 'HAWQ'}]
+        return [{serviceName: 'HDFS'}, {serviceName: 'HBASE'}, {serviceName: 'AMBARI_METRICS'}, {serviceName: 'ACCUMULO'}, {serviceName: 'HAWQ'}, {serviceName: 'RANGER'}]
       });
     });
 
@@ -339,7 +347,7 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
           name: 'hbase.rootdir',
           filename: 'ams-hbase-site'
         },
-        value: 'file:///var/lib/ambari-metrics-collector/hbase'
+        value: 'hdfs://' + nameServiceId + '/user/ams/hbase'
       },
       {
         config: {
@@ -364,7 +372,14 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
           name: 'hawq_dfs_url',
           filename: 'hawq-site'
         },
-        value: nameServiceId + '/hawq_default'
+        value: nameServiceId + '/hawq_data'
+      },
+      {
+        config: {
+          name: 'xasecure.audit.destination.hdfs.dir',
+          filename: 'ranger-env'
+        },
+        value: 'hdfs://' + nameServiceId + '/ranger/audit'
       }
     ]).forEach(function (test) {
       describe(test.config.name, function () {
@@ -385,7 +400,7 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
           it('name is ' + test.name, function () {
             expect(configs[0].name).to.equal(test.name);
           });
-          it('displayNamr is' + test.name, function () {
+          it('displayName is' + test.name, function () {
             expect(configs[0].displayName).to.equal(test.name);
           });
         }
@@ -413,6 +428,7 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
       'ams-hbase-site': {tag: 'v6'},
       'hawq-site': {tag: 'v7'},
       'hdfs-client': {tag: 'v8'},
+      'ranger-env': {tag: 'v9'}
     }}};
 
     beforeEach(function () {
@@ -421,7 +437,8 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
           Em.Object.create({serviceName: 'HBASE'}),
           Em.Object.create({serviceName: 'ACCUMULO'}),
           Em.Object.create({serviceName: 'AMBARI_METRICS'}),
-          Em.Object.create({serviceName: 'HAWQ'})
+          Em.Object.create({serviceName: 'HAWQ'}),
+          Em.Object.create({serviceName: 'RANGER'})
         ];
       });
       controller.onLoadConfigsTags(data);
@@ -433,9 +450,214 @@ describe('App.HighAvailabilityWizardStep3Controller', function() {
     });
 
     it('urlParams are valid', function () {
-      expect(this.args[0].data.urlParams).to.be.equal('(type=hdfs-site&tag=v1)|(type=core-site&tag=v2)|(type=zoo.cfg&tag=v3)|(type=hbase-site&tag=v4)|(type=accumulo-site&tag=v5)|(type=ams-hbase-site&tag=v6)|(type=hawq-site&tag=v7)|(type=hdfs-client&tag=v8)');
+      expect(this.args[0].data.urlParams).to.be.equal('(type=hdfs-site&tag=v1)|(type=core-site&tag=v2)|(type=zoo.cfg&tag=v3)|(type=hbase-site&tag=v4)|(type=accumulo-site&tag=v5)|(type=ams-hbase-site&tag=v6)|(type=hawq-site&tag=v7)|(type=hdfs-client&tag=v8)|(type=ranger-env&tag=v9)');
     });
 
+  });
+
+  describe('#clearStep', function() {
+
+    it('should clean data', function() {
+      controller.set('stepConfigs', [{}]);
+      controller.set('serverConfigData', {a: 1});
+      controller.clearStep();
+      expect(controller.get('stepConfigs')).to.be.empty;
+      expect(controller.get('serverConfigData')).to.be.empty;
+    });
+  });
+
+  describe('#loadStep', function() {
+    beforeEach(function() {
+      sinon.stub(controller, 'clearStep');
+      sinon.stub(controller, 'loadConfigsTags');
+      controller.loadStep();
+    });
+    afterEach(function() {
+      controller.clearStep.restore();
+      controller.loadConfigsTags.restore();
+    });
+
+    it('loadConfigsTags should be called', function() {
+      expect(controller.loadConfigsTags.calledOnce).to.be.true;
+    });
+
+    it('clearStep should be called', function() {
+      expect(controller.clearStep.calledOnce).to.be.true;
+    });
+  });
+
+  describe('#loadConfigsTags', function() {
+    it('App.ajax.send should be called', function() {
+      controller.loadConfigsTags();
+      expect(testHelpers.findAjaxRequest('name', 'config.tags')).to.be.exist;
+    });
+  });
+
+  describe('#onLoadConfigs', function() {
+    beforeEach(function() {
+      sinon.stub(controller, 'removeConfigs');
+      sinon.stub(controller, 'tweakServiceConfigs');
+      sinon.stub(controller, 'renderServiceConfigs');
+      controller.set('configsToRemove', [{}]);
+      controller.set('haConfig', Em.Object.create({
+        configs: []
+      }));
+      controller.onLoadConfigs({a: 1});
+    });
+    afterEach(function() {
+      controller.tweakServiceConfigs.restore();
+      controller.removeConfigs.restore();
+      controller.renderServiceConfigs.restore();
+    });
+
+    it('serviceConfigData should be set', function() {
+      expect(controller.get('serverConfigData')).to.be.eql({a: 1});
+    });
+
+    it('removeConfigs should be called', function() {
+      expect(controller.removeConfigs.calledWith([{}], {a: 1})).to.be.true;
+    });
+
+    it('tweakServiceConfigs should be called', function() {
+      expect(controller.tweakServiceConfigs.calledWith([])).to.be.true;
+    });
+
+    it('renderServiceConfigs should be called', function() {
+      expect(controller.renderServiceConfigs.calledWith(Em.Object.create({
+        configs: []
+      }))).to.be.true;
+    });
+
+    it('isLoaded should be true', function() {
+      expect(controller.get('isLoaded')).to.be.true;
+    });
+  });
+
+  describe('#renderServiceConfigs', function() {
+    var serviceConfig = {
+      serviceName: 'S1',
+      displayName: 's1',
+      configCategories: [
+        {
+          name: 'C1',
+          errorCount: 0
+        },
+        {
+          name: 'C2',
+          errorCount: 0
+        }
+      ]
+    };
+    beforeEach(function() {
+      sinon.stub(controller, 'loadComponentConfigs');
+      sinon.stub(App.Service, 'find').returns([Em.Object.create({serviceName: 'C1'})]);
+
+      controller.renderServiceConfigs(serviceConfig);
+    });
+    afterEach(function() {
+      controller.loadComponentConfigs.restore();
+      App.Service.find.restore();
+    });
+
+    it('serviceConfig should be pushed in stepConfigs', function() {
+      expect(controller.get('stepConfigs')).to.have.length(1);
+    });
+
+    it('selectedService should be set', function() {
+      expect(JSON.stringify(controller.get('selectedService.configCategories'))).to.be.equal(JSON.stringify([{
+        name: 'C1',
+        errorCount: 0
+      }]));
+      expect(controller.get('selectedService.serviceName')).to.be.equal('S1');
+      expect(controller.get('selectedService.displayName')).to.be.equal('s1');
+      expect(controller.get('selectedService.showConfig')).to.be.true;
+      expect(controller.get('selectedService.configs')).to.be.empty;
+    });
+
+    it('once should be true', function() {
+      expect(controller.get('once')).to.be.true;
+    });
+  });
+
+  describe('#loadComponentConfigs', function() {
+
+    it('should push configs', function() {
+      var _componentConfig = {
+        configs: [{
+          isReconfigurable: true
+        }]
+      };
+      var componentConfig = {
+        configs: []
+      };
+      controller.loadComponentConfigs(_componentConfig, componentConfig);
+      expect(componentConfig.configs).to.have.length(1);
+      expect(componentConfig.configs[0].get('isEditable')).to.be.true;
+    });
+  });
+
+  describe('#_prepareLocalDB', function() {
+    beforeEach(function() {
+      sinon.stub(App.Service, 'find').returns([{serviceName: 'S1'}]);
+    });
+    afterEach(function() {
+      App.Service.find.restore();
+    });
+
+    it('should return localDb object', function() {
+      controller.set('content', Em.Object.create({
+        masterComponentHosts: [{}],
+        slaveComponentHosts: [{}],
+        hosts: [{}]
+      }));
+      expect(controller._prepareLocalDB()).to.be.eql({
+        masterComponentHosts: [{}],
+        slaveComponentHosts: [{}],
+        hosts: [{}],
+        installedServices: ['S1']
+      });
+    });
+  });
+
+  describe('#tweakServiceConfigs', function() {
+    beforeEach(function() {
+      sinon.stub(controller, '_prepareLocalDB');
+      sinon.stub(controller, '_prepareDependencies');
+      sinon.stub(App.NnHaConfigInitializer, 'initialValue');
+    });
+    afterEach(function() {
+      controller._prepareLocalDB.restore();
+      controller._prepareDependencies.restore();
+      App.NnHaConfigInitializer.initialValue.restore();
+    });
+
+    it('should modify configs', function() {
+      expect(controller.tweakServiceConfigs([{}])).to.be.eql([{isOverridable: false}]);
+    });
+  });
+
+  describe('#removeConfigs', function() {
+
+    it('should remove config properties', function() {
+      var configs = {
+        items: [
+          {
+            type: 'k1',
+            properties: {
+              p1: {}
+            }
+          }
+        ]
+      };
+      expect(JSON.stringify(controller.removeConfigs({k1: ['p1']}, configs))).to.be.equal(JSON.stringify({
+        items: [
+          {
+            type: 'k1',
+            properties: {}
+          }
+        ]
+      }));
+    });
   });
 
 });

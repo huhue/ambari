@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,9 +20,12 @@ package org.apache.ambari.server.actionmanager;
 
 import static org.junit.Assert.assertEquals;
 
+import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
 
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
@@ -31,6 +34,7 @@ import org.apache.ambari.server.serveraction.ServerAction;
 import org.apache.ambari.server.serveraction.upgrades.ConfigureAction;
 import org.apache.ambari.server.state.svccomphost.ServiceComponentHostServerActionEvent;
 import org.apache.ambari.server.utils.StageUtils;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -62,7 +66,7 @@ public class StageTest {
 
   @Test
   public void testAddServerActionCommand_userName() throws Exception {
-    final Stage stage = stageFactory.createNew(1, "/tmp", "cluster1", 978, "context", CLUSTER_HOST_INFO,
+    final Stage stage = stageFactory.createNew(1, "/tmp", "cluster1", 978, "context",
         "{\"host_param\":\"param_value\"}", "{\"stage_param\":\"param_value\"}");
 
     stage.addServerActionCommand(ConfigureAction.class.getName(),
@@ -70,7 +74,7 @@ public class StageTest {
         RoleCommand.EXECUTE,
         "cluster1",
         new ServiceComponentHostServerActionEvent(StageUtils.getHostName(), System.currentTimeMillis()),
-        Collections.<String, String> emptyMap(), null, null, 1200, false, false);
+        Collections.emptyMap(), null, null, 1200, false, false);
 
     List<ExecutionCommandWrapper> executionCommands = stage.getExecutionCommands(null);
     assertEquals(1, executionCommands.size());
@@ -78,5 +82,10 @@ public class StageTest {
     String actionUserName = executionCommands.get(0).getExecutionCommand().getRoleParams().get(ServerAction.ACTION_USER_NAME);
 
     assertEquals("user1", actionUserName);
+  }
+
+  @After
+  public void tearDown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 }

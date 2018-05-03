@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,14 +19,18 @@
 package org.apache.ambari.server.state;
 
 import java.util.Map;
-import java.util.concurrent.locks.ReadWriteLock;
+import java.util.Set;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.controller.ServiceResponse;
+import org.apache.ambari.server.controller.internal.DeleteHostComponentStatusMetaData;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 
 public interface Service {
 
   String getName();
+
+  String getDisplayName();
 
   long getClusterId();
 
@@ -36,6 +40,8 @@ public interface Service {
       throws AmbariException;
 
   Map<String, ServiceComponent> getServiceComponents();
+
+  Set<String> getServiceHosts();
 
   void addServiceComponents(Map<String, ServiceComponent> components)
       throws AmbariException;
@@ -47,37 +53,11 @@ public interface Service {
 
   void setDesiredState(State state);
 
-  /**
-   * Gets this Service's security state.
-   *
-   * @return this services desired SecurityState
-   */
-  SecurityState getSecurityState();
-
-  /**
-   * Sets this Service's desired security state
-   * <p/>
-   * It is expected that the new SecurityState is a valid endpoint state such that
-   * SecurityState.isEndpoint() == true.
-   *
-   * @param securityState the desired SecurityState for this Service
-   * @throws AmbariException if the new state is not an endpoint state
-   */
-  void setSecurityState(SecurityState securityState) throws AmbariException;
-
-  StackId getDesiredStackVersion();
-
-  void setDesiredStackVersion(StackId stackVersion);
+  StackId getDesiredStackId();
 
   ServiceResponse convertToResponse();
 
   void debugDump(StringBuilder sb);
-
-  boolean isPersisted();
-
-  void persist();
-
-  void refresh();
 
   ServiceComponent addServiceComponent(String serviceComponentName)
       throws AmbariException;
@@ -89,20 +69,14 @@ public interface Service {
    */
   boolean canBeRemoved();
 
-  void deleteAllComponents() throws AmbariException;
+  void deleteAllComponents(DeleteHostComponentStatusMetaData deleteMetaData);
 
-  void deleteServiceComponent(String componentName)
+  void deleteServiceComponent(String componentName, DeleteHostComponentStatusMetaData deleteMetaData)
       throws AmbariException;
 
   boolean isClientOnlyService();
 
-  void delete() throws AmbariException;
-
-  /**
-   * Get lock to control access to cluster structure
-   * @return cluster-global lock
-   */
-  ReadWriteLock getClusterGlobalLock();
+  void delete(DeleteHostComponentStatusMetaData deleteMetaData);
 
   /**
    * Sets the maintenance state for the service
@@ -114,6 +88,59 @@ public interface Service {
    * @return the maintenance state
    */
   MaintenanceState getMaintenanceState();
+
+  /**
+   * Refresh Service info due to current stack
+   * @throws AmbariException
+   */
+  void updateServiceInfo() throws AmbariException;
+
+
+  /**
+   * Get a true or false value specifying
+   * whether credential store is supported by this service.
+   * @return true or false
+   */
+  boolean isCredentialStoreSupported();
+
+  /**
+   * Get a true or false value specifying
+   * whether credential store is required by this service.
+   * @return true or false
+   */
+  boolean isCredentialStoreRequired();
+
+  /**
+   * Get a true or false value specifying whether
+   * credential store use is enabled for this service.
+   *
+   * @return true or false
+   */
+  boolean isCredentialStoreEnabled();
+
+  /**
+   * Set a true or false value specifying whether this
+   * service is to be enabled for credential store use.
+   *
+   * @param credentialStoreEnabled - true or false
+   */
+  void setCredentialStoreEnabled(boolean credentialStoreEnabled);
+
+  /**
+   * @return
+   */
+  RepositoryVersionEntity getDesiredRepositoryVersion();
+
+  /**
+   * @param desiredRepositoryVersion
+   */
+  void setDesiredRepositoryVersion(RepositoryVersionEntity desiredRepositoryVersion);
+
+  /**
+   * Gets the repository for the desired version of this service by consulting
+   * the repository states of all known components.
+   */
+  RepositoryVersionState getRepositoryState();
 
   enum Type {
     HDFS,

@@ -19,9 +19,13 @@
 var App = require('app');
 
 App.Stack = DS.Model.extend({
-  id: DS.attr('string'), //  ${stackName}-${stackVersion}-${repoVersion}.
+  id: DS.attr('string'), //  ${stackName}-${stackVersion}-${repositoryVersion}.
   stackName: DS.attr('string'),
   stackVersion: DS.attr('string'),
+  stackDefault: DS.attr('boolean'),
+  stackRepoUpdateLinkExists: DS.attr('boolean'),
+  minJdkVersion: DS.attr('string'),
+  maxJdkVersion: DS.attr('string'),
   repositoryVersion: DS.attr('string'),
   showAvailable: DS.attr('boolean'),  // All of the instances should have this value to true. We should map only those stacks that has this flag set to true
   type: DS.attr('string'), // ["PATCH", "STANDARD"]
@@ -30,18 +34,23 @@ App.Stack = DS.Model.extend({
   operatingSystems: DS.hasMany('App.OperatingSystem'),
   isSelected: DS.attr('boolean', {defaultValue: false}),
 
-  stackNameVersion: function () {
-    //${stackName}-${stackVersion}.
-    return this.get('stackName') + '-' + this.get('stackVersion');
-  }.property('stackName', 'stackVersion'),
+  versionInfoId: null,
 
-  isPatch: function () {
-    return this.get('type') == "PATCH";
-  }.property('type'),
-  displayName: function () {
-    //${stackName}-${repositoryVersion}.
-    return this.get('stackName') + '-' + this.get('repositoryVersion');
-  }.property('stackName', 'repositoryVersion'),
+  stackNameVersion: Em.computed.concat('-', 'stackName', 'stackVersion'),
+
+  isPatch: Em.computed.equal('type', 'PATCH'),
+
+  displayName: Em.computed.concat('-', 'stackName', 'repositoryVersion'),
+
+  /**
+   * @type {boolean}
+   */
+  usePublicRepo: true,
+
+  /**
+   * @type {boolean}
+   */
+  useLocalRepo: false,
 
   /**
    * @return: {Array} returns supported repositories for all OperatingSystem's supported by a stack instance
@@ -49,13 +58,28 @@ App.Stack = DS.Model.extend({
   repositories: function () {
     var operatingSystems = this.get('operatingSystems');
     var repositories = [];
-    operatingSystems.forEach(function (os) {
+    operatingSystems.filterProperty('isSelected', true).forEach(function (os) {
       os.get('repositories').forEach(function (repository) {
         repositories.pushObject(repository);
       }, this);
     }, this);
     return repositories;
-  }.property('id')
+  }.property('operatingSystems.@each.isSelected'),
+
+  cleanReposBaseUrls: function () {
+    this.get('operatingSystems').forEach(function (os) {
+      os.get('repositories').setEach('baseUrl', '');
+    });
+  },
+
+  restoreReposBaseUrls: function () {
+    this.get('operatingSystems').forEach(function (os) {
+      os.get('repositories').forEach(function (repo) {
+        repo.set('baseUrl', repo.get('baseUrlInit'));
+      });
+    });
+  }
+
 });
 
 

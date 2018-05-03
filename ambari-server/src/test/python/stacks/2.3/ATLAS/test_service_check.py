@@ -34,8 +34,8 @@ class TestAtlasCheck(RMFTestCase):
                        target = RMFTestCase.TARGET_COMMON_SERVICES
                        )
 
-    self.assertResourceCalled('Execute', 'curl -s -o /dev/null -w "%{http_code}" http://c6401.ambari.apache.org:21000/',
-                              user = 'atlas',
+    self.assertResourceCalled('Execute', 'curl -k -s -o /dev/null -w "%{http_code}" http://c6401.ambari.apache.org:21000/',
+                              user = 'ambari-qa',
                               tries = 5,
                               try_sleep = 10)
 
@@ -52,10 +52,10 @@ class TestAtlasCheck(RMFTestCase):
 
     self.assertResourceCalled('Execute',
                               '/usr/bin/kinit -kt /etc/security/keytabs/smokeuser.headless.keytab ambari-qa@EXAMPLE.COM',
-                              user = 'atlas')
+                              user = 'ambari-qa')
 
-    self.assertResourceCalled('Execute', 'curl --negotiate -u : -b ~/cookiejar.txt -c ~/cookiejar.txt -s -o /dev/null -w "%{http_code}" https://c6401.ambari.apache.org:21443/',
-                              user = 'atlas',
+    self.assertResourceCalled('Execute', 'curl -k --negotiate -u : -b ~/cookiejar.txt -c ~/cookiejar.txt -s -o /dev/null -w "%{http_code}" https://c6401.ambari.apache.org:21443/',
+                              user = 'ambari-qa',
                               tries = 5,
                               try_sleep = 10)
 

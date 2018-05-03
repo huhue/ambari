@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import javax.xml.bind.Unmarshaller;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlAttribute;
@@ -36,11 +37,14 @@ import javax.xml.bind.annotation.XmlValue;
 
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.state.stack.upgrade.ClusterGrouping;
+import org.apache.ambari.server.state.stack.upgrade.ConfigureTask;
+import org.apache.ambari.server.state.stack.upgrade.CreateAndConfigureTask;
 import org.apache.ambari.server.state.stack.upgrade.Direction;
 import org.apache.ambari.server.state.stack.upgrade.Grouping;
 import org.apache.ambari.server.state.stack.upgrade.ServiceCheckGrouping;
 import org.apache.ambari.server.state.stack.upgrade.Task;
 import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
+import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,7 +55,9 @@ import org.slf4j.LoggerFactory;
 @XmlAccessorType(XmlAccessType.FIELD)
 public class UpgradePack {
 
-  private static Logger LOG = LoggerFactory.getLogger(UpgradePack.class);
+  private static final String ALL_VERSIONS = "*";
+
+  private static final Logger LOG = LoggerFactory.getLogger(UpgradePack.class);
 
   /**
    * Name of the file without the extension, such as upgrade-2.2
@@ -66,7 +72,7 @@ public class UpgradePack {
 
   @XmlElementWrapper(name="order")
   @XmlElement(name="group")
-  private List<Grouping> groups;
+  private List<Grouping> groups = new ArrayList<>();
 
   @XmlElement(name="prerequisite-checks")
   private PrerequisiteChecks prerequisiteChecks;
@@ -104,6 +110,9 @@ public class UpgradePack {
   @XmlTransient
   private Map<String, List<String>> m_orders = null;
 
+  /**
+   * Initialized once by {@link #afterUnmarshal(Unmarshaller, Object)}.
+   */
   @XmlTransient
   private Map<String, Map<String, ProcessingComponent>> m_process = null;
 
@@ -142,7 +151,10 @@ public class UpgradePack {
    * @return the preCheck name, e.g. "CheckDescription"
    */
   public List<String> getPrerequisiteChecks() {
-    return new ArrayList<String>(prerequisiteChecks.checks);
+    if (prerequisiteChecks == null) {
+      return new ArrayList<String>();
+    }    
+    return new ArrayList<>(prerequisiteChecks.checks);
   }
 
   /**
@@ -150,7 +162,81 @@ public class UpgradePack {
    * @return the prerequisite check configuration
    */
   public PrerequisiteCheckConfig getPrerequisiteCheckConfig() {
+    if (prerequisiteChecks == null) {
+      return new PrerequisiteCheckConfig();
+    }    
     return prerequisiteChecks.configuration;
+  }
+
+  /**
+   * Merges the prerequisite checks section of the upgrade xml with
+   * the prerequisite checks from a service's upgrade xml.
+   * These are added to the end of the current list of checks.
+   *
+   * @param pack
+   *              the service's upgrade pack
+   */
+  public void mergePrerequisiteChecks(UpgradePack pack) {
+    PrerequisiteChecks newPrereqChecks = pack.prerequisiteChecks;
+    if (prerequisiteChecks == null) {
+      prerequisiteChecks = newPrereqChecks;
+      return;
+    }
+
+    if (newPrereqChecks == null) {
+      return;
+    }
+
+    if (prerequisiteChecks.checks == null) {
+      prerequisiteChecks.checks = new ArrayList<>();
+    }
+    if (newPrereqChecks.checks != null) {
+      prerequisiteChecks.checks.addAll(newPrereqChecks.checks);
+    }
+
+    if (newPrereqChecks.configuration == null) {
+      return;
+    }
+
+    if (prerequisiteChecks.configuration == null) {
+      prerequisiteChecks.configuration = newPrereqChecks.configuration;
+      return;
+    }
+    if (prerequisiteChecks.configuration.globalProperties == null) {
+      prerequisiteChecks.configuration.globalProperties = new ArrayList<>();
+    }
+    if (prerequisiteChecks.configuration.prerequisiteCheckProperties == null) {
+      prerequisiteChecks.configuration.prerequisiteCheckProperties = new ArrayList<>();
+    }
+    if (newPrereqChecks.configuration.globalProperties != null) {
+      prerequisiteChecks.configuration.globalProperties.addAll(newPrereqChecks.configuration.globalProperties);
+    }
+    if (newPrereqChecks.configuration.prerequisiteCheckProperties != null) {
+      prerequisiteChecks.configuration.prerequisiteCheckProperties.addAll(newPrereqChecks.configuration.prerequisiteCheckProperties);
+    }
+  }
+
+/**
+ * Merges the processing section of the upgrade xml with
+ * the processing section from a service's upgrade xml.
+ * These are added to the end of the current list of services.
+ *
+ * @param pack
+ *              the service's upgrade pack
+ */
+  public void mergeProcessing(UpgradePack pack) {
+    List<ProcessingService> list = pack.processing;
+    if (list == null) {
+      return;
+    }
+    if (processing == null) {
+      processing = list;
+      return;
+    }
+    processing.addAll(list);
+
+    // new processing has been created, so rebuild the mappings
+    initializeProcessingComponentMappings();
   }
 
   /**
@@ -195,6 +281,10 @@ public class UpgradePack {
     return skipServiceCheckFailures;
   }
 
+  public List<Grouping> getAllGroups() {
+    return groups;
+  }
+
   /**
    * Gets the groups defined for the upgrade pack. If a direction is defined for
    * a group, it must match the supplied direction to be returned
@@ -204,18 +294,23 @@ public class UpgradePack {
    * @return the list of groups
    */
   public List<Grouping> getGroups(Direction direction) {
-    List<Grouping> list = new ArrayList<Grouping>();
+    List<Grouping> list = new ArrayList<>();
     if (direction.isUpgrade()) {
       list = groups;
     } else {
-      if (type == UpgradeType.ROLLING) {
-        list = getDowngradeGroupsForRolling();
-      } else if (type == UpgradeType.NON_ROLLING) {
-        list = getDowngradeGroupsForNonrolling();
+      switch (type) {
+        case NON_ROLLING:
+          list = getDowngradeGroupsForNonrolling();
+          break;
+        case HOST_ORDERED:
+        case ROLLING:
+        default:
+          list = getDowngradeGroupsForRolling();
+          break;
       }
     }
 
-    List<Grouping> checked = new ArrayList<Grouping>();
+    List<Grouping> checked = new ArrayList<>();
     for (Grouping group : list) {
       if (null == group.intendedDirection || direction == group.intendedDirection) {
         checked.add(group);
@@ -236,7 +331,6 @@ public class UpgradePack {
   public boolean canBeApplied(String targetVersion){
     // check that upgrade pack can be applied to selected stack
     // converting 2.2.*.* -> 2\.2(\.\d+)?(\.\d+)?(-\d+)?
-
     String regexPattern = getTarget().replaceAll("\\.", "\\\\."); // . -> \.
     regexPattern = regexPattern.replaceAll("\\\\\\.\\*", "(\\\\\\.\\\\d+)?"); // \.* -> (\.\d+)?
     regexPattern = regexPattern.concat("(-\\d+)?");
@@ -276,7 +370,13 @@ public class UpgradePack {
    * @return the list of groups, reversed appropriately for a downgrade.
    */
   private List<Grouping> getDowngradeGroupsForRolling() {
-    List<Grouping> reverse = new ArrayList<Grouping>();
+    List<Grouping> reverse = new ArrayList<>();
+
+    // !!! Testing exposed groups.size() == 1 issue.  Normally there's no precedent for
+    // a one-group upgrade pack, so take it into account anyway.
+    if (groups.size() == 1) {
+      return groups;
+    }
 
     int idx = 0;
     int iter = 0;
@@ -306,7 +406,7 @@ public class UpgradePack {
   }
 
   private List<Grouping> getDowngradeGroupsForNonrolling() {
-    List<Grouping> list = new ArrayList<Grouping>();
+    List<Grouping> list = new ArrayList<>();
     for (Grouping g : groups) {
       list.add(g);
     }
@@ -318,32 +418,69 @@ public class UpgradePack {
    * @return a map of service_name -> map(component_name -> process).
    */
   public Map<String, Map<String, ProcessingComponent>> getTasks() {
+    return m_process;
+  }
 
-    if (null == m_process) {
-      m_process = new LinkedHashMap<String, Map<String, ProcessingComponent>>();
+  /**
+   * This method is called after all the properties (except IDREF) are
+   * unmarshalled for this object, but before this object is set to the parent
+   * object. This is done automatically by the {@link Unmarshaller}.
+   * <p/>
+   * Currently, this method performs the following post-unmarshal operations:
+   * <ul>
+   * <li>Builds a mapping of service name to a mapping of component name to
+   * {@link ProcessingComponent}</li>
+   * </ul>
+   *
+   * @param unmarshaller
+   *          the unmarshaller used to unmarshal this instance
+   * @param parent
+   *          the parent object, if any, that this will be set on.
+   * @see Unmarshaller
+   */
+  void afterUnmarshal(Unmarshaller unmarshaller, Object parent) {
+    initializeProcessingComponentMappings();
+  }
 
-      if (processing != null) {
-        for (ProcessingService svc : processing) {
-          if (!m_process.containsKey(svc.name)) {
-            m_process.put(svc.name, new LinkedHashMap<String, ProcessingComponent>());
-          }
+  /**
+   * Builds a mapping of component name to {@link ProcessingComponent} and then
+   * maps those to service name, initializing {@link #m_process} to the result.
+   */
+  private void initializeProcessingComponentMappings() {
+    m_process = new LinkedHashMap<>();
 
-          Map<String, ProcessingComponent> componentMap = m_process.get(svc.name);
+    if (CollectionUtils.isEmpty(processing)) {
+      return;
+    }
 
-          for (ProcessingComponent pc : svc.components) {
-            if (pc != null) {
-              componentMap.put(pc.name, pc);
-            } else {
-              LOG.warn("ProcessingService {} has null amongst it's values " +
-                "(total {} components)", svc.name, svc.components.size());
-            }
-          }
+    for (ProcessingService svc : processing) {
+      Map<String, ProcessingComponent> componentMap = m_process.get(svc.name);
+
+      // initialize mapping if not present for the given service name
+      if (null == componentMap) {
+        componentMap = new LinkedHashMap<>();
+        m_process.put(svc.name, componentMap);
+      }
+
+      for (ProcessingComponent pc : svc.components) {
+        if (pc != null) {
+          componentMap.put(pc.name, pc);
+        } else {
+          LOG.warn("ProcessingService {} has null amongst it's values (total {} components)",
+              svc.name, svc.components.size());
         }
       }
     }
-
-    return m_process;
   }
+
+  /**
+   * @return {@code true} if the upgrade targets any version or stack.  Both
+   * {@link #target} and {@link #targetStack} must equal "*"
+   */
+  public boolean isAllTarget() {
+    return ALL_VERSIONS.equals(target) && ALL_VERSIONS.equals(targetStack);
+  }
+
 
   /**
    * A service definition that holds a list of components in the 'order' element.
@@ -381,10 +518,10 @@ public class UpgradePack {
     @XmlElement(name="task")
     public List<Task> preTasks;
 
-    @XmlElementWrapper(name="pre-downgrade")
-    @XmlElement(name="task")
+    @XmlElement(name="pre-downgrade")
+    private DowngradeTasks preDowngradeXml;
+    @XmlTransient
     public List<Task> preDowngradeTasks;
-
 
     @XmlElementWrapper(name="upgrade")
     @XmlElement(name="task")
@@ -394,9 +531,81 @@ public class UpgradePack {
     @XmlElement(name="task")
     public List<Task> postTasks;
 
-    @XmlElementWrapper(name="post-downgrade")
-    @XmlElement(name="task")
+
+    @XmlElement(name="post-downgrade")
+    private DowngradeTasks postDowngradeXml;
+    @XmlTransient
     public List<Task> postDowngradeTasks;
+
+    /**
+     * This method verifies that if {@code pre-upgrade} is defined, that there is also
+     * a sibling {@code pre-downgrade} defined.  Similarly, {@code post-upgrade} must have a
+     * sibling {@code post-downgrade}.  This is because the JDK (include 1.8) JAXB doesn't
+     * support XSD xpath assertions for siblings.
+     *
+     * @param unmarshaller  the unmarshaller
+     * @param parent        the parent
+     */
+    void afterUnmarshal(Unmarshaller unmarshaller, Object parent) {
+      if (null != preDowngradeXml) {
+        preDowngradeTasks = preDowngradeXml.copyUpgrade ? preTasks :
+          preDowngradeXml.tasks;
+      }
+
+      if (null != postDowngradeXml) {
+        postDowngradeTasks = postDowngradeXml.copyUpgrade ? postTasks :
+          postDowngradeXml.tasks;
+      }
+
+      ProcessingService service = (ProcessingService) parent;
+
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Processing component {}/{} preUpgrade={} postUpgrade={} preDowngrade={} postDowngrade={}",
+            preTasks, preDowngradeTasks, postTasks, postDowngradeTasks);
+      }
+
+      if (null != preTasks && null == preDowngradeTasks) {
+        String error = String.format("Upgrade pack must contain pre-downgrade elements if "
+            + "pre-upgrade exists for processing component %s/%s", service.name, name);
+
+        throw new RuntimeException(error);
+      }
+
+      if (null != postTasks && null == postDowngradeTasks) {
+        String error = String.format("Upgrade pack must contain post-downgrade elements if "
+            + "post-upgrade exists for processing component %s/%s", service.name, name);
+
+        throw new RuntimeException(error);
+      }
+
+      // !!! check for config tasks and mark the associated service
+      initializeTasks(service.name, preTasks);
+      initializeTasks(service.name, postTasks);
+      initializeTasks(service.name, tasks);
+      initializeTasks(service.name, preDowngradeTasks);
+      initializeTasks(service.name, postDowngradeTasks);
+    }
+
+    /**
+     * Checks for config tasks and marks the associated service.
+     * @param service
+     *          the service name
+     * @param tasks
+     *          the list of tasks to check
+     */
+    private void initializeTasks(String service, List<Task> tasks) {
+      if (CollectionUtils.isEmpty(tasks)) {
+        return;
+      }
+
+      for (Task task : tasks) {
+        if (Task.Type.CONFIGURE == task.getType()) {
+          ((ConfigureTask) task).associatedService = service;
+        } else if (Task.Type.CREATE_AND_CONFIGURE == task.getType()) {
+          ((CreateAndConfigureTask) task).associatedService = service;
+        }
+      }
+    }
   }
 
   /**
@@ -418,7 +627,7 @@ public class UpgradePack {
      * List of additional prerequisite checks to run in addition to required prerequisite checks
      */
     @XmlElement(name="check", type=String.class)
-    public List<String> checks = new ArrayList<String>();
+    public List<String> checks = new ArrayList<>();
 
     /**
      * Prerequisite checks configuration
@@ -451,7 +660,7 @@ public class UpgradePack {
       if(globalProperties == null) {
         return null;
       }
-      Map<String, String> result = new HashMap<String, String>();
+      Map<String, String> result = new HashMap<>();
       for (PrerequisiteProperty property : globalProperties) {
         result.put(property.name, property.value);
       }
@@ -501,7 +710,7 @@ public class UpgradePack {
         return null;
       }
 
-      Map<String, String> result = new HashMap<String, String>();
+      Map<String, String> result = new HashMap<>();
       for (PrerequisiteProperty property : properties) {
         result.put(property.name, property.value);
       }
@@ -519,4 +728,17 @@ public class UpgradePack {
     @XmlValue
     public String value;
   }
+
+  /**
+   * A {@code (pre|post)-downgrade} can have an attribute as well as contain {@code task} elements.
+   */
+  private static class DowngradeTasks {
+
+    @XmlAttribute(name="copy-upgrade")
+    private boolean copyUpgrade = false;
+
+    @XmlElement(name="task")
+    private List<Task> tasks = new ArrayList<>();
+  }
+
 }

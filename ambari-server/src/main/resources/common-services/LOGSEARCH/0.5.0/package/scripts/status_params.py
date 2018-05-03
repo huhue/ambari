@@ -19,14 +19,12 @@ limitations under the License.
 
 """
 
+from resource_management.libraries.functions import get_kinit_path
+from resource_management.libraries.functions.default import default
 from resource_management.libraries.functions.format import format
 from resource_management.libraries.script.script import Script
 
 config = Script.get_config()
-
-logsearch_solr_port = config['configurations']['logsearch-solr-env']['logsearch_solr_port']
-logsearch_solr_piddir = config['configurations']['logsearch-solr-env']['logsearch_solr_pid_dir']
-logsearch_solr_pidfile = format("{logsearch_solr_piddir}/solr-{logsearch_solr_port}.pid")
 
 # logsearch pid file
 logsearch_pid_dir = config['configurations']['logsearch-env']['logsearch_pid_dir']
@@ -35,3 +33,6 @@ logsearch_pid_file = format("{logsearch_pid_dir}/logsearch.pid")
 # logfeeder pid file
 logfeeder_pid_dir = config['configurations']['logfeeder-env']['logfeeder_pid_dir']
 logfeeder_pid_file = format("{logfeeder_pid_dir}/logfeeder.pid")
+
+security_enabled = config['configurations']['cluster-env']['security_enabled']
+kinit_path_local = get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))

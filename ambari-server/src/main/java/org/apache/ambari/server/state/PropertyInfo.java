@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,10 +19,12 @@
 package org.apache.ambari.server.state;
 
 
-import com.google.common.base.Predicate;
-import com.google.common.collect.Iterables;
-import org.apache.ambari.server.controller.StackConfigurationResponse;
-import org.w3c.dom.Element;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import javax.xml.bind.Unmarshaller;
 import javax.xml.bind.annotation.XmlAccessType;
@@ -33,12 +35,8 @@ import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlElementWrapper;
 import javax.xml.bind.annotation.XmlList;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import org.apache.ambari.server.controller.StackConfigurationResponse;
+import org.w3c.dom.Element;
 
 @XmlAccessorType(XmlAccessType.FIELD)
 public class PropertyInfo {
@@ -52,15 +50,21 @@ public class PropertyInfo {
   private String filename;
   private boolean deleted;
 
+  @XmlElement(name="on-ambari-upgrade", required = true)
+  private PropertyUpgradeBehavior propertyAmbariUpgradeBehavior;
+
+  @XmlElement(name="on-stack-upgrade")
+  private PropertyStackUpgradeBehavior propertyStackUpgradeBehavior = new PropertyStackUpgradeBehavior();
+
   @XmlAttribute(name = "require-input")
   private boolean requireInput;
 
   @XmlElement(name = "property-type")
   @XmlList
-  private Set<PropertyType> propertyTypes = new HashSet<PropertyType>();
+  private Set<PropertyType> propertyTypes = new HashSet<>();
 
   @XmlAnyElement
-  private List<Element> propertyAttributes = new ArrayList<Element>();
+  private List<Element> propertyAttributes = new ArrayList<>();
 
   @XmlElement(name = "value-attributes")
   private ValueAttributesInfo propertyValueAttributes =
@@ -69,11 +73,27 @@ public class PropertyInfo {
   @XmlElementWrapper(name="depends-on")
   @XmlElement(name = "property")
   private Set<PropertyDependencyInfo> dependsOnProperties =
-    new HashSet<PropertyDependencyInfo>();
+    new HashSet<>();
 
   @XmlElementWrapper(name="property_depended_by")
   private Set<PropertyDependencyInfo> dependedByProperties =
-    new HashSet<PropertyDependencyInfo>();
+    new HashSet<>();
+
+  /**
+   * The list of properties that use this property.
+   * Password properties may be used by other properties in
+   * the same config type or different config type, typically
+   * when asking for user name and password pairs.
+   */
+  @XmlElementWrapper(name="used-by")
+  @XmlElement(name = "property")
+  private Set<PropertyDependencyInfo> usedByProperties =
+          new HashSet<>();
+
+  @XmlElementWrapper(name="supported-refresh-commands")
+  @XmlElement(name="refresh-command")
+  private Set<RefreshCommand> supportedRefreshCommands = new HashSet<>();
+
 
   //This method is called after all the properties (except IDREF) are unmarshalled for this object,
   //but before this object is set to the parent object.
@@ -84,7 +104,7 @@ public class PropertyInfo {
   }
 
   public PropertyInfo() {
-
+    propertyAmbariUpgradeBehavior = new PropertyUpgradeBehavior();
   }
 
   public String getName() {
@@ -93,6 +113,10 @@ public class PropertyInfo {
 
   public void setName(String name) {
     this.name = name;
+  }
+
+  public Set<PropertyDependencyInfo> getUsedByProperties() {
+    return usedByProperties;
   }
 
   public String getValue() {
@@ -134,7 +158,15 @@ public class PropertyInfo {
   public void setPropertyTypes(Set<PropertyType> propertyTypes) {
     this.propertyTypes = propertyTypes;
   }
-  
+
+  public PropertyUpgradeBehavior getPropertyAmbariUpgradeBehavior() {
+    return propertyAmbariUpgradeBehavior;
+  }
+
+  public void setPropertyAmbariUpgradeBehavior(PropertyUpgradeBehavior propertyAmbariUpgradeBehavior) {
+    this.propertyAmbariUpgradeBehavior = propertyAmbariUpgradeBehavior;
+  }
+
   public StackConfigurationResponse convertToResponse() {
     return new StackConfigurationResponse(getName(), getValue(),
       getDescription(), getDisplayName() , getFilename(), isRequireInput(),
@@ -151,7 +183,7 @@ public class PropertyInfo {
   }
 
   public Map<String, String> getAttributesMap() {
-    Map<String, String> attributes = new HashMap<String, String>();
+    Map<String, String> attributes = new HashMap<>();
     for (Element propertyAttribute : propertyAttributes) {
       attributes.put(propertyAttribute.getTagName(), propertyAttribute.getFirstChild().getNodeValue());
     }
@@ -166,6 +198,10 @@ public class PropertyInfo {
     return dependsOnProperties;
   }
 
+  public void setPropertyValueAttributes(ValueAttributesInfo propertyValueAttributes) {
+    this.propertyValueAttributes = propertyValueAttributes;
+  }
+
   public Set<PropertyDependencyInfo> getDependedByProperties() {
     return dependedByProperties;
   }
@@ -176,6 +212,30 @@ public class PropertyInfo {
 
   public void setRequireInput(boolean requireInput) {
     this.requireInput = requireInput;
+  }
+
+  public List<Element> getPropertyAttributes() {
+    return propertyAttributes;
+  }
+
+  public void setPropertyAttributes(List<Element> propertyAttributes) {
+    this.propertyAttributes = propertyAttributes;
+  }
+
+  public Set<RefreshCommand> getSupportedRefreshCommands() {
+    return supportedRefreshCommands;
+  }
+
+  public void setSupportedRefreshCommands(Set<RefreshCommand> supportedRefreshCommands) {
+    this.supportedRefreshCommands = supportedRefreshCommands;
+  }
+
+  /**
+   * Willcard properties should not be included to stack configurations.
+   * @return
+   */
+  public boolean shouldBeConfigured() {
+    return !getName().contains("*");
   }
 
   @Override
@@ -239,14 +299,24 @@ public class PropertyInfo {
       '}';
   }
 
+  public PropertyStackUpgradeBehavior getPropertyStackUpgradeBehavior() {
+    return propertyStackUpgradeBehavior;
+  }
+
+  public void setPropertyStackUpgradeBehavior(PropertyStackUpgradeBehavior propertyStackUpgradeBehavior) {
+    this.propertyStackUpgradeBehavior = propertyStackUpgradeBehavior;
+  }
+
   public enum PropertyType {
     PASSWORD,
     USER,
+    UID,
     GROUP,
+    GID,
     TEXT,
     ADDITIONAL_USER_PROPERTY,
-    DONT_ADD_ON_UPGRADE,
     NOT_MANAGED_HDFS_PATH,
-    VALUE_FROM_PROPERTY_FILE
+    VALUE_FROM_PROPERTY_FILE,
+    KERBEROS_PRINCIPAL
   }
 }

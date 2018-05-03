@@ -22,10 +22,14 @@ App.HighAvailabilityWizardStep5Controller = App.HighAvailabilityProgressPageCont
 
   name:"highAvailabilityWizardStep5Controller",
 
-  commands: ['stopServices', 'installNameNode', 'installJournalNodes', 'reconfigureHDFS', 'startJournalNodes', 'disableSNameNode'],
+  commands: ['stopAllServices', 'installNameNode', 'installJournalNodes', 'reconfigureHDFS', 'startJournalNodes', 'disableSNameNode'],
 
   hdfsSiteTag : "",
   coreSiteTag : "",
+
+  stopAllServices: function () {
+    this.stopServices([], true, true);
+  },
 
   installNameNode: function () {
     var hostName = this.get('content.masterComponentHosts').filterProperty('component', 'NAMENODE').findProperty('isInstalled', false).hostName;
@@ -44,7 +48,7 @@ App.HighAvailabilityWizardStep5Controller = App.HighAvailabilityProgressPageCont
 
   disableSNameNode: function () {
     var hostName = this.get('content.masterComponentHosts').findProperty('component', 'SECONDARY_NAMENODE').hostName;
-    App.ajax.send({
+    return App.ajax.send({
       name: 'common.host.host_component.passive',
       sender: this,
       data: {
@@ -71,9 +75,10 @@ App.HighAvailabilityWizardStep5Controller = App.HighAvailabilityProgressPageCont
    * @param {Object} data - config object to update
    */
   updateConfigProperties: function(data) {
-    var siteNames = ['hdfs-site','core-site'];
-    var configData = this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)));
-    App.ajax.send({
+    var siteNames = ['hdfs-site', 'core-site'].concat(this.getRangerSiteNames(data));
+    var note = Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false));
+    var configData = this.reconfigureSites(siteNames, data, note);
+    return App.ajax.send({
       name: 'common.service.configurations',
       sender: this,
       data: {
@@ -82,6 +87,25 @@ App.HighAvailabilityWizardStep5Controller = App.HighAvailabilityProgressPageCont
       error: 'onTaskError',
       success: 'installHDFSClients'
     });
+  },
+
+  getRangerSiteNames: function(data) {
+    var siteNames = [];
+    if (App.Service.find().someProperty('serviceName', 'RANGER')) {
+      var hdfsPluginConfig = data.items.findProperty('type', 'ranger-hdfs-plugin-properties');
+      if (hdfsPluginConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in hdfsPluginConfig.properties) {
+          siteNames.push('ranger-hdfs-plugin-properties');
+        }
+      }
+      var hdfsAuditConfig = data.items.findProperty('type', 'ranger-hdfs-audit');
+      if (hdfsAuditConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in hdfsAuditConfig.properties) {
+          siteNames.push('ranger-hdfs-audit');
+        }
+      }
+    }
+    return siteNames;
   },
 
   installHDFSClients: function () {

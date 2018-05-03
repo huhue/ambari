@@ -59,7 +59,7 @@ public class HostEventCreator implements RequestAuditEventCreator {
   /**
    * Pattern to retrieve hostname from url
    */
-  private static final Pattern HOSTNAME_PATTERN = Pattern.compile(".*" + HostResourceProvider.HOST_NAME_PROPERTY_ID + "\\s*=\\s*([^&\\s]+).*");
+  private static final Pattern HOSTNAME_PATTERN = Pattern.compile(".*" + HostResourceProvider.HOST_HOST_NAME_PROPERTY_ID + "\\s*=\\s*([^&\\s]+).*");
 
   /**
    * {@inheritDoc}
@@ -109,7 +109,7 @@ public class HostEventCreator implements RequestAuditEventCreator {
           .withResultStatus(result.getStatus())
           .withUrl(request.getURI())
           .withRemoteIp(request.getRemoteAddress())
-          .withHostName(RequestAuditEventCreatorHelper.getNamedProperty(request, HostResourceProvider.HOST_NAME_PROPERTY_ID))
+          .withHostName(RequestAuditEventCreatorHelper.getNamedProperty(request, HostResourceProvider.HOST_HOST_NAME_PROPERTY_ID))
           .build();
       case QUERY_POST:
         return AddComponentToHostRequestAuditEvent.builder()
@@ -138,7 +138,7 @@ public class HostEventCreator implements RequestAuditEventCreator {
       Set<Map<String, String>> set = (Set<Map<String, String>>) propertySet.getProperties().get("host_components");
       if (set != null && !set.isEmpty()) {
         for(Map<String, String> element : set) {
-          components.add(element.get(HostComponentResourceProvider.HOST_COMPONENT_COMPONENT_NAME_PROPERTY_ID));
+          components.add(element.get(HostComponentResourceProvider.COMPONENT_NAME));
         }
       }
     }

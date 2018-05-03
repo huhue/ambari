@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,7 +17,20 @@
  */
 package org.apache.ambari.server.controller.metrics.timeline;
 
+import static org.apache.ambari.server.controller.metrics.MetricsPaddingMethod.ZERO_PADDING_PARAM;
+import static org.apache.ambari.server.controller.metrics.MetricsServiceProvider.MetricsService.TIMELINE_METRICS;
+
+import java.io.IOException;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import org.apache.ambari.server.configuration.ComponentSSLConfiguration;
+import org.apache.ambari.server.controller.AmbariServer;
 import org.apache.ambari.server.controller.internal.PropertyInfo;
 import org.apache.ambari.server.controller.internal.URLStreamProvider;
 import org.apache.ambari.server.controller.metrics.MetricHostProvider;
@@ -33,27 +46,22 @@ import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.SystemException;
 import org.apache.ambari.server.controller.spi.TemporalInfo;
 import org.apache.ambari.server.controller.utilities.PropertyHelper;
+import org.apache.ambari.server.events.MetricsCollectorHostDownEvent;
+import org.apache.ambari.server.events.publishers.AmbariEventPublisher;
 import org.apache.hadoop.metrics2.sink.timeline.TimelineMetric;
 import org.apache.hadoop.metrics2.sink.timeline.TimelineMetrics;
 import org.apache.http.client.utils.URIBuilder;
-
-import java.io.IOException;
-import java.net.SocketTimeoutException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static org.apache.ambari.server.controller.metrics.MetricsPaddingMethod.ZERO_PADDING_PARAM;
-import static org.apache.ambari.server.controller.metrics.MetricsServiceProvider.MetricsService.TIMELINE_METRICS;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class AMSReportPropertyProvider extends MetricsReportPropertyProvider {
+  private static final Logger LOG = LoggerFactory.getLogger(AMSReportPropertyProvider.class);
   private MetricsPaddingMethod metricsPaddingMethod;
   private final TimelineMetricCache metricCache;
   MetricsRequestHelper requestHelper;
   private static AtomicInteger printSkipPopulateMsgHostCounter = new AtomicInteger(0);
   private static AtomicInteger printSkipPopulateMsgHostCompCounter = new AtomicInteger(0);
+  private AmbariEventPublisher ambariEventPublisher;
 
   public AMSReportPropertyProvider(Map<String, Map<String, PropertyInfo>> componentPropertyInfoMap,
                                    URLStreamProvider streamProvider,
@@ -67,6 +75,9 @@ public class AMSReportPropertyProvider extends MetricsReportPropertyProvider {
 
     this.metricCache = cacheProvider.getTimelineMetricsCache();
     this.requestHelper = new MetricsRequestHelper(streamProvider);
+    if (AmbariServer.getController() != null) {
+      this.ambariEventPublisher = AmbariServer.getController().getAmbariEventPublisher();
+    }
   }
 
   /**
@@ -74,7 +85,7 @@ public class AMSReportPropertyProvider extends MetricsReportPropertyProvider {
    */
   @Override
   public Set<String> checkPropertyIds(Set<String> propertyIds) {
-    Set<String> supportedIds = new HashSet<String>();
+    Set<String> supportedIds = new HashSet<>();
     for (String propertyId : propertyIds) {
       if (propertyId.startsWith(ZERO_PADDING_PARAM)
           || PropertyHelper.hasAggregateFunctionSuffix(propertyId)) {
@@ -89,7 +100,7 @@ public class AMSReportPropertyProvider extends MetricsReportPropertyProvider {
   public Set<Resource> populateResources(Set<Resource> resources,
                Request request, Predicate predicate) throws SystemException {
 
-    Set<Resource> keepers = new HashSet<Resource>();
+    Set<Resource> keepers = new HashSet<>();
     for (Resource resource : resources) {
       if (populateResource(resource, request, predicate)) {
         keepers.add(resource);
@@ -215,9 +226,12 @@ public class AMSReportPropertyProvider extends MetricsReportPropertyProvider {
         }
       } catch (IOException io) {
         timelineMetrics = null;
-        if (io instanceof SocketTimeoutException) {
+        if (io instanceof SocketTimeoutException || io instanceof ConnectException) {
           if (LOG.isDebugEnabled()) {
             LOG.debug("Skip populating metrics on socket timeout exception.");
+          }
+          if (ambariEventPublisher != null) {
+            ambariEventPublisher.publish(new MetricsCollectorHostDownEvent(clusterName, host));
           }
           break;
         }
@@ -242,7 +256,7 @@ public class AMSReportPropertyProvider extends MetricsReportPropertyProvider {
   }
 
   private Map<String, MetricReportRequest> getPropertyIdMaps(Request request, Set<String> ids) {
-    Map<String, MetricReportRequest> propertyMap = new HashMap<String, MetricReportRequest>();
+    Map<String, MetricReportRequest> propertyMap = new HashMap<>();
 
     for (String id : ids) {
       Map<String, PropertyInfo> propertyInfoMap = getPropertyInfoMap("*", id);
@@ -279,7 +293,7 @@ public class AMSReportPropertyProvider extends MetricsReportPropertyProvider {
 
   class MetricReportRequest {
     private TemporalInfo temporalInfo;
-    private Map<String, String> propertyIdMap = new HashMap<String, String>();
+    private Map<String, String> propertyIdMap = new HashMap<>();
 
     public TemporalInfo getTemporalInfo() {
       return temporalInfo;

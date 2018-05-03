@@ -20,7 +20,20 @@ limitations under the License.
 from mock.mock import patch, MagicMock
 
 from stacks.utils.RMFTestCase import *
+from resource_management.libraries.functions.constants import StackFeature
 
+# used for faking out stack features when the config files used by unit tests use older stacks
+def mock_stack_feature(stack_feature, stack_version):
+  if stack_feature == StackFeature.ROLLING_UPGRADE:
+    return True
+  if stack_feature == StackFeature.CONFIG_VERSIONING:
+    return True
+  if stack_feature == StackFeature.PIG_ON_TEZ:
+    return True
+
+  return False
+
+@patch("resource_management.libraries.functions.stack_features.check_stack_feature", new=MagicMock(side_effect=mock_stack_feature))
 class TestPigServiceCheck(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "PIG/0.12.0.2.0/package"
   STACK_VERSION = "2.2"
@@ -37,7 +50,24 @@ class TestPigServiceCheck(RMFTestCase):
                        stack_version=self.STACK_VERSION,
                        target=RMFTestCase.TARGET_COMMON_SERVICES
     )
-    
+    self.assertResourceCalled('HdfsResource', '/user/ambari-qa',
+                              immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
+                              dfs_type = '',
+                              security_enabled = True,
+                              hadoop_bin_dir = '/usr/hdp/current/hadoop-client/bin',
+                              keytab = '/etc/security/keytabs/hdfs.headless.keytab',
+                              kinit_path_local = '/usr/bin/kinit',
+                              user = 'hdfs',
+                              mode = 0770,
+                              owner = 'ambari-qa',
+                              action = ['create_on_execute'],
+                              hdfs_resource_ignore_file='/var/lib/ambari-agent/data/.hdfs_resource_ignore',
+                              hdfs_site=self.getConfig()['configurations']['hdfs-site'],
+                              principal_name = 'hdfs@EXAMPLE.COM',
+                              default_fs='hdfs://c6401.ambari.apache.org:8020',
+                              hadoop_conf_dir = '/usr/hdp/current/hadoop-client/conf',
+                              type = 'directory',
+                              )
     self.assertResourceCalled('HdfsResource', '/user/ambari-qa/pigsmoke.out',
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
         security_enabled = True,
@@ -138,7 +168,7 @@ class TestPigServiceCheck(RMFTestCase):
         action = ['create_on_execute'], hdfs_resource_ignore_file='/var/lib/ambari-agent/data/.hdfs_resource_ignore',
     )
 
-    copy_to_hdfs_mock.assert_called_with("tez", "hadoop", "hdfs", host_sys_prepped=False)
+    copy_to_hdfs_mock.assert_called_with("tez", "hadoop", "hdfs", skip=False)
     self.assertResourceCalled('HdfsResource', None,
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
         security_enabled = True,

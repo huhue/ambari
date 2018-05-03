@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -16,6 +16,15 @@
  * limitations under the License.
  */
 package org.apache.ambari.server.utils;
+
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.AMBARI_JAVA_HOME;
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.AMBARI_JAVA_VERSION;
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.AMBARI_JCE_NAME;
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.AMBARI_JDK_NAME;
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.JAVA_HOME;
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.JAVA_VERSION;
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.JCE_NAME;
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.JDK_NAME;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -45,24 +54,24 @@ import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.Stage;
 import org.apache.ambari.server.actionmanager.StageFactory;
 import org.apache.ambari.server.agent.ExecutionCommand;
+import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.controller.ActionExecutionContext;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Host;
-import org.apache.ambari.server.state.HostComponentAdminState;
 import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.ServiceComponent;
-import org.apache.ambari.server.state.ServiceComponentHost;
 import org.apache.ambari.server.state.svccomphost.ServiceComponentHostInstallEvent;
 import org.apache.ambari.server.topology.TopologyManager;
 import org.apache.commons.lang.StringUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.codehaus.jackson.JsonGenerationException;
 import org.codehaus.jackson.map.JsonMappingException;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.codehaus.jackson.map.SerializationConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.Sets;
 import com.google.gson.Gson;
 import com.google.inject.Inject;
 
@@ -72,16 +81,16 @@ public class StageUtils {
   public static final String DEFAULT_RACK = "/default-rack";
   public static final String DEFAULT_IPV4_ADDRESS = "127.0.0.1";
 
-  private static final Log LOG = LogFactory.getLog(StageUtils.class);
+  private static final Logger LOG = LoggerFactory.getLogger(StageUtils.class);
   protected static final String AMBARI_SERVER_HOST = "ambari_server_host";
+  protected static final String AMBARI_SERVER_PORT = "ambari_server_port";
+  protected static final String AMBARI_SERVER_USE_SSL = "ambari_server_use_ssl";
   protected static final String HOSTS_LIST = "all_hosts";
   protected static final String PORTS = "all_ping_ports";
   protected static final String RACKS = "all_racks";
   protected static final String IPV4_ADDRESSES = "all_ipv4_ips";
-  private static Map<String, String> componentToClusterInfoKeyMap =
-      new HashMap<String, String>();
-  private static Map<String, String> decommissionedToClusterInfoKeyMap =
-      new HashMap<String, String>();
+
+  private static Map<String, String> componentToClusterInfoKeyMap = new HashMap<>();
   private volatile static Gson gson;
 
   @Inject
@@ -90,6 +99,9 @@ public class StageUtils {
   @Inject
   private static TopologyManager topologyManager;
 
+  @Inject
+  private static Configuration configuration;
+  
   @Inject
   public StageUtils(StageFactory stageFactory) {
     StageUtils.stageFactory = stageFactory;
@@ -129,49 +141,51 @@ public class StageUtils {
     StageUtils.topologyManager = topologyManager;
   }
 
-  static {
-    componentToClusterInfoKeyMap.put("NAMENODE", "namenode_host");
-    componentToClusterInfoKeyMap.put("JOBTRACKER", "jtnode_host");
-    componentToClusterInfoKeyMap.put("SECONDARY_NAMENODE", "snamenode_host");
-    componentToClusterInfoKeyMap.put("RESOURCEMANAGER", "rm_host");
-    componentToClusterInfoKeyMap.put("NODEMANAGER", "nm_hosts");
-    componentToClusterInfoKeyMap.put("HISTORYSERVER", "hs_host");
-    componentToClusterInfoKeyMap.put("JOURNALNODE", "journalnode_hosts");
-    componentToClusterInfoKeyMap.put("ZKFC", "zkfc_hosts");
-    componentToClusterInfoKeyMap.put("ZOOKEEPER_SERVER", "zookeeper_hosts");
-    componentToClusterInfoKeyMap.put("FLUME_HANDLER", "flume_hosts");
-    componentToClusterInfoKeyMap.put("HBASE_MASTER", "hbase_master_hosts");
-    componentToClusterInfoKeyMap.put("HBASE_REGIONSERVER", "hbase_rs_hosts");
-    componentToClusterInfoKeyMap.put("HIVE_SERVER", "hive_server_host");
-    componentToClusterInfoKeyMap.put("HIVE_METASTORE", "hive_metastore_host");
-    componentToClusterInfoKeyMap.put("OOZIE_SERVER", "oozie_server");
-    componentToClusterInfoKeyMap.put("WEBHCAT_SERVER", "webhcat_server_host");
-    componentToClusterInfoKeyMap.put("MYSQL_SERVER", "hive_mysql_host");
-    componentToClusterInfoKeyMap.put("DASHBOARD", "dashboard_host");
-    componentToClusterInfoKeyMap.put("GANGLIA_SERVER", "ganglia_server_host");
-    componentToClusterInfoKeyMap.put("DATANODE", "slave_hosts");
-    componentToClusterInfoKeyMap.put("TASKTRACKER", "mapred_tt_hosts");
-    componentToClusterInfoKeyMap.put("HBASE_REGIONSERVER", "hbase_rs_hosts");
-    componentToClusterInfoKeyMap.put("ACCUMULO_MASTER", "accumulo_master_hosts");
-    componentToClusterInfoKeyMap.put("ACCUMULO_MONITOR", "accumulo_monitor_hosts");
-    componentToClusterInfoKeyMap.put("ACCUMULO_GC", "accumulo_gc_hosts");
-    componentToClusterInfoKeyMap.put("ACCUMULO_TRACER", "accumulo_tracer_hosts");
-    componentToClusterInfoKeyMap.put("ACCUMULO_TSERVER", "accumulo_tserver_hosts");
+  //todo: proper static injection
+  public static void setConfiguration(Configuration configuration) {
+    StageUtils.configuration = configuration;
   }
 
+  private static void put2componentToClusterInfoKeyMap(String component){
+    componentToClusterInfoKeyMap.put(component, getClusterHostInfoKey(component));
+  }
+
+  /**
+   * Even though this map is populated systematically, we still need this map
+   * since components like Atlas Client that are missing from this map
+   * and cleint components are handled differently
+   */
   static {
-    decommissionedToClusterInfoKeyMap.put("DATANODE", "decom_dn_hosts");
-    decommissionedToClusterInfoKeyMap.put("TASKTRACKER", "decom_tt_hosts");
-    decommissionedToClusterInfoKeyMap.put("NODEMANAGER", "decom_nm_hosts");
-    decommissionedToClusterInfoKeyMap.put("HBASE_REGIONSERVER", "decom_hbase_rs_hosts");
+    put2componentToClusterInfoKeyMap("NAMENODE");
+    put2componentToClusterInfoKeyMap("JOBTRACKER");
+    put2componentToClusterInfoKeyMap("SECONDARY_NAMENODE");
+    put2componentToClusterInfoKeyMap("RESOURCEMANAGER");
+    put2componentToClusterInfoKeyMap("NODEMANAGER");
+    put2componentToClusterInfoKeyMap("HISTORYSERVER");
+    put2componentToClusterInfoKeyMap("JOURNALNODE");
+    put2componentToClusterInfoKeyMap("ZKFC");
+    put2componentToClusterInfoKeyMap("ZOOKEEPER_SERVER");
+    put2componentToClusterInfoKeyMap("FLUME_HANDLER");
+    put2componentToClusterInfoKeyMap("HBASE_MASTER");
+    put2componentToClusterInfoKeyMap("HBASE_REGIONSERVER");
+    put2componentToClusterInfoKeyMap("HIVE_SERVER");
+    put2componentToClusterInfoKeyMap("HIVE_METASTORE");
+    put2componentToClusterInfoKeyMap("OOZIE_SERVER");
+    put2componentToClusterInfoKeyMap("WEBHCAT_SERVER");
+    put2componentToClusterInfoKeyMap("MYSQL_SERVER");
+    put2componentToClusterInfoKeyMap("DASHBOARD");
+    put2componentToClusterInfoKeyMap("GANGLIA_SERVER");
+    put2componentToClusterInfoKeyMap("DATANODE");
+    put2componentToClusterInfoKeyMap("TASKTRACKER");
+    put2componentToClusterInfoKeyMap("ACCUMULO_MASTER");
+    put2componentToClusterInfoKeyMap("ACCUMULO_MONITOR");
+    put2componentToClusterInfoKeyMap("ACCUMULO_GC");
+    put2componentToClusterInfoKeyMap("ACCUMULO_TRACER");
+    put2componentToClusterInfoKeyMap("ACCUMULO_TSERVER");
   }
 
   public static String getActionId(long requestId, long stageId) {
     return requestId + "-" + stageId;
-  }
-
-  public static Map<String, String> getComponentToClusterInfoKeyMap() {
-    return componentToClusterInfoKeyMap;
   }
 
   public static long[] getRequestStage(String actionId) {
@@ -182,20 +196,20 @@ public class StageUtils {
     return requestStageIds;
   }
 
-  public static Stage getATestStage(long requestId, long stageId, String clusterHostInfo, String commandParamsStage, String hostParamsStage) {
+  public static Stage getATestStage(long requestId, long stageId, String commandParamsStage, String hostParamsStage) {
     String hostname;
     try {
       hostname = InetAddress.getLocalHost().getHostName();
     } catch (UnknownHostException e) {
       hostname = "host-dummy";
     }
-    return getATestStage(requestId, stageId, hostname, clusterHostInfo, commandParamsStage, hostParamsStage);
+    return getATestStage(requestId, stageId, hostname, commandParamsStage, hostParamsStage);
   }
 
   //For testing only
   @Inject
-  public static Stage getATestStage(long requestId, long stageId, String hostname, String clusterHostInfo, String commandParamsStage, String hostParamsStage) {
-    Stage s = stageFactory.createNew(requestId, "/tmp", "cluster1", 1L, "context", clusterHostInfo, commandParamsStage, hostParamsStage);
+  public static Stage getATestStage(long requestId, long stageId, String hostname, String commandParamsStage, String hostParamsStage) {
+    Stage s = stageFactory.createNew(requestId, "/tmp", "cluster1", 1L, "context", commandParamsStage, hostParamsStage);
     s.setStageId(stageId);
     long now = System.currentTimeMillis();
     s.addHostRoleExecutionCommand(hostname, Role.NAMENODE, RoleCommand.INSTALL,
@@ -204,32 +218,32 @@ public class StageUtils {
     ExecutionCommand execCmd = s.getExecutionCommandWrapper(hostname, "NAMENODE").getExecutionCommand();
 
     execCmd.setRequestAndStage(s.getRequestId(), s.getStageId());
-    List<String> slaveHostList = new ArrayList<String>();
+    List<String> slaveHostList = new ArrayList<>();
     slaveHostList.add(hostname);
     slaveHostList.add("host2");
-    Map<String, String> hdfsSite = new TreeMap<String, String>();
+    Map<String, String> hdfsSite = new TreeMap<>();
     hdfsSite.put("dfs.block.size", "2560000000");
     Map<String, Map<String, String>> configurations =
-        new TreeMap<String, Map<String, String>>();
+      new TreeMap<>();
     configurations.put("hdfs-site", hdfsSite);
     execCmd.setConfigurations(configurations);
     Map<String, Map<String, Map<String, String>>> configurationAttributes =
-        new TreeMap<String, Map<String, Map<String, String>>>();
-    Map<String, Map<String, String>> hdfsSiteAttributes = new TreeMap<String, Map<String, String>>();
-    Map<String, String> finalAttribute = new TreeMap<String, String>();
+      new TreeMap<>();
+    Map<String, Map<String, String>> hdfsSiteAttributes = new TreeMap<>();
+    Map<String, String> finalAttribute = new TreeMap<>();
     finalAttribute.put("dfs.block.size", "true");
     hdfsSiteAttributes.put("final", finalAttribute);
     configurationAttributes.put("hdfsSite", hdfsSiteAttributes);
     execCmd.setConfigurationAttributes(configurationAttributes);
-    Map<String, String> params = new TreeMap<String, String>();
+    Map<String, String> params = new TreeMap<>();
     params.put("jdklocation", "/x/y/z");
     params.put("stack_version", "1.2.0");
     params.put("stack_name", "HDP");
     execCmd.setHostLevelParams(params);
-    Map<String, String> roleParams = new TreeMap<String, String>();
+    Map<String, String> roleParams = new TreeMap<>();
     roleParams.put("format", "false");
     execCmd.setRoleParams(roleParams);
-    Map<String, String> commandParams = new TreeMap<String, String>();
+    Map<String, String> commandParams = new TreeMap<>();
     commandParams.put(ExecutionCommand.KeyNames.COMMAND_TIMEOUT, "600");
     execCmd.setCommandParams(commandParams);
     return s;
@@ -248,16 +262,30 @@ public class StageUtils {
     return mapper.readValue(is, clazz);
   }
 
-  public static Map<String, String> getCommandParamsStage(ActionExecutionContext actionExecContext) throws AmbariException {
-    return actionExecContext.getParameters() != null ? actionExecContext.getParameters() : new TreeMap<String, String>();
+  public static Map<String, String> getCommandParamsStage(ActionExecutionContext actionExecContext, String requestContext) throws AmbariException {
+    Map<String, String> commandParams = actionExecContext.getParameters() != null ? actionExecContext.getParameters() : new TreeMap<>();
+    if (StringUtils.isNotEmpty(requestContext) && requestContext.toLowerCase().contains("rolling-restart")) {
+      commandParams.put("rolling_restart", "true");
+    }
+    return commandParams;
+  }
+
+  /**
+   * A helper method for generating keys for the clusterHostInfo section.
+   */
+  public static String getClusterHostInfoKey(String componentName){
+    if (componentName == null){
+      throw new IllegalArgumentException("Component name cannot be null");
+    }
+    return componentName.toLowerCase()+"_hosts";
   }
 
   public static Map<String, Set<String>> getClusterHostInfo(Cluster cluster) throws AmbariException {
     //Fill hosts and ports lists
-    Set<String>   hostsSet  = new LinkedHashSet<String>();
-    List<Integer> portsList = new ArrayList<Integer>();
-    List<String>  rackList  = new ArrayList<String>();
-    List<String>  ipV4List  = new ArrayList<String>();
+    Set<String>   hostsSet  = new LinkedHashSet<>();
+    List<Integer> portsList = new ArrayList<>();
+    List<String>  rackList  = new ArrayList<>();
+    List<String>  ipV4List  = new ArrayList<>();
 
     Collection<Host> allHosts = cluster.getHosts();
     for (Host host : allHosts) {
@@ -285,11 +313,11 @@ public class StageUtils {
       }
     }
 
-    List<String> hostsList = new ArrayList<String>(hostsSet);
-    Map<String, String> additionalComponentToClusterInfoKeyMap = new HashMap<String, String>();
+    List<String> hostsList = new ArrayList<>(hostsSet);
+    Map<String, String> additionalComponentToClusterInfoKeyMap = new HashMap<>();
 
     // Fill hosts for services
-    Map<String, SortedSet<Integer>> hostRolesInfo = new HashMap<String, SortedSet<Integer>>();
+    Map<String, SortedSet<Integer>> hostRolesInfo = new HashMap<>();
     for (Map.Entry<String, Service> serviceEntry : cluster.getServices().entrySet()) {
 
       Service service = serviceEntry.getValue();
@@ -308,9 +336,7 @@ public class StageUtils {
           additionalComponentToClusterInfoKeyMap.put(componentName, roleName);
         }
 
-        String decomRoleName = decommissionedToClusterInfoKeyMap.get(componentName);
-
-        if (roleName == null && decomRoleName == null) {
+        if (roleName == null) {
           continue;
         }
 
@@ -320,29 +346,13 @@ public class StageUtils {
             SortedSet<Integer> hostsForComponentsHost = hostRolesInfo.get(roleName);
 
             if (hostsForComponentsHost == null) {
-              hostsForComponentsHost = new TreeSet<Integer>();
+              hostsForComponentsHost = new TreeSet<>();
               hostRolesInfo.put(roleName, hostsForComponentsHost);
             }
 
             int hostIndex = hostsList.indexOf(hostName);
             //Add index of host to current host role
             hostsForComponentsHost.add(hostIndex);
-          }
-
-          if (decomRoleName != null) {
-            ServiceComponentHost scHost = serviceComponent.getServiceComponentHost(hostName);
-            if (scHost.getComponentAdminState() == HostComponentAdminState.DECOMMISSIONED) {
-              SortedSet<Integer> hostsForComponentsHost = hostRolesInfo.get(decomRoleName);
-
-              if (hostsForComponentsHost == null) {
-                hostsForComponentsHost = new TreeSet<Integer>();
-                hostRolesInfo.put(decomRoleName, hostsForComponentsHost);
-              }
-
-              int hostIndex = hostsList.indexOf(hostName);
-              //Add index of host to current host role
-              hostsForComponentsHost.add(hostIndex);
-            }
           }
         }
       }
@@ -354,7 +364,7 @@ public class StageUtils {
       Collection<String> hostComponents = entry.getValue();
 
       for (String hostComponent : hostComponents) {
-        String roleName = componentToClusterInfoKeyMap.get(hostComponent);
+        String roleName = getClusterHostInfoKey(hostComponent);
         if (null == roleName) {
           roleName = additionalComponentToClusterInfoKeyMap.get(hostComponent);
         }
@@ -363,7 +373,7 @@ public class StageUtils {
           // a higher priority lookup
           for (Service service : cluster.getServices().values()) {
             for (ServiceComponent sc : service.getServiceComponents().values()) {
-              if (!sc.isClientComponent() && sc.getName().equals(hostComponent)) {
+              if (sc.getName().equals(hostComponent)) {
                 roleName = hostComponent.toLowerCase() + "_hosts";
                 additionalComponentToClusterInfoKeyMap.put(hostComponent, roleName);
               }
@@ -375,7 +385,7 @@ public class StageUtils {
           SortedSet<Integer> hostsForComponentsHost = hostRolesInfo.get(roleName);
 
           if (hostsForComponentsHost == null) {
-            hostsForComponentsHost = new TreeSet<Integer>();
+            hostsForComponentsHost = new TreeSet<>();
             hostRolesInfo.put(roleName, hostsForComponentsHost);
           }
 
@@ -394,10 +404,10 @@ public class StageUtils {
       }
     }
 
-    Map<String, Set<String>> clusterHostInfo = new HashMap<String, Set<String>>();
+    Map<String, Set<String>> clusterHostInfo = new HashMap<>();
 
     for (Map.Entry<String, SortedSet<Integer>> entry : hostRolesInfo.entrySet()) {
-      TreeSet<Integer> sortedSet = new TreeSet<Integer>(entry.getValue());
+      TreeSet<Integer> sortedSet = new TreeSet<>(entry.getValue());
 
       Set<String> replacedRangesSet = replaceRanges(sortedSet);
 
@@ -411,14 +421,17 @@ public class StageUtils {
 
     // Fill server host
     /*
-     * Note: We don't replace server host name by an index (like we do
+     * Note: We don't replace server host name, port, ssl usage by an index (like we do
      * with component hostnames), because if ambari-agent is not installed
      * at ambari-server host, then allHosts map will not contain
      * ambari-server hostname.
      */
-    TreeSet<String> serverHost = new TreeSet<String>();
-    serverHost.add(getHostName());
-    clusterHostInfo.put(AMBARI_SERVER_HOST, serverHost);
+    clusterHostInfo.put(AMBARI_SERVER_HOST, Sets.newHashSet(getHostName()));
+    
+    boolean serverUseSsl = configuration.getApiSSLAuthentication();
+    int port = serverUseSsl ? configuration.getClientSSLApiPort() : configuration.getClientApiPort();
+    clusterHostInfo.put(AMBARI_SERVER_PORT, Sets.newHashSet(Integer.toString(port)));
+    clusterHostInfo.put(AMBARI_SERVER_USE_SSL, Sets.newHashSet(Boolean.toString(serverUseSsl)));
 
     return clusterHostInfo;
   }
@@ -437,7 +450,7 @@ public class StageUtils {
    * @throws AmbariException if an index fails to map to a host name
    */
   public static Map<String, Set<String>> substituteHostIndexes(Map<String, Set<String>> clusterHostInfo) throws AmbariException {
-    Set<String> keysToSkip = new HashSet<String>(Arrays.asList(HOSTS_LIST, PORTS, AMBARI_SERVER_HOST, RACKS, IPV4_ADDRESSES));
+    Set<String> keysToSkip = new HashSet<>(Arrays.asList(HOSTS_LIST, PORTS, AMBARI_SERVER_HOST, AMBARI_SERVER_PORT, AMBARI_SERVER_USE_SSL, RACKS, IPV4_ADDRESSES));
     String[] allHosts = {};
     if (clusterHostInfo.get(HOSTS_LIST) != null) {
       allHosts = clusterHostInfo.get(HOSTS_LIST).toArray(new String[clusterHostInfo.get(HOSTS_LIST).size()]);
@@ -447,7 +460,7 @@ public class StageUtils {
       if (keysToSkip.contains(key)) {
         continue;
       }
-      Set<String> hosts = new HashSet<String>();
+      Set<String> hosts = new HashSet<>();
       Set<String> currentHostsIndexes = clusterHostInfo.get(key);
       if (currentHostsIndexes == null) {
         continue;
@@ -482,7 +495,7 @@ public class StageUtils {
       return null;
     }
 
-    Set<String> rangedSet = new HashSet<String>();
+    Set<String> rangedSet = new HashSet<>();
 
     Integer prevElement = null;
     Integer startOfRange = set.first();
@@ -513,7 +526,7 @@ public class StageUtils {
    */
   public static <T> Set<String> replaceMappedRanges(List<T> values) {
 
-    Map<T, SortedSet<Integer>> convolutedValues = new HashMap<T, SortedSet<Integer>>();
+    Map<T, SortedSet<Integer>> convolutedValues = new HashMap<>();
 
     int valueIndex = 0;
 
@@ -522,14 +535,14 @@ public class StageUtils {
       SortedSet<Integer> correspValues = convolutedValues.get(value);
 
       if (correspValues == null) {
-        correspValues = new TreeSet<Integer>();
+        correspValues = new TreeSet<>();
         convolutedValues.put(value, correspValues);
       }
       correspValues.add(valueIndex);
       valueIndex++;
     }
 
-    Set<String> result = new HashSet<String>();
+    Set<String> result = new HashSet<>();
 
     for (Entry<T, SortedSet<Integer>> entry : convolutedValues.entrySet()) {
       Set<String> replacedRanges = replaceRanges(entry.getValue());
@@ -552,7 +565,7 @@ public class StageUtils {
    * @return a set of integers representing the original range
    */
   private static Set<Integer> rangeToSet(String range) {
-    Set<Integer> indexSet = new HashSet<Integer>();
+    Set<Integer> indexSet = new HashSet<>();
     int startIndex;
     int endIndex;
     if (range.contains("-")) {
@@ -578,5 +591,49 @@ public class StageUtils {
         endOfRange.toString() :
         startOfRange + separator + endOfRange;
     return rangeItem;
+  }
+
+  /**
+   * Add ambari specific JDK details to command parameters.
+   */
+  public static void useAmbariJdkInCommandParams(Map<String, String> commandParams, Configuration configuration) {
+    if (StringUtils.isNotEmpty(configuration.getJavaHome()) && !configuration.getJavaHome().equals(configuration.getStackJavaHome())) {
+      commandParams.put(AMBARI_JAVA_HOME, configuration.getJavaHome());
+      commandParams.put(AMBARI_JAVA_VERSION, String.valueOf(configuration.getJavaVersion()));
+      if (StringUtils.isNotEmpty(configuration.getJDKName())) { // if not custom jdk
+        commandParams.put(AMBARI_JDK_NAME, configuration.getJDKName());
+      }
+      if (StringUtils.isNotEmpty(configuration.getJCEName())) { // if not custom jdk
+        commandParams.put(AMBARI_JCE_NAME, configuration.getJCEName());
+      }
+    }
+  }
+
+  /**
+   * Fill hots level parameters with Jdk details, override them with the stack JDK data, in case of stack JAVA_HOME exists
+   */
+  public static void useStackJdkIfExists(Map<String, String> hostLevelParams, Configuration configuration) {
+    // set defaults first
+    hostLevelParams.put(JAVA_HOME, configuration.getJavaHome());
+    hostLevelParams.put(JDK_NAME, configuration.getJDKName());
+    hostLevelParams.put(JCE_NAME, configuration.getJCEName());
+    hostLevelParams.put(JAVA_VERSION, String.valueOf(configuration.getJavaVersion()));
+    if (StringUtils.isNotEmpty(configuration.getStackJavaHome())
+      && !configuration.getStackJavaHome().equals(configuration.getJavaHome())) {
+      hostLevelParams.put(JAVA_HOME, configuration.getStackJavaHome());
+      if (StringUtils.isNotEmpty(configuration.getStackJavaVersion())) {
+        hostLevelParams.put(JAVA_VERSION, configuration.getStackJavaVersion());
+      }
+      if (StringUtils.isNotEmpty(configuration.getStackJDKName())) {
+        hostLevelParams.put(JDK_NAME, configuration.getStackJDKName());
+      } else {
+        hostLevelParams.put(JDK_NAME, null); // custom jdk for stack
+      }
+      if (StringUtils.isNotEmpty(configuration.getStackJCEName())) {
+        hostLevelParams.put(JCE_NAME, configuration.getStackJCEName());
+      } else {
+        hostLevelParams.put(JCE_NAME, null); // custom jdk for stack
+      }
+    }
   }
 }

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,14 +17,14 @@
  */
 package org.apache.ambari.server.controller.jmx;
 
-import org.apache.ambari.server.controller.spi.SystemException;
-
 import java.util.Set;
 
 /**
  * Provider of JMX host information.
  */
 public interface JMXHostProvider {
+
+  String getPublicHostName(String clusterName, String hostName);
 
   /**
    * Get the JMX host names for the given cluster name and component name.
@@ -35,21 +35,7 @@ public interface JMXHostProvider {
    * @return set of JMX host names
    *
    */
-  public Set<String> getHostNames(String clusterName, String componentName);
-
-  /**
-   * Get the port for the specified cluster name and component.
-   *
-   * @param clusterName    the cluster name
-   * @param componentName  the component name
-   * @param hostName       the component hostName
-   *
-   * @return the port for the specified cluster name and component
-   *
-   * @throws SystemException if unable to get the JMX port
-   */
-  public String getPort(String clusterName, String componentName, String hostName)
-      throws SystemException;
+  Set<String> getHostNames(String clusterName, String componentName);
 
   /**
    * Get the port for the specified cluster name and component.
@@ -60,12 +46,9 @@ public interface JMXHostProvider {
    * @param httpsEnabled   https enabled
    *
    * @return the port for the specified cluster name and component
-   *
-   * @throws SystemException if unable to get the JMX port
    */
-  public String getPort(String clusterName, String componentName, String hostName,  boolean httpsEnabled)
-      throws SystemException;
-  
+  String getPort(String clusterName, String componentName, String hostName, boolean httpsEnabled);
+
   /**
    * Get the protocol for the specified cluster name and component.
    *
@@ -75,7 +58,7 @@ public interface JMXHostProvider {
    * @return the JMX protocol for the specified cluster name and component, one of http or https
    *
    */
-  public String getJMXProtocol(String clusterName, String componentName) ;
+  String getJMXProtocol(String clusterName, String componentName) ;
   
   /**
    * Get the rpc tag for the specified cluster name, component and port number
@@ -87,6 +70,6 @@ public interface JMXHostProvider {
    * @return the RPC tag for the specified cluster name, component and port number(client/healthcheck/etc.).
    *
    */
-  public String getJMXRpcMetricTag(String clusterName, String componentName, String port);
+  String getJMXRpcMetricTag(String clusterName, String componentName, String port);
 
 }

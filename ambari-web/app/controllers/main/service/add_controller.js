@@ -22,7 +22,7 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
 
   name: 'addServiceController',
 
-  totalSteps: 8,
+  totalSteps: 7,
 
   /**
    * @type {string}
@@ -122,27 +122,19 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
         callback: function () {
           var self = this;
           var dfd = $.Deferred();
-          this.loadKerberosDescriptorConfigs().done(function() {
-            self.loadConfigThemes().then(function() {
-              dfd.resolve();
-            });
-            self.loadServiceConfigGroups();
-            self.loadServiceConfigProperties();
-            self.loadCurrentHostGroups();
-          });
-          return dfd.promise();
-        }
-      }
-    ],
-    '5': [
-      {
-        type: 'sync',
-        callback: function () {
-          this.checkSecurityStatus();
           this.load('cluster');
           this.set('content.additionalClients', []);
           this.set('installClientQueueLength', 0);
           this.set('installClietsQueue', App.ajaxQueue.create({abortOnError: false}));
+          this.loadKerberosDescriptorConfigs().done(function() {
+            self.loadServiceConfigGroups();
+            self.loadConfigThemes().then(function() {
+              self.loadServiceConfigProperties();
+              self.loadCurrentHostGroups();
+              dfd.resolve();
+            });
+          });
+          return dfd.promise();
         }
       }
     ]
@@ -197,6 +189,7 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
       }, this);
       this.setDBProperty('services', services);
     }
+    App.store.fastCommit();
     this.set('serviceToInstall', null);
     this.set('content.services', stackServices);
     var self = this;
@@ -316,12 +309,17 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
    */
   loadKerberosDescriptorConfigs: function() {
     var self = this,
-        dfd = $.Deferred();
+        dfd = $.Deferred(),
+        mergedDescriptorConfigs;
     if (App.get('isKerberosEnabled')) {
-      this.loadClusterDescriptorConfigs().then(function(properties) {
-        self.set('kerberosDescriptorConfigs', self.createServicesStackDescriptorConfigs(properties));
-      }).always(function(){
-        dfd.resolve();
+      this.loadClusterDescriptorStackConfigs().then(function (stackProperties) {
+        self.loadClusterDescriptorConfigs().then(function(properties) {
+          self.set('kerberosDescriptorData', properties);
+          mergedDescriptorConfigs = self.mergeDescriptorStackWithConfigs(stackProperties, properties);
+          self.set('kerberosDescriptorConfigs', mergedDescriptorConfigs);
+        }).always(function(){
+          dfd.resolve();
+        });
       });
     } else {
       dfd.resolve();
@@ -385,6 +383,18 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
   },
 
   /**
+   * Load information about hosts with clients components
+   */
+  loadClients: function () {
+    var clients = this.getDBProperty('clientInfo');
+    if (clients) {
+      this.set('content.clients', clients);
+    } else {
+      this.saveClients();
+    }
+  },
+
+  /**
    * Remove all loaded data.
    * Created as copy for App.router.clearAllSteps
    */
@@ -400,6 +410,7 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
   finish: function () {
     this.clearAllSteps();
     this.clearStorageData();
+    this.clearServiceConfigProperties();
     this.resetDbNamespace();
     App.router.get('updateController').updateAll();
   },
@@ -442,7 +453,8 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
   installSelectedServices: function (callback) {
     var name = 'common.services.update';
     var selectedServices = this.get('content.services').filterProperty('isInstalled', false).filterProperty('isSelected', true).mapProperty('serviceName');
-    var data = this.generateDataForInstallServices(selectedServices);
+    var dependentServices = this.getServicesBySelectedSlaves();
+    var data = this.generateDataForInstallServices(selectedServices.concat(dependentServices));
     this.installServicesRequest(name, data, callback.bind(this));
   },
 
@@ -455,6 +467,23 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
       success: 'installServicesSuccessCallback',
       error: 'installServicesErrorCallback'
     }).then(callback, callback);
+  },
+
+  /**
+   * return list of services by selected and not installed slave components
+   * @returns {Array}
+   */
+  getServicesBySelectedSlaves: function () {
+    var result = [];
+    this.get('content.slaveComponentHosts').forEach(function (slaveComponent) {
+      if (slaveComponent.hosts.someProperty('isInstalled', false)) {
+        var stackComponent = App.StackServiceComponent.find().findProperty('componentName', slaveComponent.componentName);
+        if (stackComponent) {
+          result.push(stackComponent.get('serviceName'));
+        }
+      }
+    });
+    return result.uniq();
   },
 
   /**
@@ -522,13 +551,6 @@ App.AddServiceController = App.WizardController.extend(App.AddSecurityConfigs, {
   installClientError: function(request, ajaxOptions, error, opt, params) {
     if (this.get('installClientQueueLength') - 1 === params.counter) {
       params.deferred.resolve();
-    }
-  },
-
-  checkSecurityStatus: function() {
-    if (!App.get('isKerberosEnabled')) {
-      this.set('skipConfigureIdentitiesStep', true);
-      this.get('isStepDisabled').findProperty('step', 5).set('value', true);
     }
   },
 

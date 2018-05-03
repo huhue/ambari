@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,6 +17,25 @@
  */
 
 package org.apache.ambari.server.controller.internal;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
+import javax.naming.OperationNotSupportedException;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.controller.AmbariManagementController;
@@ -41,23 +60,8 @@ import org.apache.ambari.server.security.ldap.LdapBatchDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.naming.OperationNotSupportedException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Queue;
-import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
 
 /**
  * Resource provider for ldap sync events.
@@ -85,6 +89,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
   public static final String USERS_CREATED_PROPERTY_ID       = "Event/summary/users/created";
   public static final String USERS_UPDATED_PROPERTY_ID       = "Event/summary/users/updated";
   public static final String USERS_REMOVED_PROPERTY_ID       = "Event/summary/users/removed";
+  public static final String USERS_SKIPPED_PROPERTY_ID       = "Event/summary/users/skipped";
   public static final String GROUPS_CREATED_PROPERTY_ID      = "Event/summary/groups/created";
   public static final String GROUPS_UPDATED_PROPERTY_ID      = "Event/summary/groups/updated";
   public static final String GROUPS_REMOVED_PROPERTY_ID      = "Event/summary/groups/removed";
@@ -95,32 +100,29 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
   /**
    * The key property ids for a event resource.
    */
-  private static Map<Resource.Type, String> keyPropertyIds = new HashMap<Resource.Type, String>();
-  static {
-    keyPropertyIds.put(Resource.Type.LdapSyncEvent, EVENT_ID_PROPERTY_ID);
-  }
+  private static Map<Resource.Type, String> keyPropertyIds = ImmutableMap.<Resource.Type, String>builder()
+      .put(Resource.Type.LdapSyncEvent, EVENT_ID_PROPERTY_ID)
+      .build();
 
   /**
    * The property ids for a event resource.
    */
-  private static Set<String> propertyIds = new HashSet<String>();
-
-  static {
-    propertyIds.add(EVENT_ID_PROPERTY_ID);
-    propertyIds.add(EVENT_STATUS_PROPERTY_ID);
-    propertyIds.add(EVENT_STATUS_DETAIL_PROPERTY_ID);
-    propertyIds.add(EVENT_START_TIME_PROPERTY_ID);
-    propertyIds.add(EVENT_END_TIME_PROPERTY_ID);
-    propertyIds.add(USERS_CREATED_PROPERTY_ID);
-    propertyIds.add(USERS_UPDATED_PROPERTY_ID);
-    propertyIds.add(USERS_REMOVED_PROPERTY_ID);
-    propertyIds.add(GROUPS_CREATED_PROPERTY_ID);
-    propertyIds.add(GROUPS_UPDATED_PROPERTY_ID);
-    propertyIds.add(GROUPS_REMOVED_PROPERTY_ID);
-    propertyIds.add(MEMBERSHIPS_CREATED_PROPERTY_ID);
-    propertyIds.add(MEMBERSHIPS_REMOVED_PROPERTY_ID);
-    propertyIds.add(EVENT_SPECS_PROPERTY_ID);
-  }
+  private static Set<String> propertyIds = Sets.newHashSet(
+      EVENT_ID_PROPERTY_ID,
+      EVENT_STATUS_PROPERTY_ID,
+      EVENT_STATUS_DETAIL_PROPERTY_ID,
+      EVENT_START_TIME_PROPERTY_ID,
+      EVENT_END_TIME_PROPERTY_ID,
+      USERS_CREATED_PROPERTY_ID,
+      USERS_UPDATED_PROPERTY_ID,
+      USERS_REMOVED_PROPERTY_ID,
+      USERS_SKIPPED_PROPERTY_ID,
+      GROUPS_CREATED_PROPERTY_ID,
+      GROUPS_UPDATED_PROPERTY_ID,
+      GROUPS_REMOVED_PROPERTY_ID,
+      MEMBERSHIPS_CREATED_PROPERTY_ID,
+      MEMBERSHIPS_REMOVED_PROPERTY_ID,
+      EVENT_SPECS_PROPERTY_ID);
 
   /**
    * Spec property keys.
@@ -132,12 +134,12 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
   /**
    * Map of all sync events.
    */
-  private final Map<Long, LdapSyncEventEntity> events = new ConcurrentSkipListMap<Long, LdapSyncEventEntity>();
+  private final Map<Long, LdapSyncEventEntity> events = new ConcurrentSkipListMap<>();
 
   /**
    * The queue of events to be processed.
    */
-  private final Queue<LdapSyncEventEntity> eventQueue = new LinkedList<LdapSyncEventEntity>();
+  private final Queue<LdapSyncEventEntity> eventQueue = new LinkedList<>();
 
   /**
    * Indicates whether or not the events are currently being processed.
@@ -152,7 +154,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
   /**
    * The logger.
    */
-  protected final static Logger LOG = LoggerFactory.getLogger(LdapSyncEventResourceProvider.class);
+  private static final Logger LOG = LoggerFactory.getLogger(LdapSyncEventResourceProvider.class);
 
 
   // ----- Constructors ------------------------------------------------------
@@ -161,7 +163,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
    * Construct a event resource provider.
    */
   public LdapSyncEventResourceProvider(AmbariManagementController managementController) {
-    super(propertyIds, keyPropertyIds, managementController);
+    super(Resource.Type.LdapSyncEvent, propertyIds, keyPropertyIds, managementController);
 
     EnumSet<RoleAuthorization> roleAuthorizations =
         EnumSet.of(RoleAuthorization.AMBARI_MANAGE_GROUPS, RoleAuthorization.AMBARI_MANAGE_USERS);
@@ -177,14 +179,14 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
   public RequestStatus createResourcesAuthorized(Request event)
       throws SystemException, UnsupportedPropertyException,
       ResourceAlreadyExistsException, NoSuchParentResourceException {
-    Set<LdapSyncEventEntity> newEvents = new HashSet<LdapSyncEventEntity>();
+    Set<LdapSyncEventEntity> newEvents = new HashSet<>();
 
     for (Map<String, Object> properties : event.getProperties()) {
       newEvents.add(createResources(getCreateCommand(properties)));
     }
     notifyCreate(Resource.Type.ViewInstance, event);
 
-    Set<Resource> associatedResources = new HashSet<Resource>();
+    Set<Resource> associatedResources = new HashSet<>();
     for (LdapSyncEventEntity eventEntity : newEvents) {
       Resource resource = new ResourceImpl(Resource.Type.LdapSyncEvent);
       resource.setProperty(EVENT_ID_PROPERTY_ID, eventEntity.getId());
@@ -203,7 +205,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
   public Set<Resource> getResources(Request event, Predicate predicate)
       throws SystemException, UnsupportedPropertyException, NoSuchResourceException, NoSuchParentResourceException {
 
-    Set<Resource> resources    = new HashSet<Resource>();
+    Set<Resource> resources    = new HashSet<>();
     Set<String>   requestedIds = getRequestPropertyIds(event, predicate);
 
     for (LdapSyncEventEntity eventEntity : events.values()) {
@@ -236,7 +238,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
 
   @Override
   protected Set<String> getPKPropertyIds() {
-    return new HashSet<String>(keyPropertyIds.values());
+    return new HashSet<>(keyPropertyIds.values());
   }
 
 
@@ -272,19 +274,20 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
     setResourceProperty(resource, USERS_CREATED_PROPERTY_ID, eventEntity.getUsersCreated(), requestedIds);
     setResourceProperty(resource, USERS_UPDATED_PROPERTY_ID, eventEntity.getUsersUpdated(), requestedIds);
     setResourceProperty(resource, USERS_REMOVED_PROPERTY_ID, eventEntity.getUsersRemoved(), requestedIds);
+    setResourceProperty(resource, USERS_SKIPPED_PROPERTY_ID, eventEntity.getUsersSkipped(), requestedIds);
     setResourceProperty(resource, GROUPS_CREATED_PROPERTY_ID, eventEntity.getGroupsCreated(), requestedIds);
     setResourceProperty(resource, GROUPS_UPDATED_PROPERTY_ID, eventEntity.getGroupsUpdated(), requestedIds);
     setResourceProperty(resource, GROUPS_REMOVED_PROPERTY_ID, eventEntity.getGroupsRemoved(), requestedIds);
     setResourceProperty(resource, MEMBERSHIPS_CREATED_PROPERTY_ID, eventEntity.getMembershipsCreated(), requestedIds);
     setResourceProperty(resource, MEMBERSHIPS_REMOVED_PROPERTY_ID, eventEntity.getMembershipsRemoved(), requestedIds);
 
-    Set<Map<String, String>> specs = new HashSet<Map<String, String>>();
+    Set<Map<String, String>> specs = new HashSet<>();
 
     List<LdapSyncSpecEntity> specList = eventEntity.getSpecs();
 
     for (LdapSyncSpecEntity spec : specList) {
 
-      Map<String, String> specMap = new HashMap<String, String>();
+      Map<String, String> specMap = new HashMap<>();
 
       specMap.put(PRINCIPAL_TYPE_SPEC_KEY, spec.getPrincipalType().toString().toLowerCase());
       specMap.put(SYNC_TYPE_SPEC_KEY, spec.getSyncType().toString().toLowerCase());
@@ -307,7 +310,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
   // create a event entity from the given set of properties
   private LdapSyncEventEntity toEntity(Map<String, Object> properties) {
     LdapSyncEventEntity      entity   = new LdapSyncEventEntity(getNextEventId());
-    List<LdapSyncSpecEntity> specList = new LinkedList<LdapSyncSpecEntity>();
+    List<LdapSyncSpecEntity> specList = new LinkedList<>();
 
     Set<Map<String, String>> specs = (Set<Map<String, String>>) properties.get(EVENT_SPECS_PROPERTY_ID);
 
@@ -385,7 +388,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
       public Void invoke() throws AmbariException {
         Set<String>  requestedIds = getRequestPropertyIds(PropertyHelper.getReadRequest(), predicate);
 
-        Set<LdapSyncEventEntity> entities = new HashSet<LdapSyncEventEntity>();
+        Set<LdapSyncEventEntity> entities = new HashSet<>();
 
         for (LdapSyncEventEntity entity : events.values()){
               Resource resource = toResource(entity, requestedIds);
@@ -404,7 +407,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
   // Get the ldap sync thread pool
   private static synchronized ExecutorService getExecutorService() {
     if (executorService == null) {
-      LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<Runnable>();
+      LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<>();
 
       ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(
           THREAD_POOL_CORE_SIZE,
@@ -503,7 +506,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
       case EXISTING:
         return new LdapSyncRequest(LdapSyncSpecEntity.SyncType.EXISTING);
       case SPECIFIC:
-        Set<String> principalNames = new HashSet<String>(spec.getPrincipalNames());
+        Set<String> principalNames = new HashSet<>(spec.getPrincipalNames());
         if (request == null ) {
           request = new LdapSyncRequest(LdapSyncSpecEntity.SyncType.SPECIFIC, principalNames);
         } else {
@@ -523,6 +526,7 @@ public class LdapSyncEventResourceProvider extends AbstractControllerResourcePro
     event.setUsersCreated(syncInfo.getUsersToBeCreated().size());
     event.setUsersUpdated(syncInfo.getUsersToBecomeLdap().size());
     event.setUsersRemoved(syncInfo.getUsersToBeRemoved().size());
+    event.setUsersSkipped(syncInfo.getUsersSkipped().size());
     event.setGroupsCreated(syncInfo.getGroupsToBeCreated().size());
     event.setGroupsUpdated(syncInfo.getGroupsToBecomeLdap().size());
     event.setGroupsRemoved(syncInfo.getGroupsToBeRemoved().size());

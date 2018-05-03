@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,8 +17,6 @@
  */
 package org.apache.ambari.server.state.stack.upgrade;
 
-import com.google.gson.Gson;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -27,10 +25,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.ambari.server.configuration.Configuration;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Objects;
+import com.google.gson.Gson;
+
 /**
  *
  */
 public class StageWrapper {
+
+  private static final Logger LOG = LoggerFactory.getLogger(StageWrapper.class);
 
   private static Gson gson = new Gson();
   private String text;
@@ -69,7 +78,7 @@ public class StageWrapper {
   public StageWrapper(Type type, String text, Map<String, String> params, List<TaskWrapper> tasks) {
     this.type = type;
     this.text = text;
-    this.params = (params == null ? Collections.<String, String>emptyMap() : params);
+    this.params = (params == null ? Collections.emptyMap() : params);
     this.tasks = tasks;
   }
 
@@ -84,7 +93,7 @@ public class StageWrapper {
    * Gets the tasks json.
    */
   public String getTasksJson() {
-    List<Task> realTasks = new ArrayList<Task>();
+    List<Task> realTasks = new ArrayList<>();
     for (TaskWrapper tw : tasks) {
       realTasks.addAll(tw.getTasks());
     }
@@ -96,7 +105,7 @@ public class StageWrapper {
    * @return the set of hosts for all tasks
    */
   public Set<String> getHosts() {
-    Set<String> hosts = new HashSet<String>();
+    Set<String> hosts = new HashSet<>();
     for (TaskWrapper tw : tasks) {
       hosts.addAll(tw.getHosts());
     }
@@ -146,10 +155,77 @@ public class StageWrapper {
   public enum Type {
     SERVER_SIDE_ACTION,
     RESTART,
-    RU_TASKS,
+    UPGRADE_TASKS,
     SERVICE_CHECK,
     STOP,
     START,
     CONFIGURE
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this).add("type", type)
+        .add("text",text)
+        .omitNullValues().toString();
+  }
+
+  /**
+   * Gets the maximum timeout for any task that this {@code StageWrapper} encapsulates.  TaskWrappers
+   * are homogeneous across the stage, but timeouts are defined in Upgrade Packs
+   * at the task, so each one should be checked individually.
+   *
+   * <p>
+   * WARNING:  This method relies on incorrect assumptions about {@link StageWrapper}s and the {@link TaskWrapper}s
+   * that are contained in them.  Orchestration is currently forcing a StageWrapper to have only one TaskWrapper,
+   * even though they could have many per the code.
+   *
+   * In addition, a TaskWrapper should have a one-to-one reference with the Task it contains.  That will be
+   * fixed in a future release.
+   * </p>
+   *
+   * @param configuration the configuration instance.  StageWrappers are not injectable, so pass
+   *                      this in.
+   * @return the maximum timeout, or the default agent execution timeout if none are found.  Never {@code null}.
+   */
+  public Short getMaxTimeout(Configuration configuration) {
+
+    Set<String> timeoutKeys = new HashSet<>();
+
+    // !!! FIXME a TaskWrapper should have only one task.
+    for (TaskWrapper wrapper : tasks) {
+      timeoutKeys.addAll(wrapper.getTimeoutKeys());
+    }
+
+    Short defaultTimeout = Short.valueOf(configuration.getDefaultAgentTaskTimeout(false));
+
+    if (CollectionUtils.isEmpty(timeoutKeys)) {
+      return defaultTimeout;
+    }
+
+    Short timeout = null;
+
+    for (String key : timeoutKeys) {
+      String configValue = configuration.getProperty(key);
+
+      if (StringUtils.isNotBlank(configValue)) {
+        try {
+          Short configTimeout = Short.valueOf(configValue);
+
+          if (null == timeout || configTimeout > timeout) {
+            timeout = configTimeout;
+          }
+
+        } catch (Exception e) {
+          LOG.warn("Could not parse {}/{} to a timeout value", key, configValue);
+        }
+      } else {
+        LOG.warn("Configuration {} not found to compute timeout", key);
+      }
+    }
+
+    return null == timeout ? defaultTimeout : timeout;
   }
 }

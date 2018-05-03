@@ -38,6 +38,8 @@ App.WizardStep0Controller = Em.Controller.extend({
     if (clusterName == '' && this.get('hasSubmitted')) {
       this.set('clusterNameError', Em.I18n.t('installer.step0.clusterName.error.required'));
       return true;
+    } else if (clusterName == '' ) {
+      return true;
     } else if (clusterName.length > MAX_CLUSTER_NAME_LENGTH) {
       this.set('clusterNameError', Em.I18n.t('installer.step0.clusterName.error.tooLong'));
       return true;
@@ -64,13 +66,19 @@ App.WizardStep0Controller = Em.Controller.extend({
     this.set('clusterNameError', '');
   },
 
+
+  /**
+   * @type {boolean}
+   */
+  isSubmitDisabled: Em.computed.or('invalidClusterName', 'App.router.btnClickInProgress'),
+
   /**
    * Onclick handler for <code>next</code> button
    * Disable 'Next' button while it is already under process. (using Router's property 'nextBtnClickInProgress')
    * @method submit
    */
   submit: function () {
-    if(App.router.nextBtnClickInProgress){
+    if(App.get('router.nextBtnClickInProgress')){
       return;
     }
     this.set('hasSubmitted', true);
@@ -78,7 +86,7 @@ App.WizardStep0Controller = Em.Controller.extend({
       App.clusterStatus.set('clusterName', this.get('content.cluster.name'));
       this.set('content.cluster.status', 'PENDING');
       this.set('content.cluster.isCompleted', false);
-      App.router.nextBtnClickInProgress = true;
+      App.set('router.nextBtnClickInProgress', true);
       App.router.send('next');
     }
   }

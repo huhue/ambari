@@ -34,7 +34,9 @@ class TestHistoryServer(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "YARN/2.1.0.2.0/package"
   STACK_VERSION = "2.0.6"
   DEFAULT_IMMUTABLE_PATHS = ['/apps/hive/warehouse', '/apps/falcon', '/mr-history/done', '/app-logs', '/tmp']
-  
+
+  CONFIG_OVERRIDES = {"serviceName":"MAPREDUCE2", "role":"HISTORYSERVER"}
+
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/historyserver.py",
                        classname="HistoryServer",
@@ -114,14 +116,14 @@ class TestHistoryServer(RMFTestCase):
 
     self.assertResourceCalled('File', '/var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
         action = ['delete'],
-        not_if = "ambari-sudo.sh su mapred -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid`'",
+        not_if = 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
     )
     self.assertResourceCalled('Execute', 'ulimit -c unlimited; export HADOOP_LIBEXEC_DIR=/usr/lib/hadoop/libexec && /usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh --config /etc/hadoop/conf start historyserver',
-        not_if = "ambari-sudo.sh su mapred -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid`'",
+        not_if = 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
         user = 'mapred',
     )
-    self.assertResourceCalled('Execute', "ambari-sudo.sh su mapred -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid`'",
-        not_if = "ambari-sudo.sh su mapred -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid`'",
+    self.assertResourceCalled('Execute', 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
+        not_if = 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
         tries = 5,
         try_sleep = 1,
     )
@@ -165,18 +167,16 @@ class TestHistoryServer(RMFTestCase):
 
     self.assert_configure_secured()
 
-    pid_check_cmd = 'ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid >/dev/null 2>&1 && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid` >/dev/null 2>&1'
-
     self.assertResourceCalled('File', '/var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
         action = ['delete'],
-        not_if = "ambari-sudo.sh su mapred -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid`'",
+        not_if = 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
     )
     self.assertResourceCalled('Execute', 'ulimit -c unlimited; export HADOOP_LIBEXEC_DIR=/usr/lib/hadoop/libexec && /usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh --config /etc/hadoop/conf start historyserver',
-        not_if = "ambari-sudo.sh su mapred -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid`'",
+        not_if = 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
         user = 'mapred',
     )
-    self.assertResourceCalled('Execute', "ambari-sudo.sh su mapred -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid`'",
-        not_if = "ambari-sudo.sh su mapred -l -s /bin/bash -c '[RMF_EXPORT_PLACEHOLDER]ls /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ps -p `cat /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid`'",
+    self.assertResourceCalled('Execute', 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
+        not_if = 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop-mapreduce/mapred/mapred-mapred-historyserver.pid',
         tries = 5,
         try_sleep = 1,
     )
@@ -199,7 +199,55 @@ class TestHistoryServer(RMFTestCase):
     self.assertNoMoreResources()
 
   def assert_configure_default(self):
-
+    self.assertResourceCalled('Directory', '/var/run/hadoop-yarn',
+      owner = 'yarn',
+      group = 'hadoop',
+      create_parents = True,
+      cd_access = 'a',
+    )
+    self.assertResourceCalled('Directory', '/var/run/hadoop-yarn/yarn',
+      owner = 'yarn',
+      group = 'hadoop',
+      create_parents = True,
+      cd_access = 'a',
+    )
+    self.assertResourceCalled('Directory', '/var/log/hadoop-yarn/yarn',
+      owner = 'yarn',
+      group = 'hadoop',
+      create_parents = True,
+      cd_access = 'a',
+    )
+    self.assertResourceCalled('Directory', '/var/run/hadoop-mapreduce',
+      owner = 'mapred',
+      group = 'hadoop',
+      create_parents = True,
+      cd_access = 'a',
+    )
+    self.assertResourceCalled('Directory', '/var/run/hadoop-mapreduce/mapred',
+      owner = 'mapred',
+      group = 'hadoop',
+      create_parents = True,
+      cd_access = 'a',
+    )
+    self.assertResourceCalled('Directory', '/var/log/hadoop-mapreduce',
+      owner = 'mapred',
+      group = 'hadoop',
+      create_parents = True,
+      cd_access = 'a',
+    )
+    self.assertResourceCalled('Directory', '/var/log/hadoop-mapreduce/mapred',
+      owner = 'mapred',
+      group = 'hadoop',
+      create_parents = True,
+      cd_access = 'a',
+    )
+    self.assertResourceCalled('Directory', '/var/log/hadoop-yarn',
+      owner = 'yarn',
+      group = 'hadoop',
+      create_parents = True,
+      ignore_failures = True,
+      cd_access = 'a',
+    )
     self.assertResourceCalled('HdfsResource', '/app-logs',
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
         security_enabled = False,
@@ -214,7 +262,7 @@ class TestHistoryServer(RMFTestCase):
         hadoop_bin_dir = '/usr/bin',
         type = 'directory',
         action = ['create_on_execute'], hdfs_resource_ignore_file='/var/lib/ambari-agent/data/.hdfs_resource_ignore', hdfs_site=self.getConfig()['configurations']['hdfs-site'], principal_name=UnknownConfigurationMock(), default_fs='hdfs://c6401.ambari.apache.org:8020',
-        mode = 0777,
+        mode = 01777,
     )
     self.assertResourceCalled('HdfsResource', '/tmp',
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
@@ -257,7 +305,7 @@ class TestHistoryServer(RMFTestCase):
         hadoop_bin_dir = '/usr/bin',
         keytab = UnknownConfigurationMock(),
         kinit_path_local = '/usr/bin/kinit',
-        user = 'hdfs', 
+        user = 'hdfs',
         dfs_type = '',
         owner = 'mapred',
         hadoop_conf_dir = '/etc/hadoop/conf',
@@ -311,6 +359,112 @@ class TestHistoryServer(RMFTestCase):
       cd_access = 'a',
       recursive_ownership = True,
     )
+    self.assertResourceCalled('XmlConfig', 'core-site.xml',
+      owner = 'hdfs',
+      group = 'hadoop',
+      mode = 0644,
+      conf_dir = '/etc/hadoop/conf',
+      configurations = self.getConfig()['configurations']['core-site'],
+      configuration_attributes = self.getConfig()['configurationAttributes']['core-site']
+    )
+    self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
+      owner = 'hdfs',
+      group = 'hadoop',
+      mode = 0644,
+      conf_dir = '/etc/hadoop/conf',
+      configurations = self.getConfig()['configurations']['hdfs-site'],
+      configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
+    )
+    self.assertResourceCalled('XmlConfig', 'mapred-site.xml',
+      owner = 'yarn',
+      group = 'hadoop',
+      mode = 0644,
+      conf_dir = '/etc/hadoop/conf',
+      configurations = self.getConfig()['configurations']['mapred-site'],
+      configuration_attributes = self.getConfig()['configurationAttributes']['mapred-site']
+    )
+    self.assertResourceCalled('XmlConfig', 'yarn-site.xml',
+      owner = 'yarn',
+      group = 'hadoop',
+      mode = 0644,
+      conf_dir = '/etc/hadoop/conf',
+      configurations = self.getConfig()['configurations']['yarn-site'],
+      configuration_attributes = self.getConfig()['configurationAttributes']['yarn-site']
+    )
+    self.assertResourceCalled('XmlConfig', 'capacity-scheduler.xml',
+      owner = 'yarn',
+      group = 'hadoop',
+      mode = 0644,
+      conf_dir = '/etc/hadoop/conf',
+      configurations = self.getConfig()['configurations']['capacity-scheduler'],
+      configuration_attributes = self.getConfig()['configurationAttributes']['capacity-scheduler']
+    )
+    self.assertResourceCalled('File', '/etc/security/limits.d/yarn.conf',
+      content = Template('yarn.conf.j2'),
+      mode = 0644,
+    )
+    self.assertResourceCalled('File', '/etc/security/limits.d/mapreduce.conf',
+      content = Template('mapreduce.conf.j2'),
+      mode = 0644,
+    )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/yarn-env.sh',
+      content = InlineTemplate(self.getConfig()['configurations']['yarn-env']['content']),
+      owner = 'yarn',
+      group = 'hadoop',
+      mode = 0755,
+    )
+    self.assertResourceCalled('File', '/usr/lib/hadoop-yarn/bin/container-executor',
+                              group = 'hadoop',
+                              mode = 02050,
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/container-executor.cfg',
+                              content = InlineTemplate(self.getConfig()['configurations']['container-executor']['content']),
+                              group = 'hadoop',
+                              mode = 0644,
+                              )
+    self.assertResourceCalled('Directory', '/cgroups_test/cpu',
+                              group = 'hadoop',
+                              create_parents = True,
+                              mode = 0755,
+                              cd_access="a"
+    )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/mapred-env.sh',
+                              content = InlineTemplate(self.getConfig()['configurations']['mapred-env']['content']),
+                              mode = 0755,
+                              owner = 'hdfs',
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/taskcontroller.cfg',
+                              content = Template('taskcontroller.cfg.j2'),
+                              owner = 'hdfs',
+                              )
+    self.assertResourceCalled('XmlConfig', 'mapred-site.xml',
+                              owner = 'mapred',
+                              group = 'hadoop',
+                              conf_dir = '/etc/hadoop/conf',
+                              configurations = self.getConfig()['configurations']['mapred-site'],
+                              configuration_attributes = self.getConfig()['configurationAttributes']['mapred-site']
+                              )
+    self.assertResourceCalled('XmlConfig', 'capacity-scheduler.xml',
+                              owner = 'hdfs',
+                              group = 'hadoop',
+                              conf_dir = '/etc/hadoop/conf',
+                              configurations = self.getConfig()['configurations']['capacity-scheduler'],
+                              configuration_attributes = self.getConfig()['configurationAttributes']['capacity-scheduler']
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/fair-scheduler.xml',
+                              owner = 'mapred',
+                              group = 'hadoop',
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/ssl-client.xml.example',
+                              owner = 'mapred',
+                              group = 'hadoop',
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/ssl-server.xml.example',
+                              owner = 'mapred',
+                              group = 'hadoop',
+                              )
+
+  def assert_configure_secured(self):
     self.assertResourceCalled('Directory', '/var/run/hadoop-yarn',
       owner = 'yarn',
       group = 'hadoop',
@@ -360,116 +514,6 @@ class TestHistoryServer(RMFTestCase):
       ignore_failures = True,
       cd_access = 'a',
     )
-    self.assertResourceCalled('XmlConfig', 'core-site.xml',
-      owner = 'hdfs',
-      group = 'hadoop',
-      mode = 0644,
-      conf_dir = '/etc/hadoop/conf',
-      configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['core-site']
-    )
-    self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
-      owner = 'hdfs',
-      group = 'hadoop',
-      mode = 0644,
-      conf_dir = '/etc/hadoop/conf',
-      configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
-    )
-    self.assertResourceCalled('XmlConfig', 'mapred-site.xml',
-      owner = 'yarn',
-      group = 'hadoop',
-      mode = 0644,
-      conf_dir = '/etc/hadoop/conf',
-      configurations = self.getConfig()['configurations']['mapred-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['mapred-site']
-    )
-    self.assertResourceCalled('XmlConfig', 'yarn-site.xml',
-      owner = 'yarn',
-      group = 'hadoop',
-      mode = 0644,
-      conf_dir = '/etc/hadoop/conf',
-      configurations = self.getConfig()['configurations']['yarn-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['yarn-site']
-    )
-    self.assertResourceCalled('XmlConfig', 'capacity-scheduler.xml',
-      owner = 'yarn',
-      group = 'hadoop',
-      mode = 0644,
-      conf_dir = '/etc/hadoop/conf',
-      configurations = self.getConfig()['configurations']['capacity-scheduler'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['capacity-scheduler']
-    )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/yarn.exclude',
-      owner = 'yarn',
-      group = 'hadoop',
-    )
-    self.assertResourceCalled('File', '/etc/security/limits.d/yarn.conf',
-      content = Template('yarn.conf.j2'),
-      mode = 0644,
-    )
-    self.assertResourceCalled('File', '/etc/security/limits.d/mapreduce.conf',
-      content = Template('mapreduce.conf.j2'),
-      mode = 0644,
-    )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/yarn-env.sh',
-      content = InlineTemplate(self.getConfig()['configurations']['yarn-env']['content']),
-      owner = 'yarn',
-      group = 'hadoop',
-      mode = 0755,
-    )
-    self.assertResourceCalled('File', '/usr/lib/hadoop-yarn/bin/container-executor',
-                              group = 'hadoop',
-                              mode = 02050,
-                              )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/container-executor.cfg',
-                              content = Template('container-executor.cfg.j2'),
-                              group = 'hadoop',
-                              mode = 0644,
-                              )
-    self.assertResourceCalled('Directory', '/cgroups_test/cpu',
-                              group = 'hadoop',
-                              create_parents = True,
-                              mode = 0755,
-                              cd_access="a"
-    )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/mapred-env.sh',
-                              content = InlineTemplate(self.getConfig()['configurations']['mapred-env']['content']),
-                              mode = 0755,
-                              owner = 'hdfs',
-                              )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/taskcontroller.cfg',
-                              content = Template('taskcontroller.cfg.j2'),
-                              owner = 'hdfs',
-                              )
-    self.assertResourceCalled('XmlConfig', 'mapred-site.xml',
-                              owner = 'mapred',
-                              group = 'hadoop',
-                              conf_dir = '/etc/hadoop/conf',
-                              configurations = self.getConfig()['configurations']['mapred-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['mapred-site']
-                              )
-    self.assertResourceCalled('XmlConfig', 'capacity-scheduler.xml',
-                              owner = 'hdfs',
-                              group = 'hadoop',
-                              conf_dir = '/etc/hadoop/conf',
-                              configurations = self.getConfig()['configurations']['capacity-scheduler'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['capacity-scheduler']
-                              )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/fair-scheduler.xml',
-                              owner = 'mapred',
-                              group = 'hadoop',
-                              )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/ssl-client.xml.example',
-                              owner = 'mapred',
-                              group = 'hadoop',
-                              )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/ssl-server.xml.example',
-                              owner = 'mapred',
-                              group = 'hadoop',
-                              )
-
-  def assert_configure_secured(self):
 
     self.assertResourceCalled('HdfsResource', '/app-logs',
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
@@ -485,7 +529,7 @@ class TestHistoryServer(RMFTestCase):
         hadoop_bin_dir = '/usr/bin',
         type = 'directory',
         action = ['create_on_execute'], hdfs_resource_ignore_file='/var/lib/ambari-agent/data/.hdfs_resource_ignore', hdfs_site=self.getConfig()['configurations']['hdfs-site'], principal_name='hdfs', default_fs='hdfs://c6401.ambari.apache.org:8020',
-        mode = 0777,
+        mode = 01777,
     )
 
     self.assertResourceCalled('HdfsResource', '/tmp',
@@ -582,62 +626,13 @@ class TestHistoryServer(RMFTestCase):
       cd_access = 'a',
       recursive_ownership = True,
     )
-    self.assertResourceCalled('Directory', '/var/run/hadoop-yarn',
-      owner = 'yarn',
-      group = 'hadoop',
-      create_parents = True,
-      cd_access = 'a',
-    )
-    self.assertResourceCalled('Directory', '/var/run/hadoop-yarn/yarn',
-      owner = 'yarn',
-      group = 'hadoop',
-      create_parents = True,
-      cd_access = 'a',
-    )
-    self.assertResourceCalled('Directory', '/var/log/hadoop-yarn/yarn',
-      owner = 'yarn',
-      group = 'hadoop',
-      create_parents = True,
-      cd_access = 'a',
-    )
-    self.assertResourceCalled('Directory', '/var/run/hadoop-mapreduce',
-      owner = 'mapred',
-      group = 'hadoop',
-      create_parents = True,
-      cd_access = 'a',
-    )
-    self.assertResourceCalled('Directory', '/var/run/hadoop-mapreduce/mapred',
-      owner = 'mapred',
-      group = 'hadoop',
-      create_parents = True,
-      cd_access = 'a',
-    )
-    self.assertResourceCalled('Directory', '/var/log/hadoop-mapreduce',
-      owner = 'mapred',
-      group = 'hadoop',
-      create_parents = True,
-      cd_access = 'a',
-    )
-    self.assertResourceCalled('Directory', '/var/log/hadoop-mapreduce/mapred',
-      owner = 'mapred',
-      group = 'hadoop',
-      create_parents = True,
-      cd_access = 'a',
-    )
-    self.assertResourceCalled('Directory', '/var/log/hadoop-yarn',
-      owner = 'yarn',
-      group = 'hadoop',
-      create_parents = True,
-      ignore_failures = True,
-      cd_access = 'a',
-    )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
       owner = 'hdfs',
       group = 'hadoop',
       mode = 0644,
       conf_dir = '/etc/hadoop/conf',
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['core-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['core-site']
     )
     self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
       owner = 'hdfs',
@@ -645,7 +640,7 @@ class TestHistoryServer(RMFTestCase):
       mode = 0644,
       conf_dir = '/etc/hadoop/conf',
       configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
     )
     self.assertResourceCalled('XmlConfig', 'mapred-site.xml',
       owner = 'yarn',
@@ -653,7 +648,7 @@ class TestHistoryServer(RMFTestCase):
       mode = 0644,
       conf_dir = '/etc/hadoop/conf',
       configurations = self.getConfig()['configurations']['mapred-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['mapred-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['mapred-site']
     )
     self.assertResourceCalled('XmlConfig', 'yarn-site.xml',
       owner = 'yarn',
@@ -661,7 +656,7 @@ class TestHistoryServer(RMFTestCase):
       mode = 0644,
       conf_dir = '/etc/hadoop/conf',
       configurations = self.getConfig()['configurations']['yarn-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['yarn-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['yarn-site']
     )
     self.assertResourceCalled('XmlConfig', 'capacity-scheduler.xml',
       owner = 'yarn',
@@ -669,11 +664,7 @@ class TestHistoryServer(RMFTestCase):
       mode = 0644,
       conf_dir = '/etc/hadoop/conf',
       configurations = self.getConfig()['configurations']['capacity-scheduler'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['capacity-scheduler']
-    )
-    self.assertResourceCalled('File', '/etc/hadoop/conf/yarn.exclude',
-      owner = 'yarn',
-      group = 'hadoop',
+      configuration_attributes = self.getConfig()['configurationAttributes']['capacity-scheduler']
     )
     self.assertResourceCalled('File', '/etc/security/limits.d/yarn.conf',
       content = Template('yarn.conf.j2'),
@@ -694,7 +685,7 @@ class TestHistoryServer(RMFTestCase):
       mode = 06050,
     )
     self.assertResourceCalled('File', '/etc/hadoop/conf/container-executor.cfg',
-      content = Template('container-executor.cfg.j2'),
+      content = InlineTemplate(self.getConfig()['configurations']['container-executor']['content']),
       group = 'hadoop',
       mode = 0644,
     )
@@ -720,19 +711,34 @@ class TestHistoryServer(RMFTestCase):
                               group = 'hadoop',
                               mode = 0644,
                               )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/yarn_jaas.conf',
+                              content = Template('yarn_jaas.conf.j2'),
+                              owner = 'yarn',
+                              group = 'hadoop',
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/yarn_nm_jaas.conf',
+                              content = Template('yarn_nm_jaas.conf.j2'),
+                              owner = 'yarn',
+                              group = 'hadoop',
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/mapred_jaas.conf',
+                              content = Template('mapred_jaas.conf.j2'),
+                              owner = 'mapred',
+                              group = 'hadoop',
+                              )
     self.assertResourceCalled('XmlConfig', 'mapred-site.xml',
                               owner = 'mapred',
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['mapred-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['mapred-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['mapred-site']
                               )
     self.assertResourceCalled('XmlConfig', 'capacity-scheduler.xml',
                               owner = 'hdfs',
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['capacity-scheduler'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['capacity-scheduler']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['capacity-scheduler']
                               )
     self.assertResourceCalled('File', '/etc/hadoop/conf/fair-scheduler.xml',
                               owner = 'mapred',
@@ -747,168 +753,44 @@ class TestHistoryServer(RMFTestCase):
                               group = 'hadoop',
                               )
 
-  @patch("resource_management.libraries.functions.security_commons.build_expectations")
-  @patch("resource_management.libraries.functions.security_commons.get_params_from_filesystem")
-  @patch("resource_management.libraries.functions.security_commons.validate_security_config_properties")
-  @patch("resource_management.libraries.functions.security_commons.cached_kinit_executor")
-  @patch("resource_management.libraries.script.Script.put_structured_out")
-  def test_security_status(self, put_structured_out_mock, cached_kinit_executor_mock, validate_security_config_mock, get_params_mock, build_exp_mock):
-    # Test that function works when is called with correct parameters
-
-    security_params = {
-      "mapred-site": {
-        'mapreduce.jobhistory.keytab': "/path/to/keytab1",
-        'mapreduce.jobhistory.principal': "principal1",
-        'mapreduce.jobhistory.webapp.spnego-keytab-file': "/path/to/keytab2",
-        'mapreduce.jobhistory.webapp.spnego-principal': "principal2"
-      }
-    }
-    result_issues = []
-
-    get_params_mock.return_value = security_params
-    validate_security_config_mock.return_value = result_issues
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/historyserver.py",
-                       classname="HistoryServer",
-                       command="security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-
-    get_params_mock.assert_called_with("/etc/hadoop/conf", {'mapred-site.xml': 'XML'})
-    build_exp_mock.assert_called_with('mapred-site',
-                                      None,
-                                      [
-                                        'mapreduce.jobhistory.keytab',
-                                        'mapreduce.jobhistory.principal',
-                                        'mapreduce.jobhistory.webapp.spnego-keytab-file',
-                                        'mapreduce.jobhistory.webapp.spnego-principal'
-                                        ],
-                                      None)
-    put_structured_out_mock.assert_called_with({"securityState": "SECURED_KERBEROS"})
-    self.assertTrue(cached_kinit_executor_mock.call_count, 2)
-    cached_kinit_executor_mock.assert_called_with('/usr/bin/kinit',
-                                                  self.config_dict['configurations']['mapred-env']['mapred_user'],
-                                                  security_params['mapred-site']['mapreduce.jobhistory.webapp.spnego-keytab-file'],
-                                                  security_params['mapred-site']['mapreduce.jobhistory.webapp.spnego-principal'],
-                                                  self.config_dict['hostname'],
-                                                  '/tmp')
-
-    # Testing that the exception throw by cached_executor is caught
-    cached_kinit_executor_mock.reset_mock()
-    cached_kinit_executor_mock.side_effect = Exception("Invalid command")
-
-    try:
-      self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/historyserver.py",
-                         classname="HistoryServer",
-                         command="security_status",
-                         config_file="secured.json",
-                         stack_version = self.STACK_VERSION,
-                         target = RMFTestCase.TARGET_COMMON_SERVICES
-      )
-    except:
-      self.assertTrue(True)
-
-    # Testing with a security_params which doesn't contain mapred-site
-    empty_security_params = {}
-    cached_kinit_executor_mock.reset_mock()
-    get_params_mock.reset_mock()
-    put_structured_out_mock.reset_mock()
-    get_params_mock.return_value = empty_security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/historyserver.py",
-                       classname="HistoryServer",
-                       command="security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityIssuesFound": "Keytab file or principal not set."})
-
-    # Testing with not empty result_issues
-    result_issues_with_params = {'mapred-site': "Something bad happened"}
-
-    validate_security_config_mock.reset_mock()
-    get_params_mock.reset_mock()
-    validate_security_config_mock.return_value = result_issues_with_params
-    get_params_mock.return_value = security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/historyserver.py",
-                       classname="HistoryServer",
-                       command="security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-
-    # Testing with security_enable = false
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/historyserver.py",
-                       classname="HistoryServer",
-                       command="security_status",
-                       config_file="default.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-
-  def assert_call_to_get_hadoop_conf_dir(self):
-    # From call to conf_select.get_hadoop_conf_dir()
-    self.assertResourceCalled("Execute", ("cp", "-R", "-p", "/etc/hadoop/conf", "/etc/hadoop/conf.backup"),
-                              not_if = "test -e /etc/hadoop/conf.backup",
-                              sudo = True)
-    self.assertResourceCalled("Directory", "/etc/hadoop/conf",
-                              action = ["delete"])
-    self.assertResourceCalled("Link", "/etc/hadoop/conf", to="/etc/hadoop/conf.backup")
-
   @patch.object(functions, "get_stack_version", new = MagicMock(return_value="2.3.0.0-1234"))
   @patch("resource_management.libraries.functions.copy_tarball.copy_to_hdfs")
+  @patch("resource_management.core.sudo.path_isdir", new = MagicMock(return_value = True))
   def test_pre_upgrade_restart_23(self, copy_to_hdfs_mock):
     config_file = self.get_src_folder()+"/test/python/stacks/2.0.6/configs/default.json"
     with open(config_file, "r") as f:
       json_content = json.load(f)
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
-    json_content['hostLevelParams']['stack_version'] = '2.3'
+    json_content['clusterLevelParams']['stack_version'] = '2.3'
     copy_to_hdfs_mock.return_value = True
     mocks_dict = {}
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/historyserver.py",
                        classname = "HistoryServer",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES,
                        call_mocks = [(0, None, ''), (0, None, None), (0, None, None), (0, None, None), (0, None, None)],
                        mocks_dict = mocks_dict)
 
     self.assertResourceCalledIgnoreEarlier('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'hadoop-mapreduce-historyserver', version), sudo=True)
-    self.assertTrue(call("tez", "hadoop", "hdfs", host_sys_prepped=False) in copy_to_hdfs_mock.call_args_list)
-    self.assertTrue(call("slider", "hadoop", "hdfs", host_sys_prepped=False) in copy_to_hdfs_mock.call_args_list)
+    self.assertTrue(call("tez", "hadoop", "hdfs", skip=False) in copy_to_hdfs_mock.call_args_list)
+    self.assertTrue(call("slider", "hadoop", "hdfs", skip=False) in copy_to_hdfs_mock.call_args_list)
 
     # From call to conf_select.get_hadoop_conf_dir()
-    self.assert_call_to_get_hadoop_conf_dir()
-    self.assert_call_to_get_hadoop_conf_dir()
 
     self.assertResourceCalled('HdfsResource', None,
         immutable_paths = self.DEFAULT_IMMUTABLE_PATHS,
         security_enabled = False,
-        hadoop_bin_dir = '/usr/hdp/current/hadoop-client/bin',
+        hadoop_bin_dir = '/usr/hdp/2.3.0.0-1234/hadoop/bin',
         keytab = UnknownConfigurationMock(),
         kinit_path_local = '/usr/bin/kinit',
         user = 'hdfs',
         dfs_type = '',
         action = ['execute'], hdfs_resource_ignore_file='/var/lib/ambari-agent/data/.hdfs_resource_ignore', hdfs_site=self.getConfig()['configurations']['hdfs-site'], principal_name=UnknownConfigurationMock(), default_fs='hdfs://c6401.ambari.apache.org:8020',
-        hadoop_conf_dir = '/usr/hdp/current/hadoop-client/conf',
+        hadoop_conf_dir = '/usr/hdp/2.3.0.0-1234/hadoop/conf',
     )
 
     self.assertNoMoreResources()
-
-    self.assertEquals(5, mocks_dict['call'].call_count)
-    self.assertEquals(5, mocks_dict['checked_call'].call_count)
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'hadoop', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[0][0][0])
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'hadoop', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])

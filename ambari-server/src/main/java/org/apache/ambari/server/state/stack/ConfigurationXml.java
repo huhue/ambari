@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -30,8 +30,8 @@ import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.bind.annotation.XmlTransient;
 import javax.xml.namespace.QName;
-import org.apache.ambari.server.stack.Validable;
 
+import org.apache.ambari.server.stack.Validable;
 import org.apache.ambari.server.state.PropertyInfo;
 
 /**
@@ -41,10 +41,10 @@ import org.apache.ambari.server.state.PropertyInfo;
 public class ConfigurationXml implements Validable{
   
   @XmlAnyAttribute
-  private Map<QName, String> attributes = new HashMap<QName, String>();
+  private Map<QName, String> attributes = new HashMap<>();
 
   @XmlElement(name="property")
-  private List<PropertyInfo> properties = new ArrayList<PropertyInfo>();
+  private List<PropertyInfo> properties = new ArrayList<>();
 
   @XmlTransient
   private boolean valid = true;
@@ -68,7 +68,7 @@ public class ConfigurationXml implements Validable{
   }
 
   @XmlTransient
-  private Set<String> errorSet = new HashSet<String>();
+  private Set<String> errorSet = new HashSet<>();
   
   @Override
   public void addError(String error) {

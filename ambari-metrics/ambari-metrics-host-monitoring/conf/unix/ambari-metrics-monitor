@@ -24,7 +24,7 @@ METRIC_MONITOR_PY_SCRIPT=${RESOURCE_MONITORING_DIR}/main.py
 PIDFILE=/var/run/ambari-metrics-monitor/ambari-metrics-monitor.pid
 OUTFILE=/var/log/ambari-metrics-monitor/ambari-metrics-monitor.out
 
-STOP_TIMEOUT=5
+STOP_TIMEOUT=10
 
 OK=0
 NOTOK=1
@@ -98,21 +98,24 @@ else
   exit 1
 fi
 
+# Set log directory path
+if [[ -n "${AMS_MONITOR_LOG_DIR}" ]]; then
+  OUTFILE=${AMS_MONITOR_LOG_DIR}/ambari-metrics-monitor.out
+fi
+
 #TODO decide if rebuild on each start (pretty quickly) to tolerate major node changes (like kernel update)
 #build psutil
 if [ ! "$(ls -A ${RESOURCE_MONITORING_DIR}/psutil/build)" ]; then
   echo "Building psutil..."
   dir=$(pwd)
   cd "${RESOURCE_MONITORING_DIR}/psutil"
-  ${PYTHON} "setup.py" "build"
+  # build psutil and redirect output to log file
+  echo "--------------------------Building psutil--------------------------" >> ${OUTFILE}
+  ${PYTHON} "setup.py" "build" >> ${OUTFILE}
+  echo "----------------------Finished building psutil---------------------" >> ${OUTFILE}
   cd "${dir}"
 else
   echo "psutil build directory is not empty, continuing..."
-fi
-
-# Set log directory path
-if [[ -n "${AMS_MONITOR_LOG_DIR}" ]]; then
-  OUTFILE=${AMS_MONITOR_LOG_DIR}/ambari-metrics-monitor.out
 fi
 
 # Set pid directory path
@@ -131,7 +134,7 @@ case "$1" in
     echo "Checking for previously running Metric Monitor..."
     if [ -f ${PIDFILE} ]; then
       PID=`cat ${PIDFILE}`
-      if [ -z "`ps ax | grep -w ${PID} | grep resource_monitoring`" ]; then
+      if [ -z "`ps ax -o pid | grep -w ${PID}`" ]; then
         echo "${PIDFILE} found with no process. Removing ${PID}..."
         rm -f ${PIDFILE}
       else
@@ -151,8 +154,9 @@ case "$1" in
 
     sleep 2
 
-    echo "Verifying ${METRIC_MONITOR} process status..."
-    if [ -z "`ps ax | grep -w ${PID} | grep resource_monitoring`" ]; then
+    echo "Verifying ${METRIC_MONITOR} process status with PID : ${PID}"
+    if [ -z "`ps ax -o pid | grep -w ${PID}`" ]; then
+      echo "Output of PID check : `ps ax -o pid | grep -w ${PID}`"
       if [ -s ${OUTFILE} ]; then
         echo "ERROR: ${METRIC_MONITOR} start failed. For more details, see ${OUTFILE}:"
         echo "===================="
@@ -173,7 +177,7 @@ case "$1" in
     if [ -f ${PIDFILE} ]; then
       PID=`cat ${PIDFILE}`
       echo "Found ${METRIC_MONITOR} PID: $PID"
-      if [ -z "`ps ax | grep -w ${PID} | grep resource_monitoring`" ]; then
+      if [ -z "`ps ax -o pid | grep -w ${PID}`" ]; then
         echo "${METRIC_MONITOR} not running. Stale PID File at: $PIDFILE"
         retcode=2
       else

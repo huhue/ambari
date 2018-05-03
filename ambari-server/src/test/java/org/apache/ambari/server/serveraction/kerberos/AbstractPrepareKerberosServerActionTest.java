@@ -18,6 +18,13 @@
 
 package org.apache.ambari.server.serveraction.kerberos;
 
+import static org.easymock.EasyMock.anyBoolean;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.verify;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,19 +34,20 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 
+import javax.persistence.EntityManager;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.agent.CommandReport;
 import org.apache.ambari.server.audit.AuditLogger;
 import org.apache.ambari.server.controller.KerberosHelper;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
+import org.apache.ambari.server.state.Host;
 import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.ServiceComponentHost;
 import org.apache.ambari.server.state.kerberos.KerberosComponentDescriptor;
-import org.apache.ambari.server.state.kerberos.KerberosServiceDescriptor;
 import org.apache.ambari.server.state.kerberos.KerberosDescriptor;
-import org.easymock.Capture;
-import org.easymock.CaptureType;
+import org.apache.ambari.server.state.kerberos.KerberosServiceDescriptor;
 import org.easymock.EasyMock;
 import org.junit.Assert;
 import org.junit.Before;
@@ -48,14 +56,7 @@ import org.junit.Test;
 import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-
-import static org.easymock.EasyMock.anyBoolean;
-import static org.easymock.EasyMock.anyObject;
-import static org.easymock.EasyMock.anyString;
-import static org.easymock.EasyMock.capture;
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.verify;
+import com.google.inject.Provider;
 
 public class AbstractPrepareKerberosServerActionTest {
   private class PrepareKerberosServerAction extends AbstractPrepareKerberosServerAction{
@@ -83,6 +84,8 @@ public class AbstractPrepareKerberosServerActionTest {
         bind(KerberosIdentityDataFileWriterFactory.class).toInstance(kerberosIdentityDataFileWriterFactory);
         bind(Clusters.class).toInstance(clusters);
         bind(AuditLogger.class).toInstance(auditLogger);
+        Provider<EntityManager> entityManagerProvider =  EasyMock.createNiceMock(Provider.class);
+        bind(EntityManager.class).toProvider(entityManagerProvider);
       }
     });
 
@@ -114,8 +117,7 @@ public class AbstractPrepareKerberosServerActionTest {
 
     Collection<String> identityFilter = new ArrayList<>();
     Map<String, Map<String, String>> kerberosConfigurations = new HashMap<>();
-    Map<String, Map<String, String>> propertiesToInsert = new HashMap<>();
-    Map<String, Set<String>> propertiesToRemove = new HashMap<>();
+    Map<String, Set<String>> propertiesToIgnore = new HashMap<>();
     Map<String, String> descriptorProperties = new HashMap<>();
     Map<String, Map<String, String>> configurations = new HashMap<>();
 
@@ -128,10 +130,7 @@ public class AbstractPrepareKerberosServerActionTest {
       put(zookeeperService, null);
     }};
 
-    Capture<Set<String>> serviceCapture = Capture.newInstance(CaptureType.LAST);
-
     expect(kerberosDescriptor.getProperties()).andReturn(descriptorProperties).atLeastOnce();
-    expect(kerberosHelper.calculateConfigurations((Cluster)anyObject(), anyString(), (Map<String,String>)anyObject())).andReturn(configurations).atLeastOnce();
     expect(kerberosIdentityDataFileWriterFactory.createKerberosIdentityDataFileWriter((File)anyObject())).andReturn(kerberosIdentityDataFileWriter);
     // it's important to pass a copy of clusterServices
     expect(cluster.getServices()).andReturn(new HashMap<>(clusterServices)).atLeastOnce();
@@ -139,25 +138,17 @@ public class AbstractPrepareKerberosServerActionTest {
     expect(serviceComponentHostHDFS.getHostName()).andReturn(hostName).atLeastOnce();
     expect(serviceComponentHostHDFS.getServiceName()).andReturn(hdfsService).atLeastOnce();
     expect(serviceComponentHostHDFS.getServiceComponentName()).andReturn(hdfsComponent).atLeastOnce();
+    expect(serviceComponentHostHDFS.getHost()).andReturn(createNiceMock(Host.class)).atLeastOnce();
 
     expect(serviceComponentHostZK.getHostName()).andReturn(hostName).atLeastOnce();
     expect(serviceComponentHostZK.getServiceName()).andReturn(zookeeperService).atLeastOnce();
     expect(serviceComponentHostZK.getServiceComponentName()).andReturn(zkComponent).atLeastOnce();
+    expect(serviceComponentHostZK.getHost()).andReturn(createNiceMock(Host.class)).atLeastOnce();
 
     expect(kerberosDescriptor.getService(hdfsService)).andReturn(serviceDescriptor).once();
 
     expect(serviceDescriptor.getComponent(hdfsComponent)).andReturn(componentDescriptor).once();
     expect(componentDescriptor.getConfigurations(anyBoolean())).andReturn(null);
-
-    expect(kerberosHelper.applyStackAdvisorUpdates(
-      (Cluster)anyObject(),
-      capture(serviceCapture),
-      (Map<String, Map<String, String>>)anyObject(),
-      (Map<String, Map<String, String>>)anyObject(),
-      (Map<String, Set<String>>)anyObject(),
-      (Map<String, Map<String, String>>)anyObject(),
-      (Map<String, Set<String>>)anyObject(),
-      anyBoolean())).andReturn(null).atLeastOnce();
 
     replay(kerberosDescriptor, kerberosHelper, kerberosIdentityDataFileWriterFactory,
       cluster, serviceComponentHostHDFS, serviceComponentHostZK, serviceDescriptor, componentDescriptor);
@@ -167,15 +158,14 @@ public class AbstractPrepareKerberosServerActionTest {
       serviceComponentHosts,
       identityFilter,
       "",
-      kerberosConfigurations,
-      propertiesToInsert,
-      propertiesToRemove,
-      false, false);
+        configurations, kerberosConfigurations,
+        false, propertiesToIgnore);
 
     verify(kerberosHelper);
 
-    Set<String> resultServices = serviceCapture.getValue();
-    Assert.assertEquals(clusterServices.keySet(), resultServices);
+    // Ensure the host and hostname values were set in the configuration context
+    Assert.assertEquals("host1", configurations.get("").get("host"));
+    Assert.assertEquals("host1", configurations.get("").get("hostname"));
   }
 
 }

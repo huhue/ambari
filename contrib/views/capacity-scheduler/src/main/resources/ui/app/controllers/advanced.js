@@ -25,6 +25,7 @@ App.CapschedAdvancedController = Ember.Controller.extend({
 
   actions: {
     rollbackQueueMappingProps: function() {
+      var tempRefreshNeeded = this.get('isRefreshOrRestartNeeded');
       var sched = this.get('scheduler'),
       attributes = sched.changedAttributes(),
       props = this.queueMappingProps;
@@ -33,14 +34,60 @@ App.CapschedAdvancedController = Ember.Controller.extend({
           sched.set(prop, attributes[prop][0]);
         }
       });
+      this.set('isRefreshOrRestartNeeded', tempRefreshNeeded);
+    },
+    rollbackProp: function(prop, item) {
+      var tempRefreshNeeded = this.get('isRefreshOrRestartNeeded');
+      var attributes = item.changedAttributes();
+      if (attributes.hasOwnProperty(prop)) {
+        item.set(prop, attributes[prop][0]);
+      }
+      this.set('isRefreshOrRestartNeeded', tempRefreshNeeded);
+      this.afterRollbackProp();
+    },
+    showSaveConfigDialog: function(mode) {
+      if (mode) {
+        this.set('saveMode', mode);
+      } else {
+        this.set('saveMode', '');
+      }
+      this.set('isSaveConfigDialogOpen', true);
+    },
+    showConfirmDialog: function() {
+      this.set('isConfirmDialogOpen', true);
     }
   },
+
+  initEvents: function() {
+    this.get('eventBus').subscribe('beforeSavingConfigs', function() {
+      this.set("tempRefreshNeed", this.get('isRefreshOrRestartNeeded') || false);
+    }.bind(this));
+
+    this.get('eventBus').subscribe('afterConfigsSaved', function(refresh) {
+      this.set('isRefreshOrRestartNeeded', refresh !== undefined? refresh:this.get('tempRefreshNeed'));
+    }.bind(this));
+  }.on('init'),
+
+  teardownEvents: function() {
+    this.get('eventBus').unsubscribe('beforeSavingConfigs');
+    this.get('eventBus').unsubscribe('afterConfigsSaved');
+  }.on('willDestroy'),
 
   isOperator: cmp.alias('controllers.capsched.isOperator'),
   scheduler: cmp.alias('controllers.capsched.content'),
   queues: cmp.alias('controllers.capsched.queues'),
+
   isQueueMappingsDirty: false,
   queueMappingProps: ['queue_mappings', 'queue_mappings_override_enable'],
+  isRefreshOrRestartNeeded: false,
+  isQueueMappignsNeedSaveOrRefresh: cmp.or('isQueueMappingsDirty', 'isRefreshOrRestartNeeded'),
+
+  saveMode: '',
+
+  isConfirmDialogOpen: false,
+  isSaveConfigDialogOpen: false,
+
+  configNote: cmp.alias('store.configNote'),
 
   queueMappingsDidChange: function() {
     var sched = this.get('scheduler'),
@@ -50,6 +97,18 @@ App.CapschedAdvancedController = Ember.Controller.extend({
       return attributes.hasOwnProperty(prop);
     });
     this.set('isQueueMappingsDirty', isDirty);
-  }.observes('scheduler.queue_mappings', 'scheduler.queue_mappings_override_enable')
+    this.set('isRefreshOrRestartNeeded', isDirty);
+  }.observes('scheduler.queue_mappings', 'scheduler.queue_mappings_override_enable'),
 
+  forceRefreshRequired: function() {
+    return !this.get('isQueueMappingsDirty') && this.get('isRefreshOrRestartNeeded');
+  }.property('isQueueMappingsDirty', 'isRefreshOrRestartNeeded'),
+
+  afterRollbackProp: function() {
+    if (this.get('isQueueMappingsDirty')) {
+      this.set('isRefreshOrRestartNeeded', true);
+    } else {
+      this.set('isRefreshOrRestartNeeded', false);
+    }
+  }
 });

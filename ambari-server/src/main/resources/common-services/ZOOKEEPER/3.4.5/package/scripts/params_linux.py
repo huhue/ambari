@@ -38,7 +38,6 @@ stack_version_formatted = status_params.stack_version_formatted
 stack_root = status_params.stack_root
 
 stack_name = status_params.stack_name
-current_version = default("/hostLevelParams/current_version", None)
 component_directory = status_params.component_directory
 
 # New Cluster Stack Version that is defined during the RESTART of a Rolling Upgrade
@@ -60,7 +59,7 @@ if stack_version_formatted and check_stack_feature(StackFeature.ROLLING_UPGRADE,
 
 
 zk_user = config['configurations']['zookeeper-env']['zk_user']
-hostname = config['hostname']
+hostname = config['agentLevelParams']['hostname']
 user_group = config['configurations']['cluster-env']['user_group']
 zk_env_sh_template = config['configurations']['zookeeper-env']['content']
 
@@ -68,7 +67,10 @@ zk_log_dir = config['configurations']['zookeeper-env']['zk_log_dir']
 zk_data_dir = config['configurations']['zoo.cfg']['dataDir']
 zk_pid_dir = status_params.zk_pid_dir
 zk_pid_file = status_params.zk_pid_file
-zk_server_heapsize_value = default('configurations/zookeeper-env/zk_server_heapsize', "1024m")
+zk_server_heapsize_value = str(default('configurations/zookeeper-env/zk_server_heapsize', "1024"))
+zk_server_heapsize_value = zk_server_heapsize_value.strip()
+if len(zk_server_heapsize_value) > 0 and zk_server_heapsize_value[-1].isdigit():
+  zk_server_heapsize_value = zk_server_heapsize_value + "m"
 zk_server_heapsize = format("-Xmx{zk_server_heapsize_value}")
 
 client_port = default('/configurations/zoo.cfg/clientPort', None)
@@ -82,10 +84,10 @@ zoo_cfg_properties_map_length = len(zoo_cfg_properties_map)
 zk_principal_name = default("/configurations/zookeeper-env/zookeeper_principal_name", "zookeeper@EXAMPLE.COM")
 zk_principal = zk_principal_name.replace('_HOST',hostname.lower())
 
-java64_home = config['hostLevelParams']['java_home']
-java_version = expect("/hostLevelParams/java_version", int)
+java64_home = config['ambariLevelParams']['java_home']
+java_version = expect("/ambariLevelParams/java_version", int)
 
-zookeeper_hosts = config['clusterHostInfo']['zookeeper_hosts']
+zookeeper_hosts = config['clusterHostInfo']['zookeeper_server_hosts']
 zookeeper_hosts.sort()
 
 zk_keytab_path = config['configurations']['zookeeper-env']['zookeeper_keytab_path']
@@ -97,6 +99,10 @@ smoke_user_keytab = config['configurations']['cluster-env']['smokeuser_keytab']
 smokeuser = config['configurations']['cluster-env']['smokeuser']
 smokeuser_principal = config['configurations']['cluster-env']['smokeuser_principal_name']
 kinit_path_local = get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))
+
+# Zookeeper log4j settings
+zookeeper_log_max_backup_size = default('configurations/zookeeper-log4j/zookeeper_log_max_backup_size',10)
+zookeeper_log_number_of_backup_files = default('configurations/zookeeper-log4j/zookeeper_log_number_of_backup_files',10)
 
 #log4j.properties
 if ('zookeeper-log4j' in config['configurations']) and ('content' in config['configurations']['zookeeper-log4j']):

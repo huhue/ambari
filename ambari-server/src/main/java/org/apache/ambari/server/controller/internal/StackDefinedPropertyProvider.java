@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,15 +17,26 @@
  */
 package org.apache.ambari.server.controller.internal;
 
-import com.google.inject.Inject;
-import com.google.inject.Injector;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+
+import org.apache.ambari.server.ServiceNotFoundException;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.configuration.ComponentSSLConfiguration;
 import org.apache.ambari.server.controller.jmx.JMXHostProvider;
 import org.apache.ambari.server.controller.jmx.JMXPropertyProvider;
 import org.apache.ambari.server.controller.metrics.MetricHostProvider;
+import org.apache.ambari.server.controller.metrics.MetricPropertyProviderFactory;
 import org.apache.ambari.server.controller.metrics.MetricsPropertyProvider;
 import org.apache.ambari.server.controller.metrics.MetricsServiceProvider;
+import org.apache.ambari.server.controller.metrics.RestMetricsPropertyProvider;
 import org.apache.ambari.server.controller.metrics.timeline.cache.TimelineMetricCacheProvider;
 import org.apache.ambari.server.controller.spi.Predicate;
 import org.apache.ambari.server.controller.spi.PropertyProvider;
@@ -36,21 +47,17 @@ import org.apache.ambari.server.controller.utilities.StreamProvider;
 import org.apache.ambari.server.security.authorization.AuthorizationException;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
+import org.apache.ambari.server.state.ConfigHelper;
+import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.StackId;
+import org.apache.ambari.server.state.UriInfo;
 import org.apache.ambari.server.state.stack.Metric;
 import org.apache.ambari.server.state.stack.MetricDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Set;
+import com.google.inject.Inject;
+import com.google.inject.Injector;
 
 /**
  * This class analyzes a service's metrics to determine if additional
@@ -62,10 +69,19 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
 
   @Inject
   private static Clusters clusters = null;
+
   @Inject
   private static AmbariMetaInfo metaInfo = null;
+
   @Inject
   private static Injector injector = null;
+
+  /**
+   * A factory used to retrieve Guice-injected instances of a metric
+   * {@link PropertyProvider}.
+   */
+  @Inject
+  private static MetricPropertyProviderFactory metricPropertyProviderFactory;
 
   private Resource.Type type = null;
   private String clusterNamePropertyId = null;
@@ -92,6 +108,7 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
   public static void init(Injector injector) {
     clusters = injector.getInstance(Clusters.class);
     metaInfo = injector.getInstance(AmbariMetaInfo.class);
+    metricPropertyProviderFactory = injector.getInstance(MetricPropertyProviderFactory.class);
     StackDefinedPropertyProvider.injector = injector;
   }
 
@@ -108,12 +125,14 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
                                       PropertyProvider defaultGangliaPropertyProvider) {
 
     this.metricHostProvider = metricHostProvider;
-    this.metricsServiceProvider = serviceProvider;
+    metricsServiceProvider = serviceProvider;
 
-    if (null == clusterPropertyId)
+    if (null == clusterPropertyId) {
       throw new NullPointerException("Cluster name property id cannot be null");
-    if (null == componentPropertyId)
+    }
+    if (null == componentPropertyId) {
       throw new NullPointerException("Component name property id cannot be null");
+    }
 
     this.type = type;
 
@@ -134,10 +153,12 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
       Request request, Predicate predicate) throws SystemException {
 
     // only arrange for one instance of Ganglia and JMX instantiation
-    Map<String, Map<String, PropertyInfo>> gangliaMap = new HashMap<String, Map<String, PropertyInfo>>();
-    Map<String, Map<String, PropertyInfo>> jmxMap = new HashMap<String, Map<String, PropertyInfo>>();
+    Map<String, Map<String, PropertyInfo>> gangliaMap = new HashMap<>();
+    Map<String, Map<String, PropertyInfo>> jmxMap = new HashMap<>();
 
-    List<PropertyProvider> additional = new ArrayList<PropertyProvider>();
+    List<PropertyProvider> additional = new ArrayList<>();
+    Map<String, String> overriddenHosts = new HashMap<>();
+    Map<String, UriInfo> overriddenJmxUris = new HashMap<>();
 
     try {
       for (Resource r : resources) {
@@ -145,21 +166,31 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
         String componentName = r.getPropertyValue(componentNamePropertyId).toString();
 
         Cluster cluster = clusters.getCluster(clusterName);
-        StackId stack = cluster.getDesiredStackVersion();
-        String svc = metaInfo.getComponentToService(stack.getStackName(),
-            stack.getStackVersion(), componentName);
+        Service service = null;
+
+        try {
+          service = cluster.getServiceByComponentName(componentName);
+        } catch (ServiceNotFoundException e) {
+          LOG.debug("Could not load component {}", componentName);
+          continue;
+        }
+
+        StackId stack = service.getDesiredStackId();
 
         List<MetricDefinition> defs = metaInfo.getMetrics(
-            stack.getStackName(), stack.getStackVersion(), svc, componentName, type.name());
+            stack.getStackName(), stack.getStackVersion(), service.getName(), componentName, type.name());
 
-        if (null == defs || 0 == defs.size())
+        if (null == defs || 0 == defs.size()) {
           continue;
+        }
 
         for (MetricDefinition m : defs) {
           if (m.getType().equals("ganglia")) {
             gangliaMap.put(componentName, getPropertyInfo(m));
+            m.getOverriddenHosts().ifPresent(host -> overriddenHosts.put(componentName, host));
           } else if (m.getType().equals("jmx")) {
             jmxMap.put(componentName, getPropertyInfo(m));
+            m.getJmxSourceUri().ifPresent(uri -> overriddenJmxUris.put(componentName, uri));
           } else {
             PropertyProvider pp = getDelegate(m,
                 streamProvider, metricHostProvider,
@@ -182,7 +213,7 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
           MetricsPropertyProvider.createInstance(type, gangliaMap,
             streamProvider, sslConfig,
             cacheProvider,
-            metricHostProvider,
+            metricHostProvider(overriddenHosts),
             metricsServiceProvider, clusterNamePropertyId,
             hostNamePropertyId, componentNamePropertyId);
 
@@ -192,8 +223,9 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
       }
 
       if (jmxMap.size() > 0) {
-        JMXPropertyProvider jpp = new JMXPropertyProvider(jmxMap, streamProvider,
-            jmxHostProvider, metricHostProvider,
+        JMXPropertyProvider jpp = metricPropertyProviderFactory.createJMXPropertyProvider(jmxMap,
+            streamProvider,
+            jmxHostProvider(overriddenJmxUris, jmxHostProvider, injector.getInstance(ConfigHelper.class)), metricHostProvider,
             clusterNamePropertyId, hostNamePropertyId,
             componentNamePropertyId, resourceStatePropertyId);
 
@@ -210,11 +242,20 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
       // Need to rethrow the catched 'AuthorizationException'.
       throw e;
     } catch (Exception e) {
+      e.printStackTrace();
       LOG.error("Error loading deferred resources", e);
       throw new SystemException("Error loading deferred resources", e);
     }
 
     return resources;
+  }
+
+  private JMXHostProvider jmxHostProvider(Map<String, UriInfo> overriddenJmxUris, JMXHostProvider defaultProvider, ConfigHelper configHelper) {
+    return overriddenJmxUris.isEmpty() ? defaultProvider : new ConfigBasedJmxHostProvider(overriddenJmxUris, defaultProvider, configHelper);
+  }
+
+  private MetricHostProvider metricHostProvider(Map<String, String> overriddenHosts) {
+    return new OverriddenMetricsHostProvider(overriddenHosts, metricHostProvider, injector.getInstance(ConfigHelper.class));
   }
 
   @Override
@@ -228,7 +269,7 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
    * Format: <metric name, property info>
    */
   public static Map<String, PropertyInfo> getPropertyInfo(MetricDefinition def) {
-    Map<String, PropertyInfo> defs = new HashMap<String, PropertyInfo>();
+    Map<String, PropertyInfo> defs = new HashMap<>();
 
     for (Entry<String, Metric> entry : def.getMetrics().entrySet()) {
       Metric metric = entry.getValue();
@@ -303,17 +344,26 @@ public class StackDefinedPropertyProvider implements PropertyProvider {
                                        String componentName) {
     Map<String, PropertyInfo> metrics = getPropertyInfo(definition);
     HashMap<String, Map<String, PropertyInfo>> componentMetrics =
-        new HashMap<String, Map<String, PropertyInfo>>();
+      new HashMap<>();
     componentMetrics.put(WRAPPED_METRICS_KEY, metrics);
 
     try {
       Class<?> clz = Class.forName(definition.getType());
+
+      // use a Factory for the REST provider
+      if (clz.equals(RestMetricsPropertyProvider.class)) {
+        return metricPropertyProviderFactory.createRESTMetricsPropertyProvider(
+            definition.getProperties(), componentMetrics, streamProvider, metricsHostProvider,
+            clusterNamePropertyId, hostNamePropertyId, componentNamePropertyId, statePropertyId,
+            componentName);
+      }
+
       try {
          /*
          * Warning: this branch is already used, that's why please adjust
          * all implementations when modifying constructor interface
          */
-        Constructor<?> ct = clz.getConstructor(Injector.class, Map.class,
+        Constructor<?> ct = clz.getConstructor(Map.class,
             Map.class, StreamProvider.class, MetricHostProvider.class,
             String.class, String.class, String.class, String.class, String.class);
         Object o = ct.newInstance(

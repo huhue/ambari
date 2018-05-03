@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,13 +17,13 @@
  */
 package org.apache.ambari.server.audit;
 
-import nl.jqno.equalsverifier.EqualsVerifier;
+import static org.hamcrest.core.IsEqual.equalTo;
+import static org.junit.Assert.assertThat;
 
 import org.apache.ambari.server.audit.event.LogoutAuditEvent;
 import org.junit.Test;
 
-import static org.hamcrest.core.IsEqual.equalTo;
-import static org.junit.Assert.assertThat;
+import nl.jqno.equalsverifier.EqualsVerifier;
 
 public class LogoutAuditEventTest {
 

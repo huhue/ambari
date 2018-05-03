@@ -21,18 +21,22 @@ limitations under the License.
 import glob
 import logging
 import os
+import pwd
 import re
 import shlex
 import socket
-import subprocess
+from ambari_commons import subprocess32
 import time
 
 from ambari_commons import OSCheck, OSConst
 from ambari_commons.firewall import Firewall
 from ambari_commons.os_family_impl import OsFamilyImpl
+from resource_management.core import shell
 
 from ambari_agent.HostCheckReportFileHandler import HostCheckReportFileHandler
-
+from AmbariConfig import AmbariConfig
+from resource_management.core.resources.jcepolicyinfo import JcePolicyInfo
+import Hardware
 
 logger = logging.getLogger()
 
@@ -54,6 +58,9 @@ class HostInfo(object):
     self.config = config
     self.reportFileHandler = HostCheckReportFileHandler(config)
 
+  def register(self, dict_obj, componentsMapped=True, commandsInProgress=True):
+    raise NotImplementedError()
+
   def dirType(self, path):
     if not os.path.exists(path):
       return 'not_exist'
@@ -66,15 +73,33 @@ class HostInfo(object):
     return 'unknown'
 
   def checkLiveServices(self, services, result):
-    osType = OSCheck.get_os_family()
+    is_redhat7_or_higher = False
+    is_redhat = False
+
+    if OSCheck.is_redhat_family():
+      is_redhat = True
+      if int(OSCheck.get_os_major_version()) >= 7:
+        is_redhat7_or_higher = True
+
     for service in services:
       svcCheckResult = {}
-      serviceName = service
-      svcCheckResult['name'] = serviceName
+      if "ntpd" in service and is_redhat7_or_higher:
+        svcCheckResult['name'] = "chronyd"
+      elif "chronyd" in service and is_redhat:
+        svcCheckResult['name'] = "ntpd"
+      else:
+        svcCheckResult['name'] = " or ".join(service)
       svcCheckResult['status'] = "UNKNOWN"
       svcCheckResult['desc'] = ""
       try:
-        out, err, code = self.getServiceStatus(serviceName)
+        out = ""
+        err = ""
+        for serviceName in service:
+          sys_out, sys_err, code = self.getServiceStatus(serviceName)
+          if code == 0:
+            break
+          out += sys_out if len(out) == 0 else os.linesep + sys_out
+          err += sys_err if len(err) == 0 else os.linesep + sys_err
         if 0 != code:
           svcCheckResult['status'] = "Unhealthy"
           svcCheckResult['desc'] = out
@@ -117,9 +142,13 @@ class HostInfo(object):
 
 def get_ntp_service():
   if OSCheck.is_redhat_family():
-    return "ntpd"
-  elif OSCheck.is_suse_family() or OSCheck.is_ubuntu_family():
-    return "ntp"
+    return ("ntpd", "chronyd",)
+  elif OSCheck.is_suse_family():
+    return ("ntpd", "ntp",)
+  elif OSCheck.is_ubuntu_family():
+    return ("ntp", "chrony",)
+  else:
+    return ("ntpd",)
 
 
 @OsFamilyImpl(os_family=OsFamilyImpl.DEFAULT)
@@ -133,7 +162,7 @@ class HostInfoLinux(HostInfo):
     "webhcat", "hadoop-hdfs", "hadoop-yarn", "hadoop-mapreduce",
     "knox", "yarn", "hive-webhcat", "kafka", "slider", "storm-slider-client",
     "mahout", "spark", "pig", "phoenix", "ranger", "accumulo",
-    "ambari-metrics-collector", "ambari-metrics-monitor", "atlas"
+    "ambari-metrics-collector", "ambari-metrics-monitor", "atlas", "zeppelin"
   ]
 
 
@@ -146,15 +175,15 @@ class HostInfoLinux(HostInfo):
     "hive", "ambari-qa", "oozie", "hbase", "hcat", "mapred",
     "hdfs", "zookeeper", "flume", "sqoop", "sqoop2",
     "hue", "yarn", "tez", "storm", "falcon", "kafka", "knox", "ams",
-    "hadoop", "spark", "accumulo", "atlas", "mahout", "ranger", "kms"
+    "hadoop", "spark", "accumulo", "atlas", "mahout", "ranger", "kms", "zeppelin"
   ]
-  
+
   # Default set of directories that are checked for existence of files and folders
   DEFAULT_BASEDIRS = [
     "/etc", "/var/run", "/var/log", "/usr/lib", "/var/lib", "/var/tmp", "/tmp", "/var",
     "/hadoop", "/usr/hdp"
   ]
-  
+
   # Exact directories names which are checked for existance
   EXACT_DIRECTORIES = [
     "/kafka-logs"
@@ -162,6 +191,7 @@ class HostInfoLinux(HostInfo):
 
   DEFAULT_SERVICE_NAME = "ntpd"
   SERVICE_STATUS_CMD = "%s %s status" % (SERVICE_CMD, DEFAULT_SERVICE_NAME)
+  SERVICE_STATUS_CMD_LIST = shlex.split(SERVICE_STATUS_CMD)
 
   THP_FILE_REDHAT = "/sys/kernel/mm/redhat_transparent_hugepage/enabled"
   THP_FILE_UBUNTU = "/sys/kernel/mm/transparent_hugepage/enabled"
@@ -170,15 +200,17 @@ class HostInfoLinux(HostInfo):
     super(HostInfoLinux, self).__init__(config)
 
   def checkUsers(self, users, results):
-    f = open('/etc/passwd', 'r')
-    for userLine in f:
-      fields = userLine.split(":")
-      if fields[0] in users:
-        result = {}
-        result['name'] = fields[0]
-        result['homeDir'] = fields[5]
-        result['status'] = "Available"
-        results.append(result)
+    for user in users:
+      try:
+          pw = pwd.getpwnam(user)
+          result = {}
+          result['name'] = pw.pw_name
+          result['homeDir'] = pw.pw_dir
+          result['status'] = "Available"
+          results.append(result)
+      except Exception as e:
+          #User doesnot exist, so skip it
+          pass
 
   def checkFolders(self, basePaths, projectNames, exactDirectories, existingUsers, dirs):
     foldersToIgnore = []
@@ -193,13 +225,13 @@ class HostInfoLinux(HostInfo):
             obj['type'] = self.dirType(path)
             obj['name'] = path
             dirs.append(obj)
-            
+
       for path in exactDirectories:
         if os.path.exists(path):
           obj = {}
           obj['type'] = self.dirType(path)
           obj['name'] = path
-          dirs.append(obj)     
+          dirs.append(obj)
     except:
       logger.exception("Checking folders failed")
 
@@ -219,21 +251,20 @@ class HostInfoLinux(HostInfo):
         cmd = cmd.replace('\0', ' ')
         if not 'AmbariServer' in cmd:
           if 'java' in cmd:
-            dict = {}
-            dict['pid'] = int(pid)
-            dict['hadoop'] = False
+            metrics = {}
+            metrics['pid'] = int(pid)
+            metrics['hadoop'] = False
             for filter in self.PROC_FILTER:
               if filter in cmd:
-                dict['hadoop'] = True
-            dict['command'] = unicode(cmd.strip(), errors='ignore')
+                metrics['hadoop'] = True
+            metrics['command'] = unicode(cmd.strip(), errors='ignore')
             for line in open(os.path.join('/proc', pid, 'status')):
               if line.startswith('Uid:'):
                 uid = int(line.split()[1])
-                dict['user'] = pwd.getpwuid(uid).pw_name
-            list.append(dict)
+                metrics['user'] = pwd.getpwuid(uid).pw_name
+            list.append(metrics)
     except:
       logger.exception("Checking java processes failed")
-    pass
 
   def getTransparentHugePage(self):
     thp_regex = "\[(.+)\]"
@@ -276,63 +307,75 @@ class HostInfoLinux(HostInfo):
         result['target'] = realConf
         etcResults.append(result)
 
-  def register(self, dict, componentsMapped=True, commandsInProgress=True):
-    """ Return various details about the host
-    componentsMapped: indicates if any components are mapped to this host
-    commandsInProgress: indicates if any commands are in progress
-    """
+  def checkUnlimitedJce(self):
+    if not self.config or not self.config.has_option(AmbariConfig.AMBARI_PROPERTIES_CATEGORY, 'java.home'):
+      return None
+    try:
+      jcePolicyInfo = JcePolicyInfo(self.config.get(AmbariConfig.AMBARI_PROPERTIES_CATEGORY, 'java.home'))
+      return jcePolicyInfo.is_unlimited_key_jce_policy()
+    except:
+      logger.exception('Unable to get information about JCE')
+      return None
 
-    dict['hostHealth'] = {}
+  def register(self, metrics, runExpensiveChecks=False, checkJavaProcs=False):
+    """ Return various details about the host"""
 
-    java = []
-    self.javaProcs(java)
-    dict['hostHealth']['activeJavaProcs'] = java
+    metrics['hostHealth'] = {}
+
+    if checkJavaProcs:
+      java = []
+      self.javaProcs(java)
+      metrics['hostHealth']['activeJavaProcs'] = java
 
     liveSvcs = []
     self.checkLiveServices(self.DEFAULT_LIVE_SERVICES, liveSvcs)
-    dict['hostHealth']['liveServices'] = liveSvcs
+    metrics['hostHealth']['liveServices'] = liveSvcs
 
-    dict['umask'] = str(self.getUMask())
+    metrics['umask'] = str(self.getUMask())
 
-    dict['transparentHugePage'] = self.getTransparentHugePage()
-    dict['firewallRunning'] = self.checkFirewall()
-    dict['firewallName'] = self.getFirewallName()
-    dict['reverseLookup'] = self.checkReverseLookup()
+    metrics['transparentHugePage'] = self.getTransparentHugePage()
+    metrics['firewallRunning'] = self.checkFirewall()
+    metrics['firewallName'] = self.getFirewallName()
+    metrics['reverseLookup'] = self.checkReverseLookup()
+    metrics['hasUnlimitedJcePolicy'] = self.checkUnlimitedJce()
     # If commands are in progress or components are already mapped to this host
     # Then do not perform certain expensive host checks
-    if componentsMapped or commandsInProgress:
-      dict['alternatives'] = []
-      dict['stackFoldersAndFiles'] = []
-      dict['existingUsers'] = []
+    if not runExpensiveChecks:
+      metrics['alternatives'] = []
+      metrics['stackFoldersAndFiles'] = []
+      metrics['existingUsers'] = []
 
     else:
       etcs = []
       self.etcAlternativesConf(self.DEFAULT_PROJECT_NAMES, etcs)
-      dict['alternatives'] = etcs
+      metrics['alternatives'] = etcs
 
       existingUsers = []
       self.checkUsers(self.DEFAULT_USERS, existingUsers)
-      dict['existingUsers'] = existingUsers
+      metrics['existingUsers'] = existingUsers
 
       dirs = []
       self.checkFolders(self.DEFAULT_BASEDIRS, self.DEFAULT_PROJECT_NAMES, self.EXACT_DIRECTORIES, existingUsers, dirs)
-      dict['stackFoldersAndFiles'] = dirs
+      metrics['stackFoldersAndFiles'] = dirs
 
-      self.reportFileHandler.writeHostCheckFile(dict)
+      self.reportFileHandler.writeHostCheckFile(metrics)
       pass
 
     # The time stamp must be recorded at the end
-    dict['hostHealth']['agentTimeStampAtReporting'] = int(time.time() * 1000)
+    metrics['hostHealth']['agentTimeStampAtReporting'] = int(time.time() * 1000)
 
     pass
 
-  def getServiceStatus(self, serivce_name):
-    service_check_live = shlex.split(self.SERVICE_STATUS_CMD)
-    service_check_live[1] = serivce_name
-    osStat = subprocess.Popen(service_check_live, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
-    out, err = osStat.communicate()
-    return out, err, osStat.returncode
+  def getServiceStatus(self, service_name):
+    service_check_live = list(self.SERVICE_STATUS_CMD_LIST)
+    service_check_live[1] = service_name
+    try:
+      code, out, err = shell.call(service_check_live, stdout = subprocess32.PIPE, stderr = subprocess32.PIPE, timeout = 5, quiet = True)
+      return out, err, code
+    except Exception as ex:
+      logger.warn("Checking service {0} status failed".format(service_name))
+      return '', str(ex), 1
+
 
 
 @OsFamilyImpl(os_family=OSConst.WINSRV_FAMILY)
@@ -341,14 +384,14 @@ class HostInfoWindows(HostInfo):
   GET_USERS_CMD = '$accounts=(Get-WmiObject -Class Win32_UserAccount -Namespace "root\cimv2" -Filter "name = \'{0}\' and Disabled=\'False\'" -ErrorAction Stop); foreach ($acc in $accounts) {{Write-Host ($acc.Domain + "\\" + $acc.Name)}}'
   GET_JAVA_PROC_CMD = 'foreach ($process in (gwmi Win32_Process -Filter "name = \'java.exe\'")){{echo $process.ProcessId;echo $process.CommandLine; echo $process.GetOwner().User}}'
   DEFAULT_LIVE_SERVICES = [
-    "W32Time"
+    ("W32Time",)
   ]
   DEFAULT_USERS = "hadoop"
 
   def checkUsers(self, user_mask, results):
     get_users_cmd = ["powershell", '-noProfile', '-NonInteractive', '-nologo', "-Command", self.GET_USERS_CMD.format(user_mask)]
     try:
-      osStat = subprocess.Popen(get_users_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      osStat = subprocess32.Popen(get_users_cmd, stdout=subprocess32.PIPE, stderr=subprocess32.PIPE)
       out, err = osStat.communicate()
     except:
       raise Exception("Failed to get users.")
@@ -394,43 +437,39 @@ class HostInfoWindows(HostInfo):
     code, out, err = run_powershell_script(self.SERVICE_STATUS_CMD.format(serivce_name))
     return out, err, code
 
-  def register(self, dict, componentsMapped=True, commandsInProgress=True):
+  def register(self, metrics, runExpensiveChecks=False):
     """ Return various details about the host
-    componentsMapped: indicates if any components are mapped to this host
-    commandsInProgress: indicates if any commands are in progress
     """
-    dict['hostHealth'] = {}
+    metrics['hostHealth'] = {}
 
     java = []
     self.javaProcs(java)
-    dict['hostHealth']['activeJavaProcs'] = java
+    metrics['hostHealth']['activeJavaProcs'] = java
 
     liveSvcs = []
     self.checkLiveServices(self.DEFAULT_LIVE_SERVICES, liveSvcs)
-    dict['hostHealth']['liveServices'] = liveSvcs
+    metrics['hostHealth']['liveServices'] = liveSvcs
 
-    dict['umask'] = str(self.getUMask())
+    metrics['umask'] = str(self.getUMask())
 
-    dict['firewallRunning'] = self.checkFirewall()
-    dict['firewallName'] = self.getFirewallName()
-    dict['reverseLookup'] = self.checkReverseLookup()
-    # If commands are in progress or components are already mapped to this host
-    # Then do not perform certain expensive host checks
-    if componentsMapped or commandsInProgress:
-      dict['alternatives'] = []
-      dict['stackFoldersAndFiles'] = []
-      dict['existingUsers'] = []
+    metrics['firewallRunning'] = self.checkFirewall()
+    metrics['firewallName'] = self.getFirewallName()
+    metrics['reverseLookup'] = self.checkReverseLookup()
+
+    if not runExpensiveChecks:
+      metrics['alternatives'] = []
+      metrics['stackFoldersAndFiles'] = []
+      metrics['existingUsers'] = []
     else:
       existingUsers = []
       self.checkUsers(self.DEFAULT_USERS, existingUsers)
-      dict['existingUsers'] = existingUsers
+      metrics['existingUsers'] = existingUsers
       # TODO check HDP stack and folders here
-      self.reportFileHandler.writeHostCheckFile(dict)
+      self.reportFileHandler.writeHostCheckFile(metrics)
       pass
 
     # The time stamp must be recorded at the end
-    dict['hostHealth']['agentTimeStampAtReporting'] = int(time.time() * 1000)
-
+    metrics['hostHealth']['agentTimeStampAtReporting'] = int(time.time() * 1000)
 
 
 def main(argv=None):

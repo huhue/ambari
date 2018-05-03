@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,13 +18,13 @@
 
 package org.apache.ambari.server.stack;
 
-import org.apache.ambari.server.AmbariException;
-
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+
+import org.apache.ambari.server.AmbariException;
 
 /**
  * Abstract base service definition module.
@@ -60,20 +60,20 @@ public abstract class BaseModule<T, I> implements StackDefinitionModule<T, I> {
    * @return collection of the merged modules
    */
   protected <T extends StackDefinitionModule<T, ?>> Collection<T> mergeChildModules(
-      Map<String, StackModule> allStacks, Map<String, ServiceModule> commonServices, Map<String, T> modules, Map<String, T> parentModules)
+      Map<String, StackModule> allStacks, Map<String, ServiceModule> commonServices, Map<String, ExtensionModule> extensions, Map<String, T> modules, Map<String, T> parentModules)
         throws AmbariException {
-    Set<String> addedModules = new HashSet<String>();
-    Collection<T> mergedModules = new HashSet<T>();
+    Set<String> addedModules = new HashSet<>();
+    Collection<T> mergedModules = new HashSet<>();
 
     for (T module : modules.values()) {
       String id = module.getId();
       addedModules.add(id);
       if (!module.isDeleted()) {
         if (parentModules.containsKey(id)) {
-          module.resolve(parentModules.get(id), allStacks, commonServices);
+          module.resolve(parentModules.get(id), allStacks, commonServices, extensions);
         }
-        mergedModules.add(module);
       }
+      mergedModules.add(module);
     }
 
     // add non-overlapping parent modules

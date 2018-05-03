@@ -20,40 +20,31 @@ limitations under the License.
 
 import sys
 from resource_management.libraries.script.script import Script
-from resource_management.libraries.functions import conf_select, stack_select
+from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions.constants import StackFeature
 from resource_management.core.exceptions import ClientComponentHasNoStatus
 
 from metadata import metadata
 
-# todo: support rolling upgrade
+
 class AtlasClient(Script):
 
-  def get_component_name(self):
-    return "atlas-client"
+  def pre_upgrade_restart(self, env, upgrade_type=None):
+    import params
+    env.set_params(params)
 
-  # ToDo: currently <stack-selector-tool> doesn't contain atlas-client, uncomment this block when
-  # ToDo: atlas-client will be available
-  # def pre_upgrade_restart(self, env, upgrade_type=None):
-  #   import params
-  #   env.set_params(params)
-  #
-  # TODO: Add ATLAS_CONFIG_VERSIONING stack feature and uncomment this code when config versioning for Atlas is supported
-  #   if params.version and check_stack_feature(StackFeature.ATLAS_CONFIG_VERSIONING, params.version):
-  #     conf_select.select(params.stack_name, "atlas", params.version)
-  # TODO: Add ATLAS_CLIENT_ROLLING_UPGRADE stack feature and uncomment this code when rolling upgrade for Atlas client is supported
-  #   if params.version and check_stack_feature(StackFeature.ATLAS_CLIENT_ROLLING_UPGRADE, params.version):
-  #     stack_select.select("atlas-client", params.version)
+    if check_stack_feature(StackFeature.ATLAS_UPGRADE_SUPPORT, params.version_for_stack_feature_checks):
+      stack_select.select_packages(params.version)
 
   def install(self, env):
     self.install_packages(env)
     self.configure(env)
 
-  def configure(self, env):
+  def configure(self, env, upgrade_type=None, config_dir=None):
     import params
     env.set_params(params)
-    metadata()
+    metadata('client')
 
   def status(self, env):
     raise ClientComponentHasNoStatus()

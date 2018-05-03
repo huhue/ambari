@@ -66,7 +66,9 @@ class UserProvider(Provider):
         groups = self.resource.groups
         if self.user and self.user_groups:
           groups += self.user_groups
-        option_value = ",".join(groups)
+        option_value = ",".join(groups) 
+      elif attributes[1] == "-u" and self.user and self.user.pw_uid == getattr(self.resource, option_name):
+        option_value = None
       else:
         option_value = getattr(self.resource, option_name)
         
@@ -78,7 +80,7 @@ class UserProvider(Provider):
       return
 
     command.append(self.resource.username)
-
+    
     shell.checked_call(command, sudo=True)
 
   def action_remove(self):
@@ -98,19 +100,25 @@ class UserProvider(Provider):
   def user_groups(self):
     if self.resource.fetch_nonlocal_groups:
       return [g.gr_name for g in grp.getgrall() if self.resource.username in g.gr_mem]
-    else:
-      with open('/etc/group', 'rb') as fp:
-        content = fp.read()
-      
-      groups = []
-      for line in content.splitlines():
-        entries = line.split(':')
-        group_name = entries[0]
+
+    with open('/etc/group', 'rb') as fp:
+      content = fp.read()
+
+    # Each line should have 4 parts, even with no members (trailing colon)
+    # group-name:group-password:group-id:
+    # group-name:group-password:group-id:group-members
+    groups = []
+    for line in content.splitlines():
+      entries = line.split(':')
+
+      # attempt to parse the users in the group only if there are 4 parts
+      if(len(entries) >= 4):
+        group_name = entries[0].strip()
         group_users = entries[3].split(',')
         if self.user in group_users:
           groups.append(group_name)
-          
-      return groups
+
+    return groups
 
 class GroupProvider(Provider):
   options = dict(

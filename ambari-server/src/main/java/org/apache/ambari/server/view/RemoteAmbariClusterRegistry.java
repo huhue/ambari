@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,19 +18,23 @@
 
 package org.apache.ambari.server.view;
 
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import javax.inject.Inject;
+import javax.inject.Singleton;
+
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.ClusterNotFoundException;
 import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.orm.dao.RemoteAmbariClusterDAO;
 import org.apache.ambari.server.orm.entities.RemoteAmbariClusterEntity;
 import org.apache.ambari.server.orm.entities.RemoteAmbariClusterServiceEntity;
 import org.apache.ambari.view.AmbariHttpException;
-
-import javax.inject.Inject;
-import javax.inject.Singleton;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry for Remote Ambari Cluster
@@ -38,7 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Singleton
 public class RemoteAmbariClusterRegistry {
 
-  private ConcurrentHashMap<String,RemoteAmbariCluster> clusterMap = new ConcurrentHashMap<String,RemoteAmbariCluster>();
+  private ConcurrentHashMap<Long,RemoteAmbariCluster> clusterMap = new ConcurrentHashMap<>();
 
   @Inject
   private RemoteAmbariClusterDAO remoteAmbariClusterDAO;
@@ -46,20 +50,23 @@ public class RemoteAmbariClusterRegistry {
   @Inject
   private Configuration configuration;
 
-  public RemoteAmbariCluster get(String clusterName){
-    RemoteAmbariCluster remoteAmbariCluster = clusterMap.get(clusterName);
-    if(remoteAmbariCluster == null){
-      RemoteAmbariCluster cluster = getCluster(clusterName);
-      RemoteAmbariCluster oldCluster = clusterMap.putIfAbsent(clusterName, cluster);
-      if(oldCluster == null) remoteAmbariCluster = cluster;
+  public RemoteAmbariCluster get(Long clusterId) throws MalformedURLException, ClusterNotFoundException {
+    RemoteAmbariCluster remoteAmbariCluster = clusterMap.get(clusterId);
+    if (remoteAmbariCluster == null) {
+      RemoteAmbariCluster cluster = getCluster(clusterId);
+      RemoteAmbariCluster oldCluster = clusterMap.putIfAbsent(clusterId, cluster);
+      if (oldCluster == null) remoteAmbariCluster = cluster;
       else remoteAmbariCluster = oldCluster;
     }
     return remoteAmbariCluster;
   }
 
 
-  private RemoteAmbariCluster getCluster(String clusterName) {
-    RemoteAmbariClusterEntity remoteAmbariClusterEntity = remoteAmbariClusterDAO.findByName(clusterName);
+  private RemoteAmbariCluster getCluster(Long clusterId) throws MalformedURLException, ClusterNotFoundException {
+    RemoteAmbariClusterEntity remoteAmbariClusterEntity = remoteAmbariClusterDAO.findById(clusterId);
+    if (remoteAmbariClusterEntity == null) {
+      throw new ClusterNotFoundException(clusterId);
+    }
     RemoteAmbariCluster remoteAmbariCluster = new RemoteAmbariCluster(remoteAmbariClusterEntity, configuration);
     return remoteAmbariCluster;
   }
@@ -69,9 +76,9 @@ public class RemoteAmbariClusterRegistry {
    *
    * @param entity
    */
-  public void update(RemoteAmbariClusterEntity entity){
+  public void update(RemoteAmbariClusterEntity entity) {
     remoteAmbariClusterDAO.update(entity);
-    clusterMap.remove(entity.getName());
+    clusterMap.remove(entity.getId());
   }
 
   /**
@@ -81,7 +88,7 @@ public class RemoteAmbariClusterRegistry {
    */
   public void delete(RemoteAmbariClusterEntity entity) {
     remoteAmbariClusterDAO.delete(entity);
-    clusterMap.remove(entity.getName());
+    clusterMap.remove(entity.getId());
   }
 
   /**
@@ -93,9 +100,15 @@ public class RemoteAmbariClusterRegistry {
    * @throws AmbariHttpException
    */
   public void saveOrUpdate(RemoteAmbariClusterEntity entity, boolean update) throws IOException, AmbariHttpException {
-    RemoteAmbariCluster cluster = new RemoteAmbariCluster(entity,configuration);
+
+    RemoteAmbariCluster cluster = new RemoteAmbariCluster(entity, configuration);
     Set<String> services = cluster.getServices();
-    Collection<RemoteAmbariClusterServiceEntity> serviceEntities = new ArrayList<RemoteAmbariClusterServiceEntity>();
+
+    if (!cluster.isAmbariOrClusterAdmin()) {
+      throw new AmbariException("User must be Ambari or Cluster Adminstrator.");
+    }
+
+    Collection<RemoteAmbariClusterServiceEntity> serviceEntities = new ArrayList<>();
 
     for (String service : services) {
       RemoteAmbariClusterServiceEntity serviceEntity = new RemoteAmbariClusterServiceEntity();
@@ -106,9 +119,9 @@ public class RemoteAmbariClusterRegistry {
 
     entity.setServices(serviceEntities);
 
-    if(update){
+    if (update) {
       update(entity);
-    }else{
+    } else {
       remoteAmbariClusterDAO.save(entity);
     }
   }

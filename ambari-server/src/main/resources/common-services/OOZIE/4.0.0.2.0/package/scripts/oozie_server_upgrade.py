@@ -19,9 +19,7 @@ limitations under the License.
 import glob
 import os
 import shutil
-import tempfile
 
-from resource_management.core import shell
 from resource_management.core.logger import Logger
 from resource_management.core.exceptions import Fail
 from resource_management.core.resources.system import Execute
@@ -30,7 +28,7 @@ from resource_management.core.resources.system import File
 from resource_management.libraries.functions import Direction
 from resource_management.libraries.functions import format
 from resource_management.libraries.functions import stack_select
-from resource_management.libraries.functions import tar_archive
+from resource_management.libraries.functions import lzo_utils
 from resource_management.libraries.functions.oozie_prepare_war import prepare_war
 from resource_management.libraries.script.script import Script
 from resource_management.libraries.functions import StackFeature
@@ -44,60 +42,7 @@ BACKUP_CONF_ARCHIVE = "oozie-conf-backup.tar"
 class OozieUpgrade(Script):
 
   @staticmethod
-  def backup_configuration():
-    """
-    Backs up the oozie configuration as part of the upgrade process.
-    :return:
-    """
-    Logger.info('Backing up Oozie configuration directory before upgrade...')
-    directoryMappings = OozieUpgrade._get_directory_mappings()
-
-    absolute_backup_dir = os.path.join(tempfile.gettempdir(), BACKUP_TEMP_DIR)
-    if not os.path.isdir(absolute_backup_dir):
-      os.makedirs(absolute_backup_dir)
-
-    for directory in directoryMappings:
-      if not os.path.isdir(directory):
-        raise Fail("Unable to backup missing directory {0}".format(directory))
-
-      archive = os.path.join(absolute_backup_dir, directoryMappings[directory])
-      Logger.info('Compressing {0} to {1}'.format(directory, archive))
-
-      if os.path.exists(archive):
-        os.remove(archive)
-
-      # backup the directory, following symlinks instead of including them
-      tar_archive.archive_directory_dereference(archive, directory)
-
-
-  @staticmethod
-  def restore_configuration():
-    """
-    Restores the configuration backups to their proper locations after an
-    upgrade has completed.
-    :return:
-    """
-    Logger.info('Restoring Oozie configuration directory after upgrade...')
-    directoryMappings = OozieUpgrade._get_directory_mappings()
-
-    for directory in directoryMappings:
-      archive = os.path.join(tempfile.gettempdir(), BACKUP_TEMP_DIR,
-        directoryMappings[directory])
-
-      if not os.path.isfile(archive):
-        raise Fail("Unable to restore missing backup archive {0}".format(archive))
-
-      Logger.info('Extracting {0} to {1}'.format(archive, directory))
-
-      tar_archive.untar_archive(archive, directory)
-
-    # cleanup
-    Directory(os.path.join(tempfile.gettempdir(), BACKUP_TEMP_DIR),
-              action="delete",
-    )
-
-  @staticmethod
-  def prepare_libext_directory():
+  def prepare_libext_directory(upgrade_type=None):
     """
     Performs the following actions on libext:
       - creates <stack-root>/current/oozie/libext and recursively
@@ -108,7 +53,8 @@ class OozieUpgrade(Script):
     import params
 
     # some stack versions don't need the lzo compression libraries
-    target_version_needs_compression_libraries = params.version and check_stack_feature(StackFeature.LZO, params.version)
+    target_version_needs_compression_libraries = check_stack_feature(StackFeature.LZO,
+      params.version_for_stack_feature_checks)
 
     # ensure the directory exists
     Directory(params.oozie_libext_dir, mode = 0777)
@@ -122,6 +68,9 @@ class OozieUpgrade(Script):
     # When a version is Installed, it is responsible for downloading the hadoop-lzo packages
     # if lzo is enabled.
     if params.lzo_enabled and (params.upgrade_direction == Direction.UPGRADE or target_version_needs_compression_libraries):
+      # ensure that the LZO files are installed for this version of Oozie
+      lzo_utils.install_lzo_if_needed()
+
       hadoop_lzo_pattern = 'hadoop-lzo*.jar'
       hadoop_client_new_lib_dir = format("{stack_root}/{version}/hadoop/lib")
 
@@ -142,21 +91,40 @@ class OozieUpgrade(Script):
         raise Fail("There are no files at {0} matching {1}".format(
           hadoop_client_new_lib_dir, hadoop_lzo_pattern))
 
-    # copy ext ZIP to libext dir
-    oozie_ext_zip_file = params.ext_js_path
+    # ExtJS is used to build a working Oozie Web UI - without it, Oozie will startup and work
+    # but will not have a functioning user interface - Some stacks no longer ship ExtJS,
+    # so it's optional now. On an upgrade, we should make sure that if it's not found, that's OK
+    # However, if it is found on the system (from an earlier install) then it should be used
+    extjs_included = check_stack_feature(StackFeature.OOZIE_EXTJS_INCLUDED, params.version_for_stack_feature_checks)
 
     # something like <stack-root>/current/oozie-server/libext/ext-2.2.zip
     oozie_ext_zip_target_path = os.path.join(params.oozie_libext_dir, params.ext_js_file)
 
-    if not os.path.isfile(oozie_ext_zip_file):
-      raise Fail("Unable to copy {0} because it does not exist".format(oozie_ext_zip_file))
+    # Copy ext ZIP to libext dir
+    # Default to /usr/share/$TARGETSTACK-oozie/ext-2.2.zip as the first path
+    source_ext_zip_paths = oozie.get_oozie_ext_zip_source_paths(upgrade_type, params)
 
-    Logger.info("Copying {0} to {1}".format(oozie_ext_zip_file, params.oozie_libext_dir))
-    Execute(("cp", oozie_ext_zip_file, params.oozie_libext_dir), sudo=True)
-    Execute(("chown", format("{oozie_user}:{user_group}"), oozie_ext_zip_target_path), sudo=True)
-    File(oozie_ext_zip_target_path,
-         mode=0644
-    )
+    found_at_least_one_oozie_ext_file = False
+
+    # Copy the first oozie ext-2.2.zip file that is found.
+    # This uses a list to handle the cases when migrating from some versions of BigInsights to HDP.
+    if source_ext_zip_paths is not None:
+      for source_ext_zip_path in source_ext_zip_paths:
+        if os.path.isfile(source_ext_zip_path):
+          found_at_least_one_oozie_ext_file = True
+          Logger.info("Copying {0} to {1}".format(source_ext_zip_path, params.oozie_libext_dir))
+          Execute(("cp", source_ext_zip_path, params.oozie_libext_dir), sudo=True)
+          Execute(("chown", format("{oozie_user}:{user_group}"), oozie_ext_zip_target_path), sudo=True)
+          File(oozie_ext_zip_target_path, mode=0644)
+          break
+
+    # ExtJS was expected to the be on the system, but was not found
+    if extjs_included and not found_at_least_one_oozie_ext_file:
+      raise Fail("Unable to find any Oozie source extension files from the following paths {0}".format(source_ext_zip_paths))
+
+    # ExtJS is not expected, so it's OK - just log a warning
+    if not found_at_least_one_oozie_ext_file:
+      Logger.warning("Unable to find ExtJS in any of the following paths. The Oozie UI will not be available. Source Paths: {0}".format(source_ext_zip_paths))
 
     # Redownload jdbc driver to a new current location
     oozie.download_database_library_if_needed()
@@ -270,8 +238,8 @@ class OozieUpgrade(Script):
     params.HdfsResource(format("{oozie_hdfs_user_dir}/share"),
       action = "create_on_execute",
       type = "directory",
-      owner = "oozie",
-      group = "hadoop",
+      owner = params.oozie_user,
+      group = params.user_group,
       mode = 0755,
       recursive_chmod = True)
 
@@ -288,20 +256,6 @@ class OozieUpgrade(Script):
       params.stack_root, stack_version, params.fs_root)
 
     Execute(sharelib_command, user=params.oozie_user, logoutput=True)
-
-
-  @staticmethod
-  def _get_directory_mappings():
-    """
-    Gets a dictionary of directory to archive name that represents the
-    directories that need to be backed up and their output tarball archive targets
-    :return:  the dictionary of directory to tarball mappings
-    """
-    import params
-
-    # the trailing "/" is important here so as to not include the "conf" folder itself
-    return { params.conf_dir + "/" : BACKUP_CONF_ARCHIVE }
-
 
 if __name__ == "__main__":
   OozieUpgrade().execute()

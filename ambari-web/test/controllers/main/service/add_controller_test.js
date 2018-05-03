@@ -167,25 +167,7 @@ describe('App.AddServiceController', function() {
   describe('#loadHostsSuccessCallback', function () {
 
     it('should load hosts to local db and model', function () {
-      var diskInfo = [
-          {
-            available: '600000',
-            used: '400000',
-            percent: '40%',
-            size: '10000000',
-            type: 'ext4',
-            mountpoint: '/'
-          },
-          {
-            available: '500000',
-            used: '300000',
-            percent: '50%',
-            size: '6000000',
-            type: 'ext4',
-            mountpoint: '/'
-          }
-        ],
-        hostComponents = [
+      var hostComponents = [
           [
             {
               HostRoles: {
@@ -219,31 +201,13 @@ describe('App.AddServiceController', function() {
           items: [
             {
               Hosts: {
-                cpu_count: 1,
-                disk_info: [
-                  diskInfo[0]
-                ],
                 host_name: 'h0',
-                ip: '10.1.1.0',
-                os_arch: 'x86_64',
-                os_type: 'centos6',
-                total_mem: 4194304,
-                maintenance_state: 'ON'
               },
               host_components: hostComponents[0]
             },
             {
               Hosts: {
-                cpu_count: 2,
-                disk_info: [
-                  diskInfo[1]
-                ],
-                host_name: 'h1',
-                ip: '10.1.1.1',
-                os_arch: 'x86',
-                os_type: 'centos5',
-                total_mem: 3145728,
-                maintenance_state: 'OFF'
+                host_name: 'h1'
               },
               host_components: hostComponents[1]
             }
@@ -252,29 +216,15 @@ describe('App.AddServiceController', function() {
         expected = {
           h0: {
             name: 'h0',
-            cpu: 1,
-            memory: 4194304,
-            disk_info: [diskInfo[0]],
-            osType: 'centos6',
-            osArch: 'x86_64',
-            ip: '10.1.1.0',
             bootStatus: 'REGISTERED',
             isInstalled: true,
-            maintenance_state: 'ON',
             hostComponents: hostComponents[0],
             id: 0
           },
           h1: {
             name: 'h1',
-            cpu: 2,
-            memory: 3145728,
-            disk_info: [diskInfo[1]],
-            osType: 'centos5',
-            osArch: 'x86',
-            ip: '10.1.1.1',
             bootStatus: 'REGISTERED',
             isInstalled: true,
-            maintenance_state: 'OFF',
             hostComponents: hostComponents[1],
             id: 1
           }
@@ -316,6 +266,8 @@ describe('App.AddServiceController', function() {
       sinon.stub(this.controller, 'setDBProperty', function(key, value) {
         mock.db = value;
       });
+      sinon.stub(this.controller, 'hasDependentSlaveComponent');
+      sinon.stub(App.store, 'fastCommit', Em.K);
       this.mockStackService = sinon.stub(App.StackService, 'find');
       this.mockService = sinon.stub(App.Service, 'find');
     });
@@ -323,8 +275,10 @@ describe('App.AddServiceController', function() {
     afterEach(function() {
       this.mockGetDBProperty.restore();
       this.controller.setDBProperty.restore();
+      this.controller.hasDependentSlaveComponent.restore();
       this.mockStackService.restore();
       this.mockService.restore();
+      App.store.fastCommit.restore();
     });
 
     var tests = [
@@ -411,60 +365,6 @@ describe('App.AddServiceController', function() {
     }, this);
   });
 
-  describe('#checkSecurityStatus', function () {
-
-    var cases = [
-      {
-        securityEnabled: true,
-        skipConfigureIdentitiesStep: false,
-        isStep5Disabled: false,
-        title: 'security enabled'
-      },
-      {
-        securityEnabled: false,
-        skipConfigureIdentitiesStep: true,
-        isStep5Disabled: true,
-        title: 'security disabled'
-      }
-    ];
-
-    beforeEach(function () {
-      addServiceController.setProperties({
-        skipConfigureIdentitiesStep: false,
-        isStepDisabled: [
-          Em.Object.create({
-            step: 5,
-            value: false
-          })
-        ]
-      });
-    });
-
-    afterEach(function () {
-      App.get.restore();
-    });
-
-    cases.forEach(function (item) {
-      describe(item.title, function () {
-
-        beforeEach(function () {
-          sinon.stub(App, 'get').withArgs('isKerberosEnabled').returns(item.securityEnabled);
-          addServiceController.checkSecurityStatus();
-        });
-
-        it('skipConfigureIdentitiesStep is ' + item.skipConfigureIdentitiesStep, function () {
-          expect(addServiceController.get('skipConfigureIdentitiesStep')).to.equal(item.skipConfigureIdentitiesStep);
-        });
-
-        it('step 5 is ' + (item.isStep5Disabled ? 'disabved' : 'enabled'), function () {
-          expect(addServiceController.get('isStepDisabled').findProperty('step', 5).get('value')).to.equal(item.isStep5Disabled);
-        });
-
-      });
-    });
-
-  });
-
   describe('#loadServiceConfigGroups', function () {
 
     var dbMock,
@@ -513,6 +413,149 @@ describe('App.AddServiceController', function() {
       addServiceController.clearStorageData();
       expect(addServiceController.get('areInstalledConfigGroupsLoaded')).to.be.false;
     });
+  });
+
+  describe('#loadClients', function () {
+
+    var cases = [
+      {
+        clients: null,
+        contentClients: [],
+        saveClientsCallCount: 1,
+        title: 'no clients info in local db'
+      },
+      {
+        clients: [{}],
+        contentClients: [{}],
+        saveClientsCallCount: 0,
+        title: 'clients info saved in local db'
+      }
+    ];
+
+    cases.forEach(function (item) {
+
+      describe(item.title, function () {
+
+        beforeEach(function () {
+          sinon.stub(addServiceController, 'getDBProperty').withArgs('clientInfo').returns(item.clients);
+          sinon.stub(addServiceController, 'saveClients', Em.K);
+          addServiceController.set('content.clients', []);
+          addServiceController.loadClients();
+        });
+
+        afterEach(function () {
+          addServiceController.getDBProperty.restore();
+          addServiceController.saveClients.restore();
+        });
+
+        it('content.clients', function () {
+          expect(addServiceController.get('content.clients', [])).to.eql(item.contentClients);
+        });
+
+        it('saveClients call', function () {
+          expect(addServiceController.saveClients.callCount).to.equal(item.saveClientsCallCount);
+        });
+
+      });
+
+    });
+
+  });
+
+  describe('#getServicesBySelectedSlaves', function () {
+
+    beforeEach(function () {
+      sinon.stub(App.StackServiceComponent, 'find').returns([
+        Em.Object.create({
+          componentName: 'c1',
+          serviceName: 's1'
+        }),
+        Em.Object.create({
+          componentName: 'c2',
+          serviceName: 's2'
+        }),
+        Em.Object.create({
+          componentName: 'c3',
+          serviceName: 's3'
+        }),
+        Em.Object.create({
+          componentName: 'c4',
+          serviceName: 's1'
+        })
+      ]);
+    });
+
+    [
+      {
+        title: 'should return empty array',
+        sch: [],
+        expect: []
+      },
+      {
+        title: 'should return empty array if component is absent in StackServiceComponent model',
+        sch: [
+          {
+            componentName: 'c5',
+            hosts: [
+              {
+                isInstalled: false
+              },
+              {
+                isInstalled: true
+              }
+            ]
+          },
+        ],
+        expect: []
+      },
+      {
+        title: 'should return services for not installed slaves',
+        sch: [
+          {
+            componentName: 'c1',
+            hosts: [
+              {
+                isInstalled: false
+              },
+              {
+                isInstalled: true
+              }
+            ]
+          },
+          {
+            componentName: 'c2',
+            hosts: [
+              {
+                isInstalled: false
+              },
+              {
+                isInstalled: true
+              }
+            ]
+          },
+          {
+            componentName: 'c4',
+            hosts: [
+              {
+                isInstalled: false
+              },
+              {
+                isInstalled: true
+              }
+            ]
+          }
+        ],
+        expect: ['s1', 's2']
+      }
+    ].forEach(function (test) {
+          describe(test.title, function () {
+            it(function () {
+              addServiceController.set('content.slaveComponentHosts', test.sch);
+              expect(addServiceController.getServicesBySelectedSlaves()).to.eql(test.expect);
+            });
+          })
+        });
+
   });
 
 });

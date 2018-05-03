@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class Role {
 
-  private static final Map<String, Role> roles = new ConcurrentHashMap<String, Role>();
+  private static final Map<String, Role> roles = new ConcurrentHashMap<>();
 
   /**
    * @param name the role name
@@ -120,7 +120,7 @@ public class Role {
   public static final Role NIMBUS = valueOf("NIMBUS");
   public static final Role RANGER_KMS_SERVER = valueOf("RANGER_KMS_SERVER");
   public static final Role LOGSEARCH_SERVER = valueOf("LOGSEARCH_SERVER");
-  public static final Role LOGSEARCH_SOLR = valueOf("LOGSEARCH_SOLR");
+  public static final Role INFRA_SOLR = valueOf("INFRA_SOLR");
   public static final Role LOGSEARCH_LOGFEEDER = valueOf("LOGSEARCH_LOGFEEDER");
   public static final Role INSTALL_PACKAGES = valueOf("install_packages");
   public static final Role UPDATE_REPO = valueOf("update_repo");

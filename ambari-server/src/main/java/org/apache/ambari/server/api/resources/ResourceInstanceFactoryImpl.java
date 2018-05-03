@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,15 +19,20 @@
 
 package org.apache.ambari.server.api.resources;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
 import org.apache.ambari.server.api.query.QueryImpl;
+import org.apache.ambari.server.api.services.RootServiceComponentConfigurationService;
+import org.apache.ambari.server.controller.internal.ClusterKerberosDescriptorResourceProvider;
 import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.utilities.ClusterControllerHelper;
 import org.apache.ambari.server.view.ViewRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Factory for creating resource instances.
@@ -36,18 +41,33 @@ public class ResourceInstanceFactoryImpl implements ResourceInstanceFactory {
 
 
   /**
+   * The logger.
+   */
+  private final static Logger LOG =
+          LoggerFactory.getLogger(ResourceInstanceFactoryImpl.class);
+
+  /**
    * Map of external resource definitions (added through views).
    */
   private final static Map<Resource.Type, ResourceDefinition> resourceDefinitions =
-      new HashMap<Resource.Type, ResourceDefinition>();
+    new HashMap<>();
 
 
   @Override
   public ResourceInstance createResource(Resource.Type type, Map<Resource.Type, String> mapIds) {
 
-    /**
-     * The resource definition for the specified type.
-     */
+    // this code changes hot name to lower case
+    try {
+      if (mapIds.containsKey(Resource.Type.Host)) {
+        String hostName = mapIds.get(Resource.Type.Host);
+        if (hostName != null) {
+          mapIds.put(Resource.Type.Host, hostName.toLowerCase());
+        }
+      }
+    } catch(Exception e) {
+      LOG.error("Lowercase host name value in resource failed with error:" + e);
+    }
+
     ResourceDefinition resourceDefinition = getResourceDefinition(type, mapIds);
 
     return new QueryImpl(mapIds, resourceDefinition, ClusterControllerHelper.getClusterController());
@@ -122,6 +142,10 @@ public class ResourceInstanceFactoryImpl implements ResourceInstanceFactory {
         resourceDefinition = new UserResourceDefinition();
         break;
 
+      case UserAuthenticationSource:
+        resourceDefinition = new SimpleResourceDefinition(Resource.Type.UserAuthenticationSource, "source", "sources");
+        break;
+
       case Group:
         resourceDefinition = new GroupResourceDefinition();
         break;
@@ -166,6 +190,18 @@ public class ResourceInstanceFactoryImpl implements ResourceInstanceFactory {
         resourceDefinition = new StackConfigurationDependencyResourceDefinition();
         break;
 
+      case Extension:
+        resourceDefinition = new ExtensionResourceDefinition();
+        break;
+
+      case ExtensionVersion:
+        resourceDefinition = new ExtensionVersionResourceDefinition();
+        break;
+
+      case ExtensionLink:
+        resourceDefinition = new ExtensionLinkResourceDefinition();
+        break;
+
       case OperatingSystem:
         resourceDefinition = new OperatingSystemResourceDefinition();
         break;
@@ -206,6 +242,12 @@ public class ResourceInstanceFactoryImpl implements ResourceInstanceFactory {
         resourceDefinition = new RootServiceComponentResourceDefinition();
         break;
 
+      case RootServiceComponentConfiguration:
+        resourceDefinition = new SimpleResourceDefinition(Resource.Type.RootServiceComponentConfiguration,
+            "configuration", "configurations",
+            null, RootServiceComponentConfigurationService.DIRECTIVES_MAP);
+        break;
+
       case RootServiceHostComponent:
         resourceDefinition = new RootServiceHostComponentResourceDefinition();
         break;
@@ -231,7 +273,7 @@ public class ResourceInstanceFactoryImpl implements ResourceInstanceFactory {
         String version  = mapIds.get(Resource.Type.ViewVersion);
 
         Set<SubResourceDefinition> subResourceDefinitions = (viewName == null || version == null)  ?
-            Collections.<SubResourceDefinition>emptySet() :
+            Collections.emptySet() :
             ViewRegistry.getInstance().getSubResourceDefinitions(viewName, version);
 
         resourceDefinition = new ViewInstanceResourceDefinition(subResourceDefinitions);
@@ -322,9 +364,7 @@ public class ResourceInstanceFactoryImpl implements ResourceInstanceFactory {
         break;
 
       case CompatibleRepositoryVersion:
-        resourceDefinition = new SimpleResourceDefinition(Resource.Type.CompatibleRepositoryVersion,
-            "compatible_repository_version", "compatible_repository_versions",
-            Resource.Type.OperatingSystem);
+        resourceDefinition = new CompatibleRepositoryVersionDefinition();
         break;
 
       case HostStackVersion:
@@ -364,17 +404,7 @@ public class ResourceInstanceFactoryImpl implements ResourceInstanceFactory {
         break;
 
       case StackArtifact:
-        resourceDefinition = new BaseResourceDefinition(Resource.Type.StackArtifact) {
-          @Override
-          public String getPluralName() {
-            return "artifacts";
-          }
-
-          @Override
-          public String getSingularName() {
-            return "artifact";
-          }
-        };
+        resourceDefinition = new SimpleResourceDefinition(Resource.Type.StackArtifact, "artifact", "artifacts");
         break;
 
       case Artifact:
@@ -430,7 +460,17 @@ public class ResourceInstanceFactoryImpl implements ResourceInstanceFactory {
         break;
 
       case ClusterKerberosDescriptor:
-        resourceDefinition = new SimpleResourceDefinition(Resource.Type.ClusterKerberosDescriptor, "kerberos_descriptor", "kerberos_descriptors");
+        resourceDefinition = new SimpleResourceDefinition(
+            Resource.Type.ClusterKerberosDescriptor,
+            "kerberos_descriptor",
+            "kerberos_descriptors",
+            null,
+            Collections.singletonMap(SimpleResourceDefinition.DirectiveType.READ,
+                Arrays.asList(
+                    ClusterKerberosDescriptorResourceProvider.DIRECTIVE_EVALUATE_WHEN_CLAUSE,
+                    ClusterKerberosDescriptorResourceProvider.DIRECTIVE_ADDITIONAL_SERVICES
+                ))
+        );
         break;
 
       case LoggingQuery:

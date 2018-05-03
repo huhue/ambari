@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,42 +19,36 @@
 
 package org.apache.ambari.server.controller;
 
-import java.util.Map;
-import java.util.Set;
+import javax.inject.Named;
 
+import org.apache.ambari.server.controller.internal.AlertTargetResourceProvider;
+import org.apache.ambari.server.controller.internal.ClusterStackVersionResourceProvider;
 import org.apache.ambari.server.controller.internal.UpgradeResourceProvider;
-import org.apache.ambari.server.controller.spi.Resource;
-import org.apache.ambari.server.controller.spi.Resource.Type;
+import org.apache.ambari.server.controller.internal.ViewInstanceResourceProvider;
 import org.apache.ambari.server.controller.spi.ResourceProvider;
 
-import com.google.inject.name.Named;
-import java.util.Set;
 
 public interface ResourceProviderFactory {
   @Named("host")
-  ResourceProvider getHostResourceProvider(Set<String> propertyIds,
-      Map<Type, String> keyPropertyIds,
-      AmbariManagementController managementController);
+  ResourceProvider getHostResourceProvider(AmbariManagementController managementController);
 
   @Named("hostComponent")
-  ResourceProvider getHostComponentResourceProvider(Set<String> propertyIds,
-      Map<Type, String> keyPropertyIds,
-      AmbariManagementController managementController);
+  ResourceProvider getHostComponentResourceProvider(AmbariManagementController managementController);
 
   @Named("service")
-  ResourceProvider getServiceResourceProvider(Set<String> propertyIds,
-      Map<Type, String> keyPropertyIds,
-      AmbariManagementController managementController);
+  ResourceProvider getServiceResourceProvider(AmbariManagementController managementController);
 
   @Named("component")
-  ResourceProvider getComponentResourceProvider(Set<String> propertyIds,
-      Map<Type, String> keyPropertyIds,
-      AmbariManagementController managementController);
+  ResourceProvider getComponentResourceProvider(AmbariManagementController managementController);
 
   @Named("member")
-  ResourceProvider getMemberResourceProvider(Set<String> propertyIds,
-      Map<Type, String> keyPropertyIds,
-      AmbariManagementController managementController);
+  ResourceProvider getMemberResourceProvider(AmbariManagementController managementController);
+
+  @Named("user")
+  ResourceProvider getUserResourceProvider(AmbariManagementController managementController);
+
+  @Named("userAuthenticationSource")
+  ResourceProvider getUserAuthenticationSourceResourceProvider();
 
   @Named("hostKerberosIdentity")
   ResourceProvider getHostKerberosIdentityResourceProvider(AmbariManagementController managementController);
@@ -66,11 +60,21 @@ public interface ResourceProviderFactory {
   ResourceProvider getRepositoryVersionResourceProvider();
 
   @Named("kerberosDescriptor")
-  ResourceProvider getKerberosDescriptorResourceProvider(AmbariManagementController managementController,
-                                                         Set<String> propertyIds,
-                                                         Map<Resource.Type, String> keyPropertyIds);
+  ResourceProvider getKerberosDescriptorResourceProvider(AmbariManagementController managementController);
 
   @Named("upgrade")
   UpgradeResourceProvider getUpgradeResourceProvider(AmbariManagementController managementController);
+
+  @Named("rootServiceHostComponentConfiguration")
+  ResourceProvider getRootServiceHostComponentConfigurationResourceProvider();
+
+  @Named("clusterStackVersion")
+  ClusterStackVersionResourceProvider getClusterStackVersionResourceProvider(AmbariManagementController managementController);
+
+  @Named("alertTarget")
+  AlertTargetResourceProvider getAlertTargetResourceProvider();
+
+  @Named("viewInstance")
+  ViewInstanceResourceProvider getViewInstanceResourceProvider();
 
 }

@@ -1,5 +1,43 @@
 {
+
   "configuration" : {
+    "layouts": [
+      {
+        "name": "default",
+        "tabs": [
+          {
+            "name": "settings",
+            "display-name": "Settings",
+            "layout": {
+              "tab-rows": 6,
+              "tab-columns": 3,
+              "sections": [
+                {
+                  "name": "misc-settings",
+                  "display-name": "Miscellaneous Settings",
+                  "row-index": "2",
+                  "column-index": "0",
+                  "row-span": "1",
+                  "column-span": "3",
+                  "section-columns": "3",
+                  "section-rows": "2",
+                  "subsections": [
+                    {
+                      "name": "misc-row1-col1",
+                      "display-name": "Log Level",
+                      "row-index": "0",
+                      "column-index": "0",
+                      "row-span": "1",
+                      "column-span": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+      ],
     "placement" : {
       "configs" : [
         {
@@ -17,28 +55,6 @@
         {
           "config": "hive-interactive-env/enable_hive_interactive",
           "subsection-name": "interactive-query-row1-col1"
-        },
-        {
-          "config": "hive-interactive-env/hive_server_interactive_host",
-          "subsection-name": "interactive-query-row1-col1",
-          "depends-on": [
-            {
-              "configs":[
-                "hive-interactive-env/enable_hive_interactive"
-              ],
-              "if": "${hive-interactive-env/enable_hive_interactive}",
-              "then": {
-                "property_value_attributes": {
-                  "visible": true
-                }
-              },
-              "else": {
-                "property_value_attributes": {
-                  "visible": false
-                }
-              }
-            }
-          ]
         },
         {
           "config": "hive-interactive-site/hive.llap.daemon.queue.name",
@@ -63,96 +79,7 @@
           ]
         },
         {
-          "config": "hive-interactive-env/llap_queue_capacity",
-          "subsection-name": "interactive-query-row1-col1",
-          "depends-on": [
-            {
-              "configs":[
-                "hive-interactive-env/enable_hive_interactive",
-                "hive-interactive-site/hive.llap.daemon.queue.name"
-              ],
-              "if": "${hive-interactive-env/enable_hive_interactive} && ${hive-interactive-site/hive.llap.daemon.queue.name} === llap",
-              "then": {
-                "property_value_attributes": {
-                  "visible": true
-                }
-              },
-              "else": {
-                "property_value_attributes": {
-                  "visible": false
-                }
-              }
-            }
-          ]
-        },
-        {
           "config": "hive-interactive-env/num_llap_nodes",
-          "subsection-name": "interactive-query-row1-col1",
-          "depends-on": [
-            {
-              "configs":[
-                "hive-interactive-env/enable_hive_interactive"
-              ],
-              "if": "${hive-interactive-env/enable_hive_interactive}",
-              "then": {
-                "property_value_attributes": {
-                  "visible": true
-                }
-              },
-              "else": {
-                "property_value_attributes": {
-                  "visible": false
-                }
-              }
-            }
-          ]
-        },
-        {
-          "config": "hive-interactive-site/hive.llap.daemon.yarn.container.mb",
-          "subsection-name": "interactive-query-row1-col1",
-          "depends-on": [
-            {
-              "configs":[
-                "hive-interactive-env/enable_hive_interactive"
-              ],
-              "if": "${hive-interactive-env/enable_hive_interactive}",
-              "then": {
-                "property_value_attributes": {
-                  "visible": true
-                }
-              },
-              "else": {
-                "property_value_attributes": {
-                  "visible": false
-                }
-              }
-            }
-          ]
-        },
-        {
-          "config": "hive-interactive-site/hive.llap.io.memory.size",
-          "subsection-name": "interactive-query-row1-col1",
-          "depends-on": [
-            {
-              "configs":[
-                "hive-interactive-env/enable_hive_interactive"
-              ],
-              "if": "${hive-interactive-env/enable_hive_interactive}",
-              "then": {
-                "property_value_attributes": {
-                  "visible": true
-                }
-              },
-              "else": {
-                "property_value_attributes": {
-                  "visible": false
-                }
-              }
-            }
-          ]
-        },
-        {
-          "config": "hive-interactive-site/hive.llap.daemon.num.executors",
           "subsection-name": "interactive-query-row1-col1",
           "depends-on": [
             {
@@ -194,6 +121,88 @@
               }
             }
           ]
+        },
+        {
+          "config": "hive-interactive-site/ambari.copy.hive.llap.daemon.yarn.container.mb",
+          "subsection-name": "interactive-query-row1-col1",
+          "property_value_attributes": {
+            "ui_only_property": true,
+            "copy": "hive-interactive-site/hive.llap.daemon.yarn.container.mb"
+          },
+          "depends-on": [
+            {
+              "configs":[
+                "hive-interactive-env/enable_hive_interactive"
+              ],
+              "if": "${hive-interactive-env/enable_hive_interactive}",
+              "then": {
+                "property_value_attributes": {
+                  "visible": true
+                }
+              },
+              "else": {
+                "property_value_attributes": {
+                  "visible": false
+                }
+              }
+            }
+          ]
+        },
+        {
+          "config": "hive-interactive-site/ambari.copy.hive.llap.io.memory.size",
+          "subsection-name": "interactive-query-row1-col1",
+          "property_value_attributes": {
+            "ui_only_property": true,
+            "copy": "hive-interactive-site/hive.llap.io.memory.size"
+          },
+          "depends-on": [
+            {
+              "configs":[
+                "hive-interactive-env/enable_hive_interactive"
+              ],
+              "if": "${hive-interactive-env/enable_hive_interactive}",
+              "then": {
+                "property_value_attributes": {
+                  "visible": true
+                }
+              },
+              "else": {
+                "property_value_attributes": {
+                  "visible": false
+                }
+              }
+            }
+          ]
+        },
+        {
+          "config": "hive-interactive-site/ambari.copy.hive.llap.daemon.num.executors",
+          "subsection-name": "interactive-query-row1-col1",
+          "property_value_attributes": {
+            "ui_only_property": true,
+            "copy": "hive-interactive-site/hive.llap.daemon.num.executors"
+          },
+          "depends-on": [
+            {
+              "configs":[
+                "hive-interactive-env/enable_hive_interactive"
+              ],
+              "if": "${hive-interactive-env/enable_hive_interactive}",
+              "then": {
+                "property_value_attributes": {
+                  "visible": true
+                }
+              },
+              "else": {
+                "property_value_attributes": {
+                  "visible": false
+                }
+              }
+            }
+          ]
+        },
+        {
+          "config": "hive-env/hive.log.level",
+          "subsection-name": "misc-row1-col1"
         }
       ]
     },
@@ -217,15 +226,9 @@
         }
       },
       {
-        "config": "hive-interactive-env/hive_server_interactive_host",
-        "widget": {
-          "type": "label"
-        }
-      },
-      {
         "config": "hive-interactive-site/hive.llap.daemon.queue.name",
         "widget": {
-          "type": "list"
+          "type": "combo"
         }
       },
       {
@@ -240,42 +243,31 @@
         }
       },
       {
-        "config": "hive-interactive-env/llap_queue_capacity",
-        "widget": {
-          "type": "slider",
-          "units": [
-            {
-              "unit-name": "percent"
-            }
-          ]
-        }
-      },
-      {
-        "config": "hive-interactive-site/hive.llap.daemon.yarn.container.mb",
-        "widget": {
-          "type": "slider",
-          "units": [
-            {
-              "unit-name": "GB"
-            }
-          ]
-        }
-      },
-      {
-        "config": "hive-interactive-site/hive.llap.io.memory.size",
+        "config": "hive-interactive-site/ambari.copy.hive.llap.daemon.yarn.container.mb",
         "widget": {
           "type": "label",
           "units": [
             {
-              "unit-name": "GB"
+              "unit-name": "MB"
             }
           ]
         }
       },
       {
-        "config": "hive-interactive-site/hive.llap.daemon.num.executors",
+        "config": "hive-interactive-site/ambari.copy.hive.llap.io.memory.size",
         "widget": {
-          "type": "slider",
+          "type": "label",
+          "units": [
+            {
+              "unit-name": "MB"
+            }
+          ]
+        }
+      },
+      {
+        "config": "hive-interactive-site/ambari.copy.hive.llap.daemon.num.executors",
+        "widget": {
+          "type": "label",
           "units": [
             {
               "unit-name": "int"
@@ -292,6 +284,12 @@
               "unit-name": "int"
             }
           ]
+        }
+      },
+      {
+        "config": "hive-env/hive.log.level",
+        "widget": {
+          "type": "combo"
         }
       }
     ]

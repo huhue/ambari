@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,17 +18,29 @@
 
 package org.apache.ambari.server.state;
 
+import java.util.HashSet;
+import java.util.Set;
+
 import org.apache.ambari.server.controller.RepositoryResponse;
+import org.apache.ambari.server.state.stack.RepoTag;
+
+import com.google.common.base.Function;
+import com.google.common.base.Objects;
+import com.google.common.base.Strings;
 
 public class RepositoryInfo {
   private String baseUrl;
   private String osType;
   private String repoId;
   private String repoName;
+  private String distribution;
+  private String components;
   private String mirrorsList;
   private String defaultBaseUrl;
-  private String latestBaseUrl;
-  private boolean baseSaved = false;
+  private boolean repoSaved = false;
+  private boolean unique = false;
+  private boolean ambariManagedRepositories = true;
+  private Set<RepoTag> tags = new HashSet<>();
 
   /**
    * @return the baseUrl
@@ -86,6 +98,22 @@ public class RepositoryInfo {
     this.repoName = repoName;
   }
 
+  public String getDistribution() {
+    return distribution;
+  }
+
+  public void setDistribution(String distribution) {
+    this.distribution = distribution;
+  }
+
+  public String getComponents() {
+    return components;
+  }
+
+  public void setComponents(String components) {
+    this.components = components;
+  }
+
   /**
    * @return the mirrorsList
    */
@@ -115,31 +143,31 @@ public class RepositoryInfo {
   }
 
   /**
-   * @return the latest determined base url
+   * @return if the base url or mirrors list was from a saved value
    */
-  public String getLatestBaseUrl() {
-    return latestBaseUrl;
+  public boolean isRepoSaved() {
+    return repoSaved;
   }
 
   /**
-   * @param url the latest determined base url
+   * Sets if the base url or mirrors list was from a saved value
    */
-  public void setLatestBaseUrl(String url) {
-    latestBaseUrl = url;
+  public void setRepoSaved(boolean saved) {
+    repoSaved = saved;
   }
 
   /**
-   * @return if the base url was from a saved value
+   * @return true if version of HDP that change with each release
    */
-  public boolean isBaseUrlFromSaved() {
-    return baseSaved;
+  public boolean isUnique() {
+    return unique;
   }
 
   /**
-   * Sets if the base url was from a saved value
+   * @param unique set is version of HDP that change with each release
    */
-  public void setBaseUrlFromSaved(boolean saved) {
-    baseSaved = saved;
+  public void setUnique(boolean unique) {
+    this.unique = unique;
   }
 
   @Override
@@ -149,16 +177,107 @@ public class RepositoryInfo {
         + ", repoId=" + repoId
         + ", baseUrl=" + baseUrl
         + ", repoName=" + repoName
+        + ", distribution=" + distribution
+        + ", components=" + components
         + ", mirrorsList=" + mirrorsList
+        + ", unique=" + unique
+        + ", ambariManagedRepositories=" + ambariManagedRepositories
         + " ]";
   }
 
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    RepositoryInfo that = (RepositoryInfo) o;
+    return repoSaved == that.repoSaved &&
+        unique == that.unique &&
+        Objects.equal(baseUrl, that.baseUrl) &&
+        Objects.equal(osType, that.osType) &&
+        Objects.equal(repoId, that.repoId) &&
+        Objects.equal(repoName, that.repoName) &&
+        Objects.equal(distribution, that.distribution) &&
+        Objects.equal(components, that.components) &&
+        Objects.equal(mirrorsList, that.mirrorsList) &&
+        Objects.equal(defaultBaseUrl, that.defaultBaseUrl) &&
+        Objects.equal(ambariManagedRepositories, that.ambariManagedRepositories);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hashCode(baseUrl, osType, repoId, repoName, distribution, components, mirrorsList, defaultBaseUrl,
+           ambariManagedRepositories);
+  }
 
   public RepositoryResponse convertToResponse()
   {
     return new RepositoryResponse(getBaseUrl(), getOsType(), getRepoId(),
-        getRepoName(), getMirrorsList(), getDefaultBaseUrl(), getLatestBaseUrl());
+            getRepoName(), getDistribution(), getComponents(), getMirrorsList(), getDefaultBaseUrl(),
+            getTags());
   }
 
+  /**
+   * A function that returns the repo name of any RepositoryInfo
+   */
+  public static final Function<RepositoryInfo, String> GET_REPO_NAME_FUNCTION = new Function<RepositoryInfo, String>() {
+    @Override  public String apply(RepositoryInfo input) {
+      return input.repoName;
+    }
+  };
+
+  /**
+   * A function that returns the repoId of any RepositoryInfo
+   */
+  public static final Function<RepositoryInfo, String> GET_REPO_ID_FUNCTION = new Function<RepositoryInfo, String>() {
+    @Override  public String apply(RepositoryInfo input) {
+      return input.repoId;
+    }
+  };
+
+  /**
+   * A function that returns the baseUrl of any RepositoryInfo
+   */
+  public static final Function<RepositoryInfo, String> SAFE_GET_BASE_URL_FUNCTION = new Function<RepositoryInfo, String>() {
+    @Override  public String apply(RepositoryInfo input) {
+      return Strings.nullToEmpty(input.baseUrl);
+    }
+  };
+
+  /**
+   * A function that returns the osType of any RepositoryInfo
+   */
+  public static final Function<RepositoryInfo, String> GET_OSTYPE_FUNCTION = new Function<RepositoryInfo, String>() {
+    @Override  public String apply(RepositoryInfo input) {
+      return input.osType;
+    }
+  };
+
+  /**
+   * @return true if repositories managed by ambari
+   */
+  public boolean isAmbariManagedRepositories() {
+    return ambariManagedRepositories;
+  }
+
+  /**
+   * @param ambariManagedRepositories set is repositories managed by ambari
+   */
+  public void setAmbariManagedRepositories(boolean ambariManagedRepositories) {
+    this.ambariManagedRepositories = ambariManagedRepositories;
+  }
+
+  /**
+   * @return the tags for this repository
+   */
+  public Set<RepoTag> getTags() {
+    return tags;
+  }
+
+  /**
+   * @param repoTags the tags for this repository
+   */
+  public void setTags(Set<RepoTag> repoTags) {
+    tags = repoTags;
+  }
 
 }

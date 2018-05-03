@@ -17,8 +17,10 @@ limitations under the License.
 
 """
 
-from resource_management import *
 from utils import service
+from resource_management.core.resources.system import Directory, File
+from resource_management.core.source import Template
+from resource_management.libraries.functions.check_process_status import check_process_status
 from ambari_commons.os_family_impl import OsFamilyImpl, OsFamilyFuncImpl
 from ambari_commons import OSConst
 
@@ -37,6 +39,12 @@ def snamenode(action=None, format=False):
          content=Template("exclude_hosts_list.j2"),
          owner=params.hdfs_user,
          group=params.user_group)
+    if params.hdfs_include_file:
+      File(params.include_file_path,
+         content=Template("include_hosts_list.j2"),
+         owner=params.hdfs_user,
+         group=params.user_group)
+      pass
   elif action == "start" or action == "stop":
     import params
     service(

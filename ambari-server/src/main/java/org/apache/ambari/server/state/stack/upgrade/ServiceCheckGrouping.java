@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,7 +19,9 @@ package org.apache.ambari.server.state.stack.upgrade;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -48,7 +50,7 @@ import org.slf4j.LoggerFactory;
 @XmlType(name="service-check")
 public class ServiceCheckGrouping extends Grouping {
 
-  private static Logger LOG = LoggerFactory.getLogger(ServiceCheckGrouping.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ServiceCheckGrouping.class);
 
   /**
    * During a Rolling Upgrade, the priority services are ran first, then the remaining services in the cluster.
@@ -56,14 +58,19 @@ public class ServiceCheckGrouping extends Grouping {
    */
   @XmlElementWrapper(name="priority")
   @XmlElement(name="service")
-  private Set<String> priorityServices = new LinkedHashSet<String>();
+  private Set<String> priorityServices = new LinkedHashSet<>();
 
   /**
    * During a Rolling Upgrade, exclude certain services.
    */
   @XmlElementWrapper(name="exclude")
   @XmlElement(name="service")
-  private Set<String> excludeServices = new HashSet<String>();
+  private Set<String> excludeServices = new HashSet<>();
+
+  @Override
+  protected boolean serviceCheckAfterProcessing() {
+    return false;
+  }
 
   /**
    * {@inheritDoc}
@@ -78,6 +85,13 @@ public class ServiceCheckGrouping extends Grouping {
    */
   public Set<String> getPriorities() {
     return priorityServices;
+  }
+
+  /**
+   * @return the set of service names that should be excluded
+   */
+  public Set<String> getExcluded() {
+    return excludeServices;
   }
 
   /**
@@ -116,23 +130,20 @@ public class ServiceCheckGrouping extends Grouping {
       m_cluster = upgradeContext.getCluster();
       m_metaInfo = upgradeContext.getAmbariMetaInfo();
 
-      List<StageWrapper> result = new ArrayList<StageWrapper>(stageWrappers);
+      List<StageWrapper> result = new ArrayList<>(stageWrappers);
       if (upgradeContext.getDirection().isDowngrade()) {
         return result;
       }
 
       Map<String, Service> serviceMap = m_cluster.getServices();
 
-      Set<String> clusterServices = new LinkedHashSet<String>(serviceMap.keySet());
+      Set<String> clusterServices = new LinkedHashSet<>(serviceMap.keySet());
 
       // create stages for the priorities
       for (String service : priorityServices) {
         if (checkServiceValidity(upgradeContext, service, serviceMap)) {
-          StageWrapper wrapper = new StageWrapper(
-            StageWrapper.Type.SERVICE_CHECK,
-            "Service Check " + upgradeContext.getServiceDisplay(service),
-            new TaskWrapper(service, "", Collections.<String>emptySet(),
-              new ServiceCheckTask()));
+          StageWrapper wrapper = new ServiceCheckStageWrapper(service,
+              upgradeContext.getServiceDisplay(service), true);
 
           result.add(wrapper);
           clusterServices.remove(service);
@@ -147,11 +158,9 @@ public class ServiceCheckGrouping extends Grouping {
           }
 
           if (checkServiceValidity(upgradeContext, service, serviceMap)) {
-            StageWrapper wrapper = new StageWrapper(
-              StageWrapper.Type.SERVICE_CHECK,
-              "Service Check " + upgradeContext.getServiceDisplay(service),
-              new TaskWrapper(service, "", Collections.<String>emptySet(),
-                new ServiceCheckTask()));
+            StageWrapper wrapper = new ServiceCheckStageWrapper(service,
+                upgradeContext.getServiceDisplay(service), false);
+
             result.add(wrapper);
           }
         }
@@ -171,7 +180,7 @@ public class ServiceCheckGrouping extends Grouping {
         Service svc = clusterServices.get(service);
         if (null != svc) {
           // Services that only have clients such as Pig can still have service check scripts.
-          StackId stackId = m_cluster.getDesiredStackVersion();
+          StackId stackId = svc.getDesiredStackId();
           try {
             ServiceInfo si = m_metaInfo.getService(stackId.getStackName(), stackId.getStackVersion(), service);
             CommandScriptDefinition script = si.getCommandScript();
@@ -187,4 +196,114 @@ public class ServiceCheckGrouping extends Grouping {
       return false;
     }
   }
+
+  /**
+   * Attempts to merge all the service check groupings.  This merges the excluded list and
+   * the priorities.  The priorities are merged in an order specific manner.
+   */
+  @Override
+  public void merge(Iterator<Grouping> iterator) throws AmbariException {
+    List<String> priorities = new ArrayList<>();
+    priorities.addAll(getPriorities());
+    Map<String, Set<String>> skippedPriorities = new HashMap<>();
+    while (iterator.hasNext()) {
+      Grouping next = iterator.next();
+      if (!(next instanceof ServiceCheckGrouping)) {
+        throw new AmbariException("Invalid group type " + next.getClass().getSimpleName() + " expected service check group");
+      }
+      ServiceCheckGrouping checkGroup = (ServiceCheckGrouping) next;
+      getExcluded().addAll(checkGroup.getExcluded());
+
+      boolean added = addPriorities(priorities, checkGroup.getPriorities(), checkGroup.addAfterGroupEntry);
+      if (added) {
+        addSkippedPriorities(priorities, skippedPriorities, checkGroup.getPriorities());
+      }
+      else {
+        // store these services until later
+        if (skippedPriorities.containsKey(checkGroup.addAfterGroupEntry)) {
+          Set<String> tmp = skippedPriorities.get(checkGroup.addAfterGroupEntry);
+          tmp.addAll(checkGroup.getPriorities());
+        }
+        else {
+          skippedPriorities.put(checkGroup.addAfterGroupEntry, checkGroup.getPriorities());
+        }
+      }
+    }
+    getPriorities().clear();
+    getPriorities().addAll(priorities);
+  }
+
+  /**
+   * Add the given child priorities if the service they are supposed to come after have been added.
+   */
+  private boolean addPriorities(List<String> priorities, Set<String> childPriorities, String after) {
+    if (after == null) {
+      priorities.addAll(childPriorities);
+      return true;
+    }
+    else {
+      // Check the current priorities, if the "after" priority is there then add these
+      for (int index = priorities.size() - 1; index >= 0; index--) {
+        String priority = priorities.get(index);
+        if (after.equals(priority)) {
+          priorities.addAll(index + 1, childPriorities);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Add the skipped priorities if the services they are supposed to come after have been added
+   */
+  private void addSkippedPriorities(List<String> priorities, Map<String, Set<String>> skippedPriorites, Set<String> prioritiesJustAdded) {
+    for (String priority : prioritiesJustAdded) {
+      if (skippedPriorites.containsKey(priority)) {
+        Set<String> prioritiesToAdd = skippedPriorites.remove(priority);
+        addPriorities(priorities, prioritiesToAdd, priority);
+        addSkippedPriorities(priorities, skippedPriorites, prioritiesToAdd);
+      }
+    }
+  }
+
+  /**
+   * Special type of stage wrapper that allows inspection of the service check for
+   * merging if required.  This prevents consecutive service checks from running, particularly
+   * for Patch or Maintenance types of upgrades.
+   */
+  public static class ServiceCheckStageWrapper extends StageWrapper {
+    public String service;
+    public boolean priority;
+
+    ServiceCheckStageWrapper(String service, String serviceDisplay, boolean priority) {
+      super(StageWrapper.Type.SERVICE_CHECK,
+          String.format("Service Check %s", serviceDisplay),
+          new TaskWrapper(service, "", Collections.emptySet(), new ServiceCheckTask()));
+
+      this.service = service;
+      this.priority = priority;
+    }
+
+    @Override
+    public int hashCode() {
+      return service.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (!other.getClass().equals(getClass())) {
+        return false;
+      }
+
+      if (other == this) {
+        return true;
+      }
+
+      return ((ServiceCheckStageWrapper) other).service.equals(service);
+
+    }
+
+  }
+
 }

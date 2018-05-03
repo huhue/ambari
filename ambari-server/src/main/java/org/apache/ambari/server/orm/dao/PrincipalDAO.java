@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,6 +20,7 @@ package org.apache.ambari.server.orm.dao;
 
 import java.util.Arrays;
 import java.util.List;
+
 import javax.persistence.EntityManager;
 import javax.persistence.TypedQuery;
 
@@ -121,4 +122,15 @@ public class PrincipalDAO {
   public PrincipalEntity merge(PrincipalEntity entity) {
     return entityManagerProvider.get().merge(entity);
   }
+
+  /**
+   * Remove the entity instance.
+   *
+   * @param entity  entity to remove
+   */
+  @Transactional
+  public void remove(PrincipalEntity entity) {
+    entityManagerProvider.get().remove(entity);
+  }
+
 }

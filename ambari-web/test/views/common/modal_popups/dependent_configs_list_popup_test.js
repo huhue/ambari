@@ -25,7 +25,6 @@ var view;
 describe('App.showDependentConfigsPopup', function () {
 
   beforeEach(function () {
-    view = App.showDependentConfigsPopup();
     sinon.stub(Em.run, 'next', Em.K);
     sinon.stub(Em.run, 'once', Em.K);
   });
@@ -40,7 +39,7 @@ describe('App.showDependentConfigsPopup', function () {
     beforeEach(function () {
       this.ff = function () {};
       sinon.spy(this, 'ff');
-      view = App.showDependentConfigsPopup([], Em.K, this.ff);
+      view = App.showDependentConfigsPopup([], [], Em.K, this.ff);
     });
 
     afterEach(function () {

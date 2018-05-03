@@ -127,6 +127,14 @@ App.MainAdminStackVersionsView = Em.View.extend({
    */
   repoVersions: App.RepositoryVersion.find(),
 
+  hasMaintRepoVersion: Em.computed.someBy('repoVersions', 'isMaint', true),
+
+  hasPatchRepoVersion: Em.computed.someBy('repoVersions', 'isPatch', true),
+
+  hasServiceRepoVersion: Em.computed.someBy('repoVersions', 'isService', true),
+
+  hasSpecialTypeRepoVersion: Em.computed.or('hasMaintRepoVersion', 'hasPatchRepoVersion', 'hasServiceRepoVersion'),
+
   /**
    * @type {Em.Array}
    */
@@ -143,26 +151,44 @@ App.MainAdminStackVersionsView = Em.View.extend({
     if (filter && filter.get('value')) {
       versions = versions.filter(function (version) {
         var status = version.get('status');
-        if (status === 'INSTALLED' && ['UPGRADE_READY', 'INSTALLED'].contains(filter.get('value'))) {
-          if (filter.get('value') === 'UPGRADE_READY') {
-            return stringUtils.compareVersions(version.get('repositoryVersion'), Em.get(currentVersion, 'repository_version')) === 1;
+        var isUpgrading = this.isVersionUpgrading(version);
+        if (status === 'INSTALLED' && ['UPGRADE_READY', 'INSTALLED', 'UPGRADING'].contains(filter.get('value'))) {
+          if (filter.get('value') === 'UPGRADING') {
+            return isUpgrading;
+          } else if (filter.get('value') === 'UPGRADE_READY') {
+            return !isUpgrading &&
+              stringUtils.compareVersions(version.get('repositoryVersion'), Em.get(currentVersion, 'repository_version')) === 1;
           } else if (filter.get('value') === 'INSTALLED') {
             return stringUtils.compareVersions(version.get('repositoryVersion'), Em.get(currentVersion, 'repository_version')) < 1;
           }
         } else if (filter.get('value') === 'NOT_INSTALLED') {
-          return ['INIT', 'INSTALL_FAILED', 'INSTALLING', 'OUT_OF_SYNC'].contains(status);
+          return ['NOT_REQUIRED', 'INSTALL_FAILED', 'INSTALLING', 'OUT_OF_SYNC'].contains(status);
         } else {
           return status === filter.get('value');
         }
       }, this);
     }
     if (App.get('supports.displayOlderVersions') || Em.isNone(currentVersion)) {
-      return versions.toArray();
+      return versions.filterProperty('hidden', false).toArray();
     } else {
-      return versions.filter(function(v) {
-        return stringUtils.compareVersions(v.get('repositoryVersion'), Em.get(currentVersion, 'repository_version')) >= 0;
+      return versions.filterProperty('hidden', false).filter(function(v) {
+        if (v.get('stackVersionType') === Em.get(currentVersion, 'stack_name')) {
+          // PATCH or MAINT version should be visible even if patch number lower than current
+          return v.get('isPatch') || v.get('isMaint') || stringUtils.compareVersions(v.get('repositoryVersion'), Em.get(currentVersion, 'repository_version')) >= 0;
+        }
+        return v.get('isCompatible');
       }).toArray();
     }
+  },
+
+  /**
+   * is version in upgrading or downgrading state
+   * @param version
+   */
+  isVersionUpgrading: function(version) {
+    var upgradeController = App.router.get('mainAdminStackAndUpgradeController');
+    return upgradeController.get('upgradeVersion') === version.get('displayName') ||
+           upgradeController.get('fromVersion') === version.get('repositoryVersion');
   },
 
   /**
@@ -170,10 +196,11 @@ App.MainAdminStackVersionsView = Em.View.extend({
    * @return {App.ModalPopup}
    */
   goToVersions: function () {
+    var self = this;
     return App.showConfirmationPopup(function () {
       App.ajax.send({
         name: 'ambari.service.load_server_version',
-        sender: this
+        sender: self
       }).then(function(data) {
         var components = Em.get(data,'components');
         if (Em.isArray(components)) {
@@ -183,8 +210,8 @@ App.MainAdminStackVersionsView = Em.View.extend({
               }
             }),
             sortedMappedVersions = mappedVersions.sort(),
-            latestVersion = sortedMappedVersions[sortedMappedVersions.length-1];
-            window.location.replace('/views/ADMIN_VIEW/' + latestVersion + '/INSTANCE/#/stackVersions');
+            latestVersion = sortedMappedVersions[sortedMappedVersions.length-1].replace(/[^\d.-]/g, '');
+            window.location.replace(App.appURLRoot + 'views/ADMIN_VIEW/' + latestVersion + '/INSTANCE/#/stackVersions');
         }
       });
     },

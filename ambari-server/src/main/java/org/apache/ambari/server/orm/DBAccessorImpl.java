@@ -18,6 +18,7 @@
 package org.apache.ambari.server.orm;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -26,6 +27,7 @@ import java.sql.Blob;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -33,8 +35,10 @@ import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.ambari.server.configuration.Configuration;
@@ -43,6 +47,7 @@ import org.apache.ambari.server.orm.helpers.ScriptRunner;
 import org.apache.ambari.server.orm.helpers.dbms.DbmsHelper;
 import org.apache.ambari.server.orm.helpers.dbms.DerbyHelper;
 import org.apache.ambari.server.orm.helpers.dbms.GenericDbmsHelper;
+import org.apache.ambari.server.orm.helpers.dbms.H2Helper;
 import org.apache.ambari.server.orm.helpers.dbms.MySqlHelper;
 import org.apache.ambari.server.orm.helpers.dbms.OracleHelper;
 import org.apache.ambari.server.orm.helpers.dbms.PostgresHelper;
@@ -55,6 +60,7 @@ import org.eclipse.persistence.logging.AbstractSessionLog;
 import org.eclipse.persistence.logging.SessionLogEntry;
 import org.eclipse.persistence.platform.database.DatabasePlatform;
 import org.eclipse.persistence.platform.database.DerbyPlatform;
+import org.eclipse.persistence.platform.database.H2Platform;
 import org.eclipse.persistence.platform.database.MySQLPlatform;
 import org.eclipse.persistence.platform.database.OraclePlatform;
 import org.eclipse.persistence.platform.database.PostgreSQLPlatform;
@@ -65,7 +71,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.support.JdbcUtils;
 
 import com.google.inject.Inject;
+import com.google.inject.Singleton;
 
+@Singleton
 public class DBAccessorImpl implements DBAccessor {
   private static final Logger LOG = LoggerFactory.getLogger(DBAccessorImpl.class);
   private final DatabasePlatform databasePlatform;
@@ -103,9 +111,15 @@ public class DBAccessorImpl implements DBAccessor {
       dbmsHelper = loadHelper(databasePlatform);
       dbSchema = convertObjectName(configuration.getDatabaseSchema());
     } catch (Exception e) {
-      String message = "Error while creating database accessor ";
+      String message = "";
+      if (e instanceof ClassNotFoundException) {
+        message = "If you are using a non-default database for Ambari and a custom JDBC driver jar, you need to set property \"server.jdbc.driver.path={path/to/custom_jdbc_driver}\" " +
+                "in ambari.properties config file, to include it in ambari-server classpath.";
+      } else {
+        message = "Error while creating database accessor ";
+      }
       LOG.error(message, e);
-      throw new RuntimeException(e);
+      throw new RuntimeException(message,e);
     }
   }
 
@@ -122,6 +136,9 @@ public class DBAccessorImpl implements DBAccessor {
     } else if (databasePlatform instanceof DerbyPlatform) {
       dbType = DbType.DERBY;
       return new DerbyHelper(databasePlatform);
+    } else if (databasePlatform instanceof H2Platform) {
+      dbType = DbType.H2;
+      return new H2Helper(databasePlatform);
     } else {
       dbType = DbType.UNKNOWN;
       return new GenericDbmsHelper(databasePlatform);
@@ -189,6 +206,27 @@ public class DBAccessorImpl implements DBAccessor {
     return objectName;
   }
 
+  /**
+   * Setting arguments for prepared statement
+   *
+   * @param preparedStatement {@link PreparedStatement} object
+   * @param arguments array of arguments
+   *
+   * @throws SQLException
+   */
+  private void setArgumentsForPreparedStatement(PreparedStatement preparedStatement, Object[] arguments) throws SQLException{
+    for (int i = 0; i < arguments.length; i++) {
+      if (arguments[i] instanceof byte[]) {
+        byte[] binaryData = (byte[]) arguments[i];
+
+        // JDBC drivers supports only this function signature
+        preparedStatement.setBinaryStream(i+1, new ByteArrayInputStream(binaryData), binaryData.length);
+      } else {
+        preparedStatement.setObject(i+1, arguments[i]);
+      }
+    }
+  }
+
   @Override
   public boolean tableExists(String tableName) throws SQLException {
     boolean result = false;
@@ -217,6 +255,11 @@ public class DBAccessorImpl implements DBAccessor {
   @Override
   public DbType getDbType() {
     return dbType;
+  }
+
+  @Override
+  public String getDbSchema() {
+    return dbSchema;
   }
 
   @Override
@@ -272,7 +315,7 @@ public class DBAccessorImpl implements DBAccessor {
 
   @Override
   public boolean tableHasColumn(String tableName, String... columnName) throws SQLException {
-    List<String> columnsList = new ArrayList<String>(Arrays.asList(columnName));
+    List<String> columnsList = new ArrayList<>(Arrays.asList(columnName));
     DatabaseMetaData metaData = getDatabaseMetaData();
 
     CustomStringUtils.toUpperCase(columnsList);
@@ -306,48 +349,41 @@ public class DBAccessorImpl implements DBAccessor {
 
   @Override
   public boolean tableHasForeignKey(String tableName, String fkName) throws SQLException {
-    DatabaseMetaData metaData = getDatabaseMetaData();
-
-    ResultSet rs = metaData.getImportedKeys(null, dbSchema, convertObjectName(tableName));
-
-    if (rs != null) {
-      try {
-        while (rs.next()) {
-          if (StringUtils.equalsIgnoreCase(fkName, rs.getString("FK_NAME"))) {
-            return true;
-          }
-        }
-      } finally {
-        rs.close();
-      }
-    }
-
-    LOG.warn("FK {} not found for table {}", convertObjectName(fkName), convertObjectName(tableName));
-
-    return false;
+    return getCheckedForeignKey(tableName, fkName) != null;
   }
 
-  public String getCheckedForeignKey(String tableName, String fkName) throws SQLException {
+  public String getCheckedForeignKey(String rawTableName, String rawForeignKeyName) throws SQLException {
     DatabaseMetaData metaData = getDatabaseMetaData();
 
-    ResultSet rs = metaData.getImportedKeys(null, dbSchema, convertObjectName(tableName));
-
-    if (rs != null) {
-      try {
-        while (rs.next()) {
-          if (StringUtils.equalsIgnoreCase(fkName, rs.getString("FK_NAME"))) {
-            return rs.getString("FK_NAME");
-          }
+    String tableName = convertObjectName(rawTableName);
+    String foreignKeyName = convertObjectName(rawForeignKeyName);
+    try (ResultSet rs = metaData.getImportedKeys(null, dbSchema, tableName)) {
+      while (rs.next()) {
+        String foundName = rs.getString("FK_NAME");
+        if (StringUtils.equals(foreignKeyName, foundName)) {
+          return foundName;
         }
-      } finally {
-        rs.close();
       }
     }
 
-    LOG.warn("FK {} not found for table {}", convertObjectName(fkName), convertObjectName(tableName));
+    DatabaseType databaseType = configuration.getDatabaseType();
+    if (databaseType == DatabaseType.ORACLE) {
+      try (PreparedStatement ps = getConnection().prepareStatement("SELECT constraint_name FROM user_constraints WHERE table_name = ? AND constraint_type = 'R' AND constraint_name = ?")) {
+        ps.setString(1, tableName);
+        ps.setString(2, foreignKeyName);
+        try (ResultSet rs = ps.executeQuery()) {
+          if (rs.next()) {
+            return foreignKeyName;
+          }
+        }
+      }
+    }
+
+    LOG.warn("FK {} not found for table {}", foreignKeyName, tableName);
 
     return null;
   }
+
   @Override
   public boolean tableHasForeignKey(String tableName, String refTableName,
           String columnName, String refColumnName) throws SQLException {
@@ -363,11 +399,11 @@ public class DBAccessorImpl implements DBAccessor {
     ResultSet rs = metaData.getCrossReference(null, dbSchema, convertObjectName(referenceTableName),
             null, dbSchema, convertObjectName(tableName));
 
-    List<String> pkColumns = new ArrayList<String>(referenceColumns.length);
+    List<String> pkColumns = new ArrayList<>(referenceColumns.length);
     for (String referenceColumn : referenceColumns) {
       pkColumns.add(convertObjectName(referenceColumn));
     }
-    List<String> fkColumns = new ArrayList<String>(keyColumns.length);
+    List<String> fkColumns = new ArrayList<>(keyColumns.length);
     for (String keyColumn : keyColumns) {
       fkColumns.add(convertObjectName(keyColumn));
     }
@@ -419,12 +455,18 @@ public class DBAccessorImpl implements DBAccessor {
   @Override
   public void createIndex(String indexName, String tableName,
           String... columnNames) throws SQLException {
-   if (!tableHasIndex(tableName, false, indexName)) {
-     String query = dbmsHelper.getCreateIndexStatement(indexName, tableName, columnNames);
-     executeQuery(query);
-   } else {
-     LOG.info("Index {} already exist, skipping creation, table = {}", indexName, tableName);
-   }
+    createIndex(indexName, tableName, false, columnNames);
+  }
+
+  @Override
+  public void createIndex(String indexName, String tableName, boolean isUnique,
+                          String... columnNames) throws SQLException {
+    if (!tableHasIndex(tableName, false, indexName)) {
+      String query = dbmsHelper.getCreateIndexStatement(indexName, tableName, isUnique, columnNames);
+      executeQuery(query);
+    } else {
+      LOG.info("Index {} already exist, skipping creation, table = {}", indexName, tableName);
+    }
   }
 
   @Override
@@ -524,6 +566,13 @@ public class DBAccessorImpl implements DBAccessor {
   }
 
   @Override
+  public void updateUniqueConstraint(String tableName, String constraintName, String... columnNames)
+      throws SQLException {
+    dropUniqueConstraint(tableName, constraintName);
+    addUniqueConstraint(tableName, constraintName, columnNames);
+  }
+
+  @Override
   public void addPKConstraint(String tableName, String constraintName, boolean ignoreErrors, String... columnName) throws SQLException {
     if (!tableHasPrimaryKey(tableName, null) && tableHasColumn(tableName, columnName)) {
       String query = dbmsHelper.getAddPrimaryKeyConstraintStatement(tableName, constraintName, columnName);
@@ -548,29 +597,61 @@ public class DBAccessorImpl implements DBAccessor {
 
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public void addColumn(String tableName, DBColumnInfo columnInfo) throws SQLException {
-    if (!tableHasColumn(tableName, columnInfo.getName())) {
-      //TODO workaround for default values, possibly we will have full support later
-      if (columnInfo.getDefaultValue() != null) {
-        columnInfo.setNullable(true);
-      }
-      String query = dbmsHelper.getAddColumnStatement(tableName, columnInfo);
-      executeQuery(query);
+    if (tableHasColumn(tableName, columnInfo.getName())) {
+      return;
+    }
 
-      if (columnInfo.getDefaultValue() != null) {
-        updateTable(tableName, columnInfo.getName(), columnInfo.getDefaultValue(), "");
+    DatabaseType databaseType = configuration.getDatabaseType();
+    switch (databaseType) {
+      case ORACLE: {
+        // capture the original null value and set the column to nullable if
+        // there is a default value
+        boolean originalNullable = columnInfo.isNullable();
+        if (columnInfo.getDefaultValue() != null) {
+          columnInfo.setNullable(true);
+        }
+
+        String query = dbmsHelper.getAddColumnStatement(tableName, columnInfo);
+        executeQuery(query);
+
+        // update the column after it's been created with the default value and
+        // then set the nullable field back to the specified value
+        if (columnInfo.getDefaultValue() != null) {
+          updateTable(tableName, columnInfo.getName(), columnInfo.getDefaultValue(), "");
+
+          // if the column wasn't originally nullable, then set that here
+          if (!originalNullable) {
+            setColumnNullable(tableName, columnInfo, originalNullable);
+          }
+
+          // finally, add the DEFAULT constraint to the table
+          addDefaultConstraint(tableName, columnInfo);
+        }
+        break;
+      }
+      case DERBY:
+      case MYSQL:
+      case POSTGRES:
+      case SQL_ANYWHERE:
+      case SQL_SERVER:
+      default: {  // ToDo: getAddColumnStatement not supporting default clause for binary fields
+        String query = dbmsHelper.getAddColumnStatement(tableName, columnInfo);
+        executeQuery(query);
+        break;
       }
     }
   }
 
   @Override
-  public void alterColumn(String tableName, DBColumnInfo columnInfo)
-          throws SQLException {
+  public void alterColumn(String tableName, DBColumnInfo columnInfo) throws SQLException {
     //varchar extension only (derby limitation, but not too much for others),
     if (dbmsHelper.supportsColumnTypeChange()) {
-      String statement = dbmsHelper.getAlterColumnStatement(tableName,
-              columnInfo);
+      String statement = dbmsHelper.getAlterColumnStatement(tableName, columnInfo);
       executeQuery(statement);
     } else {
       //use addColumn: add_tmp-update-drop-rename for Derby
@@ -731,16 +812,7 @@ public class DBAccessorImpl implements DBAccessor {
           String whereClause) throws SQLException {
 
     StringBuilder query = new StringBuilder(String.format("UPDATE %s SET %s = ", tableName, columnName));
-
-    // Only String and number supported.
-    // Taken from: org.eclipse.persistence.internal.databaseaccess.appendParameterInternal
-    Object dbValue = databasePlatform.convertToDatabaseType(value);
-    String valueString = value.toString();
-    if (dbValue instanceof String) {
-      valueString = "'" + value.toString() + "'";
-    }
-
-    query.append(valueString);
+    query.append(escapeParameter(value));
     query.append(" ");
     query.append(whereClause);
 
@@ -813,10 +885,78 @@ public class DBAccessorImpl implements DBAccessor {
     }
   }
 
+  /**
+   {@inheritDoc}
+   */
+  public void executePreparedQuery(String query, Object...arguments) throws SQLException {
+    executePreparedQuery(query, false, arguments);
+  }
+
+  /**
+   {@inheritDoc}
+   */
+  public void executePreparedQuery(String query, boolean ignoreFailure, Object...arguments) throws SQLException{
+    LOG.info("Executing prepared query: {}", query);
+
+    PreparedStatement preparedStatement = getConnection().prepareStatement(query);
+    setArgumentsForPreparedStatement(preparedStatement, arguments);
+
+    try {
+        preparedStatement.execute();
+    } catch (SQLException e) {
+        if (!ignoreFailure){
+          LOG.error("Error executing prepared query: {}", query, e);
+          throw e;
+        } else {
+          LOG.warn("Error executing prepared query: {}, errorCode={}, message = {}", query, e.getErrorCode(), e.getMessage());
+        }
+    } finally {
+        if (preparedStatement != null) {
+          preparedStatement.close();
+        }
+    }
+  }
+
+  /**
+   {@inheritDoc}
+   */
+  public void executePreparedUpdate(String query, Object...arguments) throws SQLException {
+    executePreparedUpdate(query, false, arguments);
+  }
+
+  /**
+   {@inheritDoc}
+   */
+  public void executePreparedUpdate(String query, boolean ignoreFailure, Object...arguments) throws SQLException{
+    LOG.info("Executing prepared query: {}", query);
+
+    PreparedStatement preparedStatement = getConnection().prepareStatement(query);
+    setArgumentsForPreparedStatement(preparedStatement, arguments);
+
+    try {
+      preparedStatement.executeUpdate();
+    } catch (SQLException e) {
+      if (!ignoreFailure){
+        LOG.error("Error executing prepared query: {}", query, e);
+        throw e;
+      } else {
+        LOG.warn("Error executing prepared query: {}, errorCode={}, message = {}", query, e.getErrorCode(), e.getMessage());
+      }
+    } finally {
+      if (preparedStatement != null) {
+        preparedStatement.close();
+      }
+    }
+  }
+
   @Override
   public void dropTable(String tableName) throws SQLException {
-    String query = dbmsHelper.getDropTableStatement(tableName);
-    executeQuery(query);
+    if (tableExists(tableName)){
+      String query = dbmsHelper.getDropTableStatement(tableName);
+      executeQuery(query);
+    } else {
+      LOG.warn("{} table doesn't exists, skipping", tableName);
+    }
   }
 
 
@@ -844,23 +984,26 @@ public class DBAccessorImpl implements DBAccessor {
     dropFKConstraint(tableName, constraintName, false);
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public void dropFKConstraint(String tableName, String constraintName, boolean ignoreFailure) throws SQLException {
-    // ToDo: figure out if name of index and constraint differs
     String checkedConstraintName = getCheckedForeignKey(convertObjectName(tableName), constraintName);
     if (checkedConstraintName != null) {
       String query = dbmsHelper.getDropFKConstraintStatement(tableName, checkedConstraintName);
       executeQuery(query, ignoreFailure);
-
-      // MySQL also adds indexes in addition to the FK which should be dropped
-      Configuration.DatabaseType databaseType = configuration.getDatabaseType();
-      if (databaseType == DatabaseType.MYSQL) {
-        query = dbmsHelper.getDropIndexStatement(constraintName, tableName);
-        executeQuery(query, true);
-      }
-
     } else {
-      LOG.warn("Constraint {} from {} table not found, nothing to drop", constraintName, tableName);
+      LOG.warn("Foreign key {} from {} table does not exist and will not be dropped",
+          constraintName, tableName);
+    }
+
+    // even if the FK didn't exist, the index constraint might, so check it
+    // indepedently of the FK (but only on MySQL)
+    Configuration.DatabaseType databaseType = configuration.getDatabaseType();
+    if (databaseType == DatabaseType.MYSQL && tableHasIndex(tableName, false, constraintName)) {
+        String query = dbmsHelper.getDropIndexStatement(constraintName, tableName);
+        executeQuery(query, true);
     }
   }
 
@@ -909,11 +1052,11 @@ public class DBAccessorImpl implements DBAccessor {
     dropPKConstraint(tableName, constraintName, false, cascade);
   }
 
-  @Override
   /**
    * Execute script with autocommit and error tolerance, like psql and sqlplus
    * do by default
    */
+  @Override
   public void executeScript(String filePath) throws SQLException, IOException {
     BufferedReader br = new BufferedReader(new FileReader(filePath));
     try {
@@ -1081,7 +1224,7 @@ public class DBAccessorImpl implements DBAccessor {
   public List<String> getIndexesList(String tableName, boolean unique)
     throws SQLException{
     ResultSet rs = getDatabaseMetaData().getIndexInfo(null, dbSchema, convertObjectName(tableName), unique, false);
-    List<String> indexList = new ArrayList<String>();
+    List<String> indexList = new ArrayList<>();
     if (rs != null){
       try{
         while (rs.next()) {
@@ -1144,6 +1287,7 @@ public class DBAccessorImpl implements DBAccessor {
 
         break;
       }
+      case MYSQL:
       case POSTGRES: {
         String lookupPrimaryKeyNameSql = String.format(
             "SELECT constraint_name FROM information_schema.table_constraints AS tc WHERE tc.constraint_type = 'PRIMARY KEY' AND table_name = '%s'",
@@ -1162,6 +1306,7 @@ public class DBAccessorImpl implements DBAccessor {
 
         break;
       }
+
       default:
         break;
     }
@@ -1197,5 +1342,365 @@ public class DBAccessorImpl implements DBAccessor {
     } else {
       dropPKConstraint(tableName, primaryKeyConstraintName, true);
     }
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public void addDefaultConstraint(String tableName, DBColumnInfo column) throws SQLException {
+    String defaultValue = escapeParameter(column.getDefaultValue());
+    StringBuilder builder = new StringBuilder(String.format("ALTER TABLE %s ", tableName));
+
+    DatabaseType databaseType = configuration.getDatabaseType();
+    switch (databaseType) {
+      case DERBY:
+      case MYSQL:
+      case POSTGRES:
+      case SQL_ANYWHERE:
+        builder.append(String.format("ALTER %s SET DEFAULT %s", column.getName(), defaultValue));
+        break;
+      case ORACLE:
+        builder.append(String.format("MODIFY %s DEFAULT %s", column.getName(), defaultValue));
+        break;
+      case SQL_SERVER:
+        builder.append(
+            String.format("ALTER COLUMN %s SET DEFAULT %s", column.getName(), defaultValue));
+        break;
+      default:
+        builder.append(String.format("ALTER %s SET DEFAULT %s", column.getName(), defaultValue));
+        break;
+    }
+
+    executeQuery(builder.toString());
+  }
+
+  /**
+   * Gets an escaped version of the specified value suitable for including as a
+   * parameter when building statements.
+   *
+   * @param value
+   *          the value to escape
+   * @return the escaped value
+   */
+  private String escapeParameter(Object value) {
+    return escapeParameter(value, databasePlatform);
+  }
+
+  public static String escapeParameter(Object value, DatabasePlatform databasePlatform) {
+    if (value == null) {
+      return null;
+    }
+
+    if (value instanceof Enum<?>) {
+      value = ((Enum) value).name();
+    }
+
+    String valueString = value.toString();
+    if (value instanceof String || databasePlatform.convertToDatabaseType(value) instanceof String) {
+      valueString = "'" + valueString + "'";
+    }
+
+    return valueString;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public void copyColumnToAnotherTable(String sourceTableName, DBColumnInfo sourceColumn, String sourceIDFieldName1, String sourceIDFieldName2, String sourceIDFieldName3,
+                                       String targetTableName, DBColumnInfo targetColumn, String targetIDFieldName1, String targetIDFieldName2, String targetIDFieldName3,
+                                       String sourceConditionFieldName, String condition, Object initialValue) throws SQLException {
+
+    if (tableHasColumn(sourceTableName, sourceIDFieldName1) &&
+        tableHasColumn(sourceTableName, sourceIDFieldName2) &&
+        tableHasColumn(sourceTableName, sourceIDFieldName3) &&
+        tableHasColumn(sourceTableName, sourceColumn.getName()) &&
+        tableHasColumn(sourceTableName, sourceConditionFieldName) &&
+        tableHasColumn(targetTableName, targetIDFieldName1) &&
+        tableHasColumn(targetTableName, targetIDFieldName2) &&
+        tableHasColumn(targetTableName, targetIDFieldName3)
+        ) {
+
+      final String moveSQL = dbmsHelper.getCopyColumnToAnotherTableStatement(sourceTableName, sourceColumn.getName(),
+          sourceIDFieldName1, sourceIDFieldName2, sourceIDFieldName3, targetTableName, targetColumn.getName(),
+          targetIDFieldName1, targetIDFieldName2, targetIDFieldName3, sourceConditionFieldName, condition);
+      final boolean isTargetColumnNullable = targetColumn.isNullable();
+
+      targetColumn.setNullable(true);  // setting column nullable by default to move rows with null
+
+      addColumn(targetTableName, targetColumn);
+      executeUpdate(moveSQL, false);
+
+      if (initialValue != null) {
+        String updateSQL = dbmsHelper.getColumnUpdateStatementWhereColumnIsNull(convertObjectName(targetTableName),
+            convertObjectName(targetColumn.getName()), convertObjectName(targetColumn.getName()));
+
+        executePreparedUpdate(updateSQL, initialValue);
+      }
+
+      if (!isTargetColumnNullable) {
+        setColumnNullable(targetTableName, targetColumn.getName(), false);
+      }
+    }
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public List<Integer> getIntColumnValues(String tableName, String columnName, String[] conditionColumnNames,
+                                          String[] values, boolean ignoreFailure) throws SQLException {
+    return executeQuery(tableName, new String[]{columnName}, conditionColumnNames, values, ignoreFailure,
+        new ResultGetter<List<Integer>>() {
+          private List<Integer> results = new ArrayList<>();
+
+          @Override
+          public void collect(ResultSet resultSet) throws SQLException {
+            results.add(resultSet.getInt(1));
+          }
+
+          @Override
+          public List<Integer> getResult() {
+            return results;
+          }
+        });
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public Map<Long, String> getKeyToStringColumnMap(String tableName, String keyColumnName, String valueColumnName,
+                                            String[] conditionColumnNames, String[] values, boolean ignoreFailure) throws SQLException {
+    return executeQuery(tableName, new String[]{keyColumnName, valueColumnName}, conditionColumnNames, values, ignoreFailure,
+        new ResultGetter<Map<Long, String>>() {
+          Map<Long, String> map = new HashMap<>();
+
+          @Override
+          public void collect(ResultSet resultSet) throws SQLException {
+            map.put(resultSet.getLong(1), resultSet.getString(2));
+          }
+
+          @Override
+          public Map<Long, String> getResult() {
+            return map;
+          }
+        });
+  }
+
+  /**
+   * Executes a query returning data as specified by the {@link ResultGetter} implementation.
+   *
+   * @param tableName            the table name
+   * @param requestedColumnNames an array of column names to select
+   * @param conditionColumnNames an array of column names to use in the where clause
+   * @param conditionValues      an array of value to pair with the column names in conditionColumnNames
+   * @param ignoreFailure        true to ignore failures executing the query; false otherwise (errors building the query will be thrown, however)
+   * @param resultGetter         a {@link ResultGetter} implementation used to format the data into the expected return value
+   * @return the result from the resultGetter
+   * @throws SQLException
+   */
+  protected <T> T executeQuery(String tableName, String[] requestedColumnNames,
+                               String[] conditionColumnNames, String[] conditionValues,
+                               boolean ignoreFailure, ResultGetter<T> resultGetter) throws SQLException {
+
+    // Build the query...
+    String query = buildQuery(tableName, requestedColumnNames, conditionColumnNames, conditionValues);
+
+    // Execute the query
+    Statement statement = getConnection().createStatement();
+    ResultSet resultSet = null;
+    try {
+      resultSet = statement.executeQuery(query);
+      if (resultSet != null) {
+        while (resultSet.next()) {
+          resultGetter.collect(resultSet);
+        }
+      }
+    } catch (SQLException e) {
+      LOG.warn("Unable to execute query: " + query, e);
+      if (!ignoreFailure) {
+        throw e;
+      }
+    } finally {
+      if (resultSet != null) {
+        resultSet.close();
+      }
+      if (statement != null) {
+        statement.close();
+      }
+    }
+
+    return resultGetter.getResult();
+  }
+
+  /**
+   * Build a SELECT statement using the supplied table name, request columns and conditional column/value pairs.
+   * <p>
+   * The conditional pairs are optional but multiple pairs will be ANDed together.
+   * <p>
+   * Examples:
+   * <ul>
+   * <li>SELECT id FROM table1</li>
+   * <li>SELECT id FROM table1 WHERE name='value1'</li>
+   * <li>SELECT id FROM table1 WHERE name='value1' AND key='key1'</li>
+   * <li>SELECT id, name FROM table1 WHERE key='key1'</li>
+   * <li>SELECT id, name FROM table1 WHERE key='key1' AND allowed='1'</li>
+   * </ul>
+   *
+   * @param tableName            the table name
+   * @param requestedColumnNames an array of column names to select
+   * @param conditionColumnNames an array of column names to use in the where clause
+   * @param conditionValues      an array of value to pair with the column names in conditionColumnNames
+   * @return a query string
+   * @throws SQLException
+   */
+  protected String buildQuery(String tableName, String[] requestedColumnNames, String[] conditionColumnNames, String[] conditionValues) throws SQLException {
+    if (!tableExists(tableName)) {
+      throw new IllegalArgumentException(String.format("%s table does not exist", tableName));
+    }
+    StringBuilder builder = new StringBuilder();
+    builder.append("SELECT ");
+
+    // Append the requested column names:
+    if ((requestedColumnNames == null) || (requestedColumnNames.length == 0)) {
+      throw new IllegalArgumentException("no columns for the select have been set");
+    }
+    for (String name : requestedColumnNames) {
+      if (!tableHasColumn(tableName, name)) {
+        throw new IllegalArgumentException(String.format("%s table does not contain %s column", tableName, name));
+      }
+    }
+    builder.append(requestedColumnNames[0]);
+    for (int i = 1; i < requestedColumnNames.length; i++) {
+      builder.append(", ").append(requestedColumnNames[1]);
+    }
+
+    // Append the source table
+    builder.append(" FROM ").append(tableName);
+
+    // Add the WHERE clause using the conditionColumnNames and the conditionValues
+    if (conditionColumnNames != null && conditionColumnNames.length > 0) {
+      for (String name : conditionColumnNames) {
+        if (!tableHasColumn(tableName, name)) {
+          throw new IllegalArgumentException(String.format("%s table does not contain %s column", tableName, name));
+        }
+      }
+      if (conditionColumnNames.length != conditionValues.length) {
+        throw new IllegalArgumentException("number of columns should be equal to number of values");
+      }
+      builder.append(" WHERE ").append(conditionColumnNames[0]).append("='").append(conditionValues[0]).append("'");
+      for (int i = 1; i < conditionColumnNames.length; i++) {
+        builder.append(" AND ").append(conditionColumnNames[i]).append("='").append(conditionValues[i]).append("'");
+      }
+    }
+
+    return builder.toString();
+  }
+
+  /**
+   * Move column data from {@code sourceTableName} to {@code targetTableName} using {@code sourceIDFieldName} and
+   * {@code targetIDFieldName} keys to match right rows
+   *
+   * @param sourceTableName
+   *          the source table name
+   * @param sourceColumn
+   *          the source column name
+   * @param sourceIDFieldName
+   *          the source id key filed name matched with {@code targetIDFieldName}
+   * @param targetTableName
+   *          the target table name
+   * @param targetColumn
+   *          the target column name
+   * @param targetIDFieldName
+   *          the target id key name matched with {@code sourceIDFieldName}
+   * @param initialValue
+   *          initial value for null-contained cells
+   * @throws SQLException
+   */
+  @Override
+  public void moveColumnToAnotherTable(String sourceTableName, DBColumnInfo sourceColumn, String sourceIDFieldName,
+              String targetTableName, DBColumnInfo targetColumn, String targetIDFieldName, Object initialValue) throws SQLException {
+
+    if (tableHasColumn(sourceTableName, sourceIDFieldName) &&
+      tableHasColumn(sourceTableName, sourceColumn.getName()) &&
+      tableHasColumn(targetTableName, targetIDFieldName)
+    ) {
+
+      final String moveSQL = dbmsHelper.getCopyColumnToAnotherTableStatement(sourceTableName, sourceColumn.getName(),
+        sourceIDFieldName, targetTableName, targetColumn.getName(),targetIDFieldName);
+      final boolean isTargetColumnNullable = targetColumn.isNullable();
+
+      targetColumn.setNullable(true);  // setting column nullable by default to move rows with null
+
+      addColumn(targetTableName, targetColumn);
+      executeUpdate(moveSQL, false);
+
+      if (initialValue != null) {
+        String updateSQL = dbmsHelper.getColumnUpdateStatementWhereColumnIsNull(convertObjectName(targetTableName),
+          convertObjectName(targetColumn.getName()), convertObjectName(targetColumn.getName()));
+
+        executePreparedUpdate(updateSQL, initialValue);
+      }
+
+      if (!isTargetColumnNullable) {
+        setColumnNullable(targetTableName, targetColumn.getName(), false);
+      }
+      dropColumn(sourceTableName, sourceColumn.getName());
+    }
+  }
+
+  /**
+   * Remove all rows from the table
+   *
+   * @param tableName name of the table
+   */
+  @Override
+  public void clearTable(String tableName) throws SQLException {
+    if (tableExists(tableName)){
+      String sqlQuery = "DELETE FROM " + convertObjectName(tableName);
+      executeQuery(sqlQuery);
+    } else {
+      LOG.warn("{} table doesn't exists, skipping", tableName);
+    }
+  }
+
+  /**
+   * Reset all rows with {@code value} for {@code columnName} column
+   *
+   * @param tableName  name of the table
+   * @param columnName
+   * @param value      data to use for update
+   */
+  @Override
+  public void clearTableColumn(String tableName, String columnName, Object value) throws SQLException {
+    if (tableExists(tableName)){
+      String sqlQuery = String.format("UPDATE %s SET %s = ?", convertObjectName(tableName), convertObjectName(columnName));
+      executePreparedUpdate(sqlQuery, value);
+    } else {
+      LOG.warn("{} table doesn't exists, skipping", tableName);
+    }
+  }
+
+  /**
+   * {@link ResultGetter} is an interface to implement to help compile results
+   * from a SQL query.
+   */
+  private interface ResultGetter<T> {
+    /**
+     * Collect results from the query's {@link ResultSet}
+     *
+     * @param resultSet the result set
+     * @throws SQLException
+     */
+    void collect(ResultSet resultSet) throws SQLException;
+
+    /**
+     * Return the compiled results in the expected data type
+     *
+     * @return the results
+     */
+    T getResult();
   }
 }

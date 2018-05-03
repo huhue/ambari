@@ -193,6 +193,7 @@ describe('App.WizardStep6Controller', function () {
       sinon.stub(controller, 'setInstalledComponents');
       sinon.stub(controller, 'restoreComponentsSelection');
       sinon.stub(controller, 'selectClientHost');
+      sinon.stub(controller, 'enableCheckboxesForDependentComponents');
     });
 
     afterEach(function() {
@@ -200,12 +201,14 @@ describe('App.WizardStep6Controller', function () {
       controller.setInstalledComponents.restore();
       controller.restoreComponentsSelection.restore();
       controller.selectClientHost.restore();
+      controller.enableCheckboxesForDependentComponents.restore();
     });
 
     describe("slaveComponents is null", function() {
 
       beforeEach(function() {
         controller.set('content.slaveComponentHosts', null);
+        controller.set('content.controllerName', null);
       });
 
       it("selectRecommendedComponents should be called", function() {
@@ -223,6 +226,15 @@ describe('App.WizardStep6Controller', function () {
       it("selectClientHost should be called", function() {
         expect(controller.renderSlaves(hostsObj)).to.eql(hostsObj);
         expect(controller.selectClientHost.calledWith(hostsObj)).to.be.true;
+      });
+      it("enableCheckboxesForDependentComponents should not be called", function() {
+        expect(controller.renderSlaves(hostsObj)).to.eql(hostsObj);
+        expect(controller.enableCheckboxesForDependentComponents.calledOnce).to.be.false;
+      });
+      it("enableCheckboxesForDependentComponents should be called", function() {
+        controller.set('content.controllerName', 'addServiceController');
+        expect(controller.renderSlaves(hostsObj)).to.eql(hostsObj);
+        expect(controller.enableCheckboxesForDependentComponents.calledOnce).to.be.true;
       });
     });
 
@@ -259,11 +271,13 @@ describe('App.WizardStep6Controller', function () {
       checkboxes: [
         {
           component: 'C1',
-          isInstalled: false
+          isInstalled: false,
+          checked: false
         },
         {
           component: 'C2',
-          isInstalled: false
+          isInstalled: false,
+          checked: false
         }
       ]
     }];
@@ -288,6 +302,8 @@ describe('App.WizardStep6Controller', function () {
       controller.setInstalledComponents(hostsObj);
       expect(hostsObj[0].checkboxes[0].isInstalled).to.be.true;
       expect(hostsObj[0].checkboxes[1].isInstalled).to.be.false;
+      expect(hostsObj[0].checkboxes[0].checked).to.be.true;
+      expect(hostsObj[0].checkboxes[1].checked).to.be.false;
     });
   });
 
@@ -369,15 +385,23 @@ describe('App.WizardStep6Controller', function () {
       checkboxes: [
         {
           component: 'C1',
-          checked: false
+          checked: false,
+          isDisabled: false
         },
         {
           component: 'C2',
-          checked: false
+          checked: false,
+          isDisabled: true
+        },
+        {
+          component: 'C3',
+          checked: false,
+          isDisabled: false
         },
         {
           component: 'CLIENT',
-          checked: false
+          checked: false,
+          isDisabled: false
         }
       ]
     }];
@@ -389,6 +413,7 @@ describe('App.WizardStep6Controller', function () {
             name: 'g1',
             components: [
               {name: 'C1'},
+              {name: 'C2'},
               {name: 'C_CLIENT'}
             ]
           }
@@ -418,16 +443,22 @@ describe('App.WizardStep6Controller', function () {
       expect(hostsObj[0].checkboxes[0].checked).to.be.true;
     });
 
-    it("C2 should not be checked", function() {
+    it("C2 should not be checked, as it is disabled", function() {
       controller.set('content.recommendations', recommendations);
       controller.selectRecommendedComponents(hostsObj);
       expect(hostsObj[0].checkboxes[1].checked).to.be.false;
     });
 
+    it("C3 should not be checked", function() {
+      controller.set('content.recommendations', recommendations);
+      controller.selectRecommendedComponents(hostsObj);
+      expect(hostsObj[0].checkboxes[2].checked).to.be.false;
+    });
+
     it("CLIENT should be checked", function() {
       controller.set('content.recommendations', recommendations);
       controller.selectRecommendedComponents(hostsObj);
-      expect(hostsObj[0].checkboxes[2].checked).to.be.true;
+      expect(hostsObj[0].checkboxes[3].checked).to.be.true;
     });
   });
 
@@ -951,7 +982,7 @@ describe('App.WizardStep6Controller', function () {
       });
   });
 
-  describe('#getHostNames', function () {
+  describe('#getAllHosts', function () {
     var tests = Em.A([
       {
         hosts: {
@@ -989,8 +1020,8 @@ describe('App.WizardStep6Controller', function () {
     tests.forEach(function (test) {
       it(test.m, function () {
         controller.set('content.hosts', test.hosts);
-        var r = controller.getHostNames();
-        expect(r).to.eql(test.e);
+        var r = controller.getAllHosts();
+        expect(r.mapProperty('hostName')).to.eql(test.e);
       });
     });
   });
@@ -1104,7 +1135,7 @@ describe('App.WizardStep6Controller', function () {
         masterComponentHosts: Em.A([
           {hostName: 'h1', component: 'c1'}
         ]),
-        hosts: {'h1': {}},
+        hosts: [{hostName: 'h1'}],
         m: 'one host and one component',
         e:{
           blueprint: {
@@ -1135,7 +1166,7 @@ describe('App.WizardStep6Controller', function () {
           {hostName: 'h2', component: 'c2'},
           {hostName: 'h2', component: 'c3'}
         ]),
-        hosts: {'h1': {}, 'h2': {}, 'h3': {}},
+        hosts: [{hostName: 'h1'}, {hostName: 'h2'}, {hostName: 'h3'}],
         m: 'multiple hosts and multiple components',
         e: {
           blueprint: {
@@ -1187,7 +1218,7 @@ describe('App.WizardStep6Controller', function () {
     tests.forEach(function (test) {
       it(test.m, function () {
         controller.set('content.masterComponentHosts', test.masterComponentHosts);
-        controller.set('content.hosts', test.hosts);
+        controller.set('hosts', test.hosts);
         var r = controller.getCurrentMastersBlueprint();
         expect(r).to.eql(test.e);
       });
@@ -1824,6 +1855,143 @@ describe('App.WizardStep6Controller', function () {
 
     });
 
+  });
+   
+  describe('#anyHostErrors', function () {
+
+    var tests = [
+    {
+       it: "anyHostErrors returns true if errorMessages are defined",
+       host: Em.A([Em.Object.create({
+          errorMessages: "Error Message"
+       })]),
+       result: true
+     },
+     {
+       it: "anyHostErrors returns false if errorMessages are not defined",
+       host: Em.A([Em.Object.create({
+       })]),
+       result: false
+     }
+    ];
+
+    tests.forEach(function(test) {
+      it(test.it, function() {
+        controller.set('hosts', test.host);
+        expect(controller.get('anyHostErrors')).to.equal(test.result);
+      })
+    });   
+  });
+
+
+   
+  describe('#anyHostWarnings', function () {
+
+    var tests = [
+    {
+       it: "anyHostWarnings returns true if warnMessages are defined",
+       host: Em.A([Em.Object.create({
+          warnMessages: "Warning Message"
+       })]),
+       result: true
+     },
+     {
+       it: "anyHostWarnings returns false if warnMessages are not defined",
+       host: Em.A([Em.Object.create({
+       })]),
+       result: false
+     }
+    ];
+
+    tests.forEach(function(test) {
+      it(test.it, function() {
+        controller.set('hosts', test.host);
+        expect(controller.get('anyHostWarnings')).to.equal(test.result);
+      })
+    });   
+  });
+
+  describe('#enableCheckboxesForDependentComponents', function () {
+
+    beforeEach(function () {
+      sinon.stub(App.StackService, 'find').returns([
+        Em.Object.create({
+          serviceName: 's1',
+          isInstalled: false,
+          isSelected: true,
+          serviceComponents: [
+            Em.Object.create({
+              componentName: 'c1',
+              isSlave: true,
+              dependencies: [
+                {
+                  serviceName: 's2',
+                  componentName: 'c2'
+                }
+              ]
+            })
+          ]
+        }),
+        Em.Object.create({
+          serviceName: 's2',
+          isInstalled: true,
+          isSelected: false,
+          serviceComponents: [
+            Em.Object.create({
+              componentName: 'c2',
+              isSlave: true,
+              dependencies: []
+            })
+          ]
+        })
+      ]);
+      sinon.stub(App.StackServiceComponent, 'find').returns([
+          Em.Object.create({
+            componentName: 'c2',
+            maxToInstall: 2
+          })
+      ]);
+    });
+
+    afterEach(function () {
+      App.StackService.find.restore();
+      App.StackServiceComponent.find.restore();
+    });
+
+    it('it should enable appropriate checkboxes', function() {
+      var hostObj = [
+        {
+          checkboxes: [
+            {
+              component: 'c1',
+              isInstalled: false,
+              isDisabled: false
+            },
+            {
+              component: 'c2',
+              isInstalled: false,
+              isDisabled: true
+            }
+          ]
+        },
+        {
+          checkboxes: [
+            {
+              component: 'c1',
+              isInstalled: false,
+              isDisabled: false
+            },
+            {
+              component: 'c2',
+              isInstalled: false,
+              isDisabled: true
+            }
+          ]
+        }
+      ];
+      expect(controller.enableCheckboxesForDependentComponents(hostObj)).to.be.true;
+      expect(hostObj[1].checkboxes[1].isDisabled).to.be.false;
+    })
   });
 
 });

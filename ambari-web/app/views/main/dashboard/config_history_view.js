@@ -59,23 +59,15 @@ App.MainConfigHistoryView = App.TableView.extend(App.TableServerViewMixin, {
     this.addObserver('startIndex', this, 'updatePagination');
     this.addObserver('displayLength', this, 'updatePagination');
     this.set('isInitialRendering', true);
-    this.refresh();
-    this.set('controller.isPolling', true);
-    this.get('controller').doPolling();
+    this.refresh(true);
+    this.get('controller').subscribeToUpdates();
   },
 
   /**
    * stop polling after leaving config history page
    */
   willDestroyElement: function () {
-    this.set('controller.isPolling', false);
-    clearTimeout(this.get('controller.timeoutRef'));
-  },
-
-  updateFilter: function (iColumn, value, type) {
-    if (!this.get('isInitialRendering')) {
-      this._super(iColumn, value, type);
-    }
+    this.get('controller').unsubscribeOfUpdates();
   },
 
   sortView: sort.serverWrapperView,
@@ -106,80 +98,6 @@ App.MainConfigHistoryView = App.TableView.extend(App.TableServerViewMixin, {
     displayName: Em.I18n.t('common.notes')
   }),
 
-  serviceFilterView: filters.createSelectView({
-    column: 1,
-    fieldType: 'filter-input-width',
-    content: function () {
-      return [
-        {
-          value: '',
-          label: Em.I18n.t('common.all')
-        }
-      ].concat(App.StackService.find().map(function (service) {
-        return {
-          value: service.get('serviceName'),
-          label: service.get('displayName')
-        }
-      }));
-    }.property('App.router.clusterController.isLoaded'),
-    onChangeValue: function () {
-      this.get('parentView').updateFilter(this.get('column'), this.get('value'), 'select');
-    }
-  }),
-
-  configGroupFilterView: filters.createSelectView({
-    column: 2,
-    fieldType: 'filter-input-width',
-    content: function () {
-      var groupName = App.ServiceConfigVersion.find().mapProperty('groupName').uniq();
-      if (groupName.indexOf(null) > -1) {
-        groupName.splice(groupName.indexOf(null), 1);
-      }
-      return [
-        {
-          value: '',
-          label: Em.I18n.t('common.all')
-        }
-      ].concat(groupName.map(function (item) {
-        return {
-          value: item,
-          label: item
-        }
-      }));
-    }.property('parentView.isInitialRendering'),
-    onChangeValue: function () {
-      this.get('parentView').updateFilter(this.get('column'), this.get('value'), 'select');
-    }
-  }),
-
-  modifiedFilterView: filters.createSelectView({
-    column: 3,
-    appliedEmptyValue: ["", ""],
-    fieldType: 'filter-input-width,modified-filter',
-    emptyValue: 'Any',
-    contentBinding: "controller.modifiedFilter.content",
-    onChangeValue: function () {
-      this.set("controller.modifiedFilter.optionValue", this.get('selected'));
-      this.get('parentView').updateFilter(this.get('column'), [this.get('controller.modifiedFilter.actualValues.startTime'), this.get('controller.modifiedFilter.actualValues.endTime')], 'range');
-    }
-  }),
-
-  authorFilterView: filters.createTextView({
-    column: 4,
-    fieldType: 'filter-input-width',
-    onChangeValue: function () {
-      this.get('parentView').updateFilter(this.get('column'), this.get('value'), 'string');
-    }
-  }),
-
-  notesFilterView: filters.createTextView({
-    column: 5,
-    fieldType: 'filter-input-width',
-    onChangeValue: function () {
-      this.get('parentView').updateFilter(this.get('column'), this.get('value'), 'string');
-    }
-  }),
-
   ConfigVersionView: Em.View.extend({
     tagName: 'tr',
     showLessNotes: true,
@@ -192,31 +110,20 @@ App.MainConfigHistoryView = App.TableView.extend(App.TableServerViewMixin, {
 
     // Define if show plain text label or link
     isServiceLinkDisabled: function () {
-      return this.get('content.serviceName') === 'KERBEROS' && !App.Service.find().someProperty('serviceName', 'KERBEROS');
-    }.property('content.serviceName')
+      return this.get('content.serviceName') === 'KERBEROS' && !App.Service.find().someProperty('serviceName', 'KERBEROS') || this.get('content.isConfigGroupDeleted');
+    }.property('content.serviceName', 'content.isConfigGroupDeleted')
   }),
 
   /**
    * refresh table content
+   * @param {boolean} shouldUpdateCounter
    */
-  refresh: function () {
+  refresh: function (shouldUpdateCounter) {
     var self = this;
     this.set('filteringComplete', false);
-    this.get('controller').load().done(function () {
+    this.get('controller').load(shouldUpdateCounter).done(function () {
       self.refreshDone.apply(self);
     });
-  },
-
-  /**
-   * Clear all filter values, update filter conditions in the localStorage and update table data with API-request
-   *
-   * @method clearFilters
-   * @override
-   */
-  clearFilters: function () {
-    this._super();
-    this.saveAllFilterConditions();
-    this.refresh();
   },
 
   /**
@@ -231,13 +138,9 @@ App.MainConfigHistoryView = App.TableView.extend(App.TableServerViewMixin, {
     App.loadTimer.finish('Config History Page');
   },
 
-  /**
-   * associations between host property and column index
-   * @type {Array}
-   */
-  colPropAssoc: function () {
-    return this.get('controller.colPropAssoc');
-  }.property('controller.colPropAssoc'),
+  saveStartIndex: function() {
+    App.db.setStartIndex(this.get('controller.name'), this.get('startIndex'));
+  }.observes('startIndex'),
 
   filter: Em.K
 });

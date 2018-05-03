@@ -43,7 +43,7 @@ describe('App.MainAdminHighAvailabilityController', function () {
       App.router.transitionTo.restore();
       controller.showErrorPopup.restore();
       App.HostComponent.find.restore();
-      App.router.get.restore();
+      App.get.restore();
     });
 
     describe('NAMENODE in INSTALLED state', function () {
@@ -66,7 +66,7 @@ describe('App.MainAdminHighAvailabilityController', function () {
             workStatus: 'INSTALLED'
           })
         ];
-        sinon.stub(App.router, 'get', function() {
+        sinon.stub(App, 'get', function() {
           return 3;
         });
         this.result = controller.enableHighAvailability();
@@ -91,7 +91,7 @@ describe('App.MainAdminHighAvailabilityController', function () {
       ];
 
       beforeEach(function () {
-        sinon.stub(App.router, 'get', function(){
+        sinon.stub(App, 'get', function(){
           return 3;
         });
         this.result = controller.enableHighAvailability();
@@ -128,7 +128,7 @@ describe('App.MainAdminHighAvailabilityController', function () {
       ];
 
       beforeEach(function () {
-        sinon.stub(App.router, 'get', function () {
+        sinon.stub(App, 'get', function () {
           return 1;
         });
         this.result = controller.enableHighAvailability();
@@ -164,7 +164,7 @@ describe('App.MainAdminHighAvailabilityController', function () {
             workStatus: 'INSTALLED'
           })
         ];
-        sinon.stub(App.router, 'get', function() {
+        sinon.stub(App, 'get', function() {
           return 3;
         });
         this.result = controller.enableHighAvailability();
@@ -197,6 +197,59 @@ describe('App.MainAdminHighAvailabilityController', function () {
     it('message is string', function () {
       var message = 'hello';
       expect(controller.joinMessage(message)).to.equal('<p>hello</p>');
+    });
+  });
+
+  describe('#manageJournalNode()', function () {
+
+    beforeEach(function () {
+      this.mock = sinon.stub(App.HostComponent, 'find');
+      sinon.stub(App.router, 'transitionTo', Em.K);
+      sinon.spy(controller, "showErrorPopup");
+    });
+
+    afterEach(function () {
+      App.router.transitionTo.restore();
+      controller.showErrorPopup.restore();
+      App.HostComponent.find.restore();
+    });
+
+    it('should show error popup if there is no NNs', function () {
+      this.mock.returns([]);
+      var result = controller.manageJournalNode();
+      expect(result).to.be.false;
+      expect(controller.showErrorPopup.calledOnce).to.be.true;
+    });
+
+    it('should show error popup if there is no NNs (2)', function () {
+      this.mock.returns([
+        Em.Object.create({
+          componentName: 'NAMENODE',
+          displayNameAdvanced: 'Active NameNode'
+        }),
+        Em.Object.create({
+          componentName: 'NAMENODE'
+        })
+      ]);
+      var result = controller.manageJournalNode();
+      expect(result).to.be.false;
+      expect(controller.showErrorPopup.calledOnce).to.be.true;
+    });
+
+    it('should call transition to wizard if we have both standby and active NNs', function () {
+      this.mock.returns([
+        Em.Object.create({
+          componentName: 'NAMENODE',
+          displayNameAdvanced: 'Active NameNode'
+        }),
+        Em.Object.create({
+          componentName: 'NAMENODE',
+          displayNameAdvanced: 'Standby NameNode'
+        })
+      ]);
+      var result = controller.manageJournalNode();
+      expect(result).to.be.true;
+      expect(App.router.transitionTo.calledOnce).to.be.true;
     });
   });
 

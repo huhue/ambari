@@ -36,6 +36,10 @@ App.Router.map(function() {
 
 var RANGER_SITE = 'ranger-yarn-plugin-properties';
 var RANGER_YARN_ENABLED = 'ranger-yarn-plugin-enabled';
+
+var YARN_SITE = 'yarn-site';
+var PREEMPTION_YARN_ENABLE = 'yarn.resourcemanager.scheduler.monitor.enable';
+var NODE_LABELS_YARN_ENABLED = 'yarn.node-labels.enabled';
 /**
  * The queues route.
  *
@@ -198,11 +202,69 @@ App.ErrorRoute = Ember.Route.extend({
 
 App.CapschedRoute = Ember.Route.extend({
   actions: {
-    rollbackProp: function(prop, item) {
-      var attributes = item.changedAttributes();
-      if (attributes.hasOwnProperty(prop)) {
-        item.set(prop, attributes[prop][0]);
+    saveCapSchedConfigs: function(saveMode, forceRefresh) {
+      var store = this.get('store'),
+      capschedCtrl = this.controllerFor("capsched"),
+      eventBus = this.get('eventBus'),
+      that = this;
+
+      eventBus.publish('beforeSavingConfigs');
+
+      if (forceRefresh) {
+        return this.forceRefreshOrRestartCapSched(saveMode);
       }
+
+      var collectedLabels = capschedCtrl.get('queues').reduce(function (prev,q) {
+        return prev.pushObjects(q.get('labels.content'));
+      },[]);
+
+      var scheduler = capschedCtrl.get('content').save(),
+          queues = capschedCtrl.get('queues').save(),
+          labels = DS.ManyArray.create({content: collectedLabels}).save(),
+          opt = '';
+
+      if (saveMode == 'restart') {
+        opt = 'saveAndRestart';
+      } else if (saveMode == 'refresh') {
+        opt = 'saveAndRefresh';
+      }
+
+      capschedCtrl.startSpinner(saveMode);
+      Em.RSVP.Promise.all([labels, queues, scheduler]).then(
+        Em.run.bind(that,'saveConfigsSuccess'),
+        Em.run.bind(that,'saveConfigsError', 'save')
+      ).then(function () {
+        eventBus.publish('afterConfigsSaved');
+        if (opt) {
+          return store.relaunchCapSched(opt);
+        }
+      }).then(function(){
+        if (opt) {
+          eventBus.publish('afterConfigsSaved', false);
+        }
+        return store.getRmSchedulerConfigInfo();
+      }).catch(
+        Em.run.bind(this,'saveConfigsError', opt)
+      ).finally(function(){
+        capschedCtrl.stopSpinner();
+        store.setLastSavedConfigXML();
+      });
+    },
+    viewConfigXmlDiff: function() {
+      var store = this.get('store'),
+        controller = this.controllerFor("capsched"),
+        lastSavedXML = store.get('lastSavedConfigXML'),
+        currentXmlConfigs = store.buildConfig('xml'),
+        diffConfigs = {baseXML: lastSavedXML, newXML: currentXmlConfigs};
+
+      controller.viewConfigXmlDiff(diffConfigs);
+    },
+    viewCapSchedConfigXml: function() {
+      var store = this.get('store'),
+        controller = this.controllerFor("capsched"),
+        viewXmlConfigs = store.buildConfig('xml');
+
+      controller.viewCapSchedXml({xmlConfig: viewXmlConfigs});
     }
   },
   beforeModel: function(transition) {
@@ -229,14 +291,29 @@ App.CapschedRoute = Ember.Route.extend({
         });
         return store.get('nodeLabels');
       }).then(function() {
-        return store.findQuery('config', {
+        var rangerEnabled = store.findQuery('config', {
           siteName: RANGER_SITE,
           configName: RANGER_YARN_ENABLED
-        }).then(function() {
-          return store.find('config', "siteName_" + RANGER_SITE + "_configName_" + RANGER_YARN_ENABLED)
-            .then(function(data) {
-              controller.set('isRangerEnabledForYarn', data.get('configValue'));
-            });
+        });
+        var nodeLabelsEnabled = store.findQuery('config', {
+          siteName: YARN_SITE,
+          configName: NODE_LABELS_YARN_ENABLED
+        });
+        var preemptionEnabled = store.findQuery('config', {
+          siteName: YARN_SITE,
+          configName: PREEMPTION_YARN_ENABLE
+        });
+        Ember.RSVP.Promise.all([rangerEnabled, nodeLabelsEnabled, preemptionEnabled]).then(function() {
+          var rangerConfig = store.getById('config', "siteName_" + RANGER_SITE + "_configName_" + RANGER_YARN_ENABLED),
+            nodeLabelConfig = store.getById('config', "siteName_" + YARN_SITE + "_configName_" + NODE_LABELS_YARN_ENABLED),
+            preemptionConfig = store.getById('config', "siteName_" + YARN_SITE + "_configName_" + PREEMPTION_YARN_ENABLE),
+            rangerValue = rangerConfig.get('configValue'),
+            nodeLabelValue = nodeLabelConfig.get('configValue'),
+            preemptionValue = preemptionConfig.get('configValue');
+
+          controller.set('isRangerEnabledForYarn', rangerValue);
+          store.set('isNodeLabelsEnabledByRM', nodeLabelValue === "true");
+          controller.set('isPreemptionEnabledByYarn', preemptionValue);
         });
       }).then(function() {
         loadingController.set('model', {
@@ -245,19 +322,78 @@ App.CapschedRoute = Ember.Route.extend({
         return store.find('queue');
       }).then(function(queues) {
         controller.set('queues', queues);
+        var allQLabels = store.all('label');
+        controller.set('allQueueLabels', allQLabels);
+        loadingController.set('model', {
+          message: 'loading rm info'
+        });
+        return store.getRmSchedulerConfigInfo();
+      }).then(function() {
         return store.find('scheduler', 'scheduler');
       }).then(function(scheduler){
+        store.setLastSavedConfigXML();
         resolve(scheduler);
       }).catch(function(e) {
         reject(e);
       });
     }, 'App: CapschedRoute#model');
+  },
+  loadingError: function (transition, error) {
+    var refuseController = this.container.lookup('controller:refuse') || this.generateController('refuse'),
+        message = error.responseJSON || {'message': 'Something went wrong.'};
+
+    transition.abort();
+    refuseController.set('model', message);
+    this.transitionTo('refuse');
+  },
+  saveConfigsSuccess: function() {
+    this.set('store.deletedQueues', []);
+  },
+  saveConfigsError: function(operation, err) {
+    this.controllerFor("capsched").stopSpinner();
+    var response = {};
+    if (err && err.responseJSON) {
+      response = err.responseJSON;
+    }
+    response.simpleMessage = operation.capitalize() + ' failed!';
+    this.controllerFor("capsched").set('alertMessage', response);
+    throw Error("Configs Error: ", err);
+  },
+  forceRefreshOrRestartCapSched: function(saveMode) {
+    var opt = '',
+      that = this,
+      store = this.get('store'),
+      capschedCtrl = this.controllerFor("capsched");
+
+    if (saveMode == 'restart') {
+      opt = 'saveAndRestart';
+    } else {
+      opt = 'saveAndRefresh';
+    }
+
+    capschedCtrl.startSpinner(saveMode);
+    store.relaunchCapSched(opt).then(function() {
+      that.get('eventBus').publish('afterConfigsSaved', false);
+    }).catch(
+      Em.run.bind(that, 'saveConfigsError', opt)
+    ).finally(function() {
+      capschedCtrl.stopSpinner();
+      store.setLastSavedConfigXML();
+    });
   }
 });
 
 App.CapschedIndexRoute = Ember.Route.extend({
   redirect: function() {
     this.transitionTo('capsched.scheduler');
+  }
+});
+
+App.CapschedSchedulerRoute = Ember.Route.extend({
+  actions: {
+    didTransition: function() {
+      this.controllerFor('capsched').set('selectedQueue', null);
+    }
   }
 });
 
@@ -269,8 +405,39 @@ App.CapschedQueuesconfIndexRoute = Ember.Route.extend({
 });
 
 App.CapschedQueuesconfEditqueueRoute = Ember.Route.extend({
+  actions: {
+    willTransition: function(transition) {
+      if (this.controllerFor('capsched.queuesconf').get('isCreaingOrRenamingQueue')) {
+        transition.abort();
+      }
+    },
+    didTransition: function() {
+      this.controllerFor('capsched').set('selectedQueue', this.controller.get('model'));
+    }
+  },
+  model: function(params, transition) {
+    var queue = this.store.getById('queue', params.queue_id);
+    if (queue) {
+      return queue;
+    }
+    this.transitionTo('capsched.queuesconf.editqueue', this.store.getById('queue', 'root'));
+  },
   setupController: function(controller, model) {
     controller.set('model', model);
     this.controllerFor('capsched.queuesconf').set('selectedQueue', model);
+  }
+});
+
+App.CapschedAdvancedRoute = Ember.Route.extend({
+  actions: {
+    didTransition: function() {
+      this.controllerFor('capsched').set('selectedQueue', null);
+    }
+  }
+});
+
+App.CapschedTraceRoute = Ember.Route.extend({
+  model: function() {
+    return this.controllerFor('capsched').get('alertMessage');
   }
 });

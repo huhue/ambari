@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -23,12 +23,17 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.lang.reflect.Field;
+import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.persistence.EntityManager;
+
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.events.AlertEvent;
 import org.apache.ambari.server.events.AlertReceivedEvent;
 import org.apache.ambari.server.events.AlertStateChangeEvent;
@@ -75,7 +80,6 @@ import com.google.common.eventbus.Subscribe;
 import com.google.gson.Gson;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 import com.google.inject.persist.UnitOfWork;
 
 import junit.framework.Assert;
@@ -108,6 +112,8 @@ public class AlertDataManagerTest {
   @Before
   public void setup() throws Exception {
     m_injector = Guice.createInjector(new InMemoryDefaultTestModule());
+    EventBusSynchronizer.synchronizeAlertEventPublisher(m_injector);
+    EventBusSynchronizer.synchronizeAmbariEventPublisher(m_injector);
     m_injector.getInstance(GuiceJpaInitializer.class);
     m_injector.getInstance(UnitOfWork.class).begin();
 
@@ -146,26 +152,26 @@ public class AlertDataManagerTest {
   }
 
   @After
-  public void teardown() {
+  public void teardown() throws AmbariException, SQLException {
     m_injector.getInstance(UnitOfWork.class).end();
-    m_injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabase(m_injector.getProvider(EntityManager.class).get());
     m_injector = null;
   }
 
   @Test
-  public void testAlertRecords() {
+  public void testAlertRecords() throws AmbariException {
     Alert alert1 = new Alert(ALERT_DEFINITION, null, SERVICE, COMPONENT, HOST1,
         AlertState.OK);
     alert1.setLabel(ALERT_LABEL);
     alert1.setText("Component component1 is OK");
     alert1.setTimestamp(1L);
-    alert1.setCluster(m_cluster.getClusterName());
+    alert1.setClusterId(m_cluster.getClusterId());
 
     Alert alert2 = new Alert(ALERT_DEFINITION, null, SERVICE, COMPONENT, HOST2,
         AlertState.CRITICAL);
     alert2.setLabel(ALERT_LABEL);
     alert2.setText("Component component2 is not OK");
-    alert2.setCluster(m_cluster.getClusterName());
+    alert2.setClusterId(m_cluster.getClusterId());
 
 
     AlertReceivedListener listener = m_injector.getInstance(AlertReceivedListener.class);
@@ -208,7 +214,7 @@ public class AlertDataManagerTest {
     alert3.setLabel(ALERT_LABEL);
     alert3.setText("Component component1 is OK");
     alert3.setTimestamp(2L);
-    alert3.setCluster(m_cluster.getClusterName());
+    alert3.setClusterId(m_cluster.getClusterId());
 
     AlertReceivedEvent event3 = new AlertReceivedEvent(
         m_cluster.getClusterId(),
@@ -241,7 +247,7 @@ public class AlertDataManagerTest {
     alert4.setLabel(ALERT_LABEL);
     alert4.setText("Component component1 is about to go down");
     alert4.setTimestamp(3L);
-    alert4.setCluster(m_cluster.getClusterName());
+    alert4.setClusterId(m_cluster.getClusterId());
 
 
     AlertReceivedEvent event4 = new AlertReceivedEvent(
@@ -306,7 +312,7 @@ public class AlertDataManagerTest {
     m_dao.create(currentAlert);
 
     AlertTargetEntity target = m_helper.createAlertTarget();
-    Set<AlertTargetEntity> targets = new HashSet<AlertTargetEntity>();
+    Set<AlertTargetEntity> targets = new HashSet<>();
     targets.add(target);
 
     AlertGroupEntity group = m_helper.createAlertGroup(
@@ -414,7 +420,7 @@ public class AlertDataManagerTest {
     AlertEventPublisher publisher = m_injector.getInstance(AlertEventPublisher.class);
     EventBusSynchronizer.synchronizeAlertEventPublisher(m_injector);
 
-    final AtomicReference<Alert> ref = new AtomicReference<Alert>();
+    final AtomicReference<Alert> ref = new AtomicReference<>();
     publisher.register(new TestListener() {
       @Override
       @Subscribe
@@ -502,7 +508,7 @@ public class AlertDataManagerTest {
   /**
    * Test interface collects aggregate alert invocations
    */
-  private static interface TestListener {
-    public void catchIt(AlertReceivedEvent event);
+  private interface TestListener {
+    void catchIt(AlertReceivedEvent event);
   }
 }

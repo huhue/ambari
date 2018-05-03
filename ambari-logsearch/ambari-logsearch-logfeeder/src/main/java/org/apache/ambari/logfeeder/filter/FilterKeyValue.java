@@ -19,114 +19,139 @@
 
 package org.apache.ambari.logfeeder.filter;
 
-import java.util.List;
-import java.util.Map;
-import java.util.StringTokenizer;
-
-import org.apache.ambari.logfeeder.LogFeederUtil;
-import org.apache.ambari.logfeeder.MetricCount;
-import org.apache.ambari.logfeeder.input.InputMarker;
+import org.apache.ambari.logfeeder.conf.LogFeederProps;
+import org.apache.ambari.logfeeder.plugin.common.MetricData;
+import org.apache.ambari.logfeeder.plugin.filter.Filter;
+import org.apache.ambari.logfeeder.plugin.input.InputMarker;
+import org.apache.ambari.logfeeder.util.LogFeederUtil;
+import org.apache.ambari.logsearch.config.api.model.inputconfig.FilterKeyValueDescriptor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 
-public class FilterKeyValue extends Filter {
-  static private Logger logger = Logger.getLogger(FilterKeyValue.class);
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
 
-  String sourceField = null;
-  String valueSplit = "=";
-  String fieldSplit = "\t";
+public class FilterKeyValue extends Filter<LogFeederProps> {
 
-  public MetricCount errorMetric = new MetricCount();
+  private static final Logger LOG = Logger.getLogger(FilterKeyValue.class);
+
+  private String sourceField = null;
+  private String valueSplit = "=";
+  private String fieldSplit = "\t";
+  private String valueBorders = null;
+  
+  private MetricData errorMetric = new MetricData("filter.error.keyvalue", false);
 
   @Override
-  public void init() throws Exception {
-    super.init();
-    errorMetric.metricsName = "filter.error.keyvalue";
+  public void init(LogFeederProps logFeederProps) throws Exception {
+    super.init(logFeederProps);
 
-    sourceField = getStringValue("source_field");
-    valueSplit = getStringValue("value_split", valueSplit);
-    fieldSplit = getStringValue("field_split", fieldSplit);
+    sourceField = getFilterDescriptor().getSourceField();
+    valueSplit = StringUtils.defaultString(((FilterKeyValueDescriptor)getFilterDescriptor()).getValueSplit(), valueSplit);
+    fieldSplit = StringUtils.defaultString(((FilterKeyValueDescriptor)getFilterDescriptor()).getFieldSplit(), fieldSplit);
+    valueBorders = ((FilterKeyValueDescriptor)getFilterDescriptor()).getValueBorders();
 
-    logger.info("init() done. source_field=" + sourceField
-      + ", value_split=" + valueSplit + ", " + ", field_split="
-      + fieldSplit + ", " + getShortDescription());
+    LOG.info("init() done. source_field=" + sourceField + ", value_split=" + valueSplit + ", " + ", field_split=" +
+        fieldSplit + ", " + getShortDescription());
     if (StringUtils.isEmpty(sourceField)) {
-      logger.fatal("source_field is not set for filter. This filter will not be applied");
+      LOG.fatal("source_field is not set for filter. Thiss filter will not be applied");
       return;
     }
-
   }
 
-  /*
-   * (non-Javadoc)
-   * 
-   * @see org.apache.ambari.logfeeder.filter.Filter#apply(java.lang.String)
-   */
   @Override
-  public void apply(String inputStr, InputMarker inputMarker) {
+  public void apply(String inputStr, InputMarker inputMarker) throws Exception {
     apply(LogFeederUtil.toJSONObject(inputStr), inputMarker);
   }
 
   @Override
-  public void apply(Map<String, Object> jsonObj, InputMarker inputMarker) {
+  public void apply(Map<String, Object> jsonObj, InputMarker inputMarker) throws Exception {
     if (sourceField == null) {
       return;
     }
-    Object valueObj = jsonObj.get(sourceField);
-    if (valueObj != null) {
-      StringTokenizer fieldTokenizer = new StringTokenizer(
-        valueObj.toString(), fieldSplit);
-      while (fieldTokenizer.hasMoreTokens()) {
-        String nv = fieldTokenizer.nextToken();
-        StringTokenizer nvTokenizer = new StringTokenizer(nv,
-          valueSplit);
-        while (nvTokenizer.hasMoreTokens()) {
-          String name = nvTokenizer.nextToken();
-          if (nvTokenizer.hasMoreTokens()) {
-            String value = nvTokenizer.nextToken();
-            jsonObj.put(name, value);
-          } else {
-            // Unbalanced name value pairs
-            logParseError("name=" + name + ", pair=" + nv
-              + ", field=" + sourceField + ", field_value="
-              + valueObj);
+    if (jsonObj.containsKey(sourceField)) {
+      String keyValueString = (String) jsonObj.get(sourceField);
+      Map<String, String> valueMap = new HashMap<>();
+      if (valueBorders != null) {
+        keyValueString = preProcessBorders(keyValueString, valueMap);
+      }
+      
+      String splitPattern = Pattern.quote(fieldSplit);
+      String[] tokens = keyValueString.split(splitPattern);
+      for (String nv : tokens) {
+        String[] nameValue = getNameValue(nv);
+        String name = nameValue != null && nameValue.length == 2 ? nameValue[0] : null;
+        String value = nameValue != null && nameValue.length == 2 ? nameValue[1] : null;
+        if (name != null && value != null) {
+          if (valueMap.containsKey(value)) {
+            value = valueMap.get(value);
           }
+          jsonObj.put(name, value);
+        } else {
+         logParseError("name=" + name + ", pair=" + nv + ", field=" + sourceField + ", field_value=" + keyValueString);
         }
       }
     }
     super.apply(jsonObj, inputMarker);
-    statMetric.count++;
+    statMetric.value++;
+  }
+
+  private String preProcessBorders(String keyValueString, Map<String, String> valueMap) {
+    char openBorder = valueBorders.charAt(0);
+    char closeBorder = valueBorders.charAt(1);
+    
+    StringBuilder processed = new StringBuilder();
+    int lastPos = 0;
+    int openBorderNum = 0;
+    int valueNum = 0;
+    for (int pos = 0; pos < keyValueString.length(); pos++) {
+      char c = keyValueString.charAt(pos);
+      if (c == openBorder) {
+        if (openBorderNum == 0 ) {
+          processed.append(keyValueString.substring(lastPos, pos));
+          lastPos = pos + 1;
+        }
+        openBorderNum++;
+      }
+      if (c == closeBorder) {
+        openBorderNum--;
+        if (openBorderNum == 0) {
+          String value = keyValueString.substring(lastPos, pos).trim();
+          String valueId = "$VALUE" + (++valueNum);
+          valueMap.put(valueId, value);
+          processed.append(valueSplit + valueId);
+          lastPos = pos + 1;
+        }
+      }
+    }
+    
+    return processed.toString();
+  }
+
+  private String[] getNameValue(String nv) {
+    String splitPattern = Pattern.quote(valueSplit);
+    return nv.split(splitPattern, 2);
   }
 
   private void logParseError(String inputStr) {
-    errorMetric.count++;
-    final String LOG_MESSAGE_KEY = this.getClass().getSimpleName()
-      + "_PARSEERROR";
-    LogFeederUtil
-      .logErrorMessageByInterval(
-        LOG_MESSAGE_KEY,
-        "Error parsing string. length=" + inputStr.length()
-          + ", input=" + input.getShortDescription()
-          + ". First upto 100 characters="
-          + LogFeederUtil.subString(inputStr, 100), null, logger,
+    errorMetric.value++;
+    String logMessageKey = this.getClass().getSimpleName() + "_PARSEERROR";
+    LogFeederUtil.logErrorMessageByInterval(logMessageKey, "Error parsing string. length=" + inputStr.length() + ", input=" +
+        getInput().getShortDescription() + ". First upto 200 characters=" + StringUtils.abbreviate(inputStr, 200), null, LOG,
         Level.ERROR);
   }
 
-  /*
-   * (non-Javadoc)
-   * 
-   * @see org.apache.ambari.logfeeder.ConfigBlock#getShortDescription()
-   */
   @Override
   public String getShortDescription() {
     return "filter:filter=keyvalue,regex=" + sourceField;
   }
 
   @Override
-  public void addMetricsContainers(List<MetricCount> metricsList) {
+  public void addMetricsContainers(List<MetricData> metricsList) {
     super.addMetricsContainers(metricsList);
     metricsList.add(errorMetric);
   }
-
 }

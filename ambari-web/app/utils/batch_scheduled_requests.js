@@ -73,8 +73,7 @@ module.exports = {
    * @param {bool} runMmOperation
    */
   restartAllServiceHostComponents: function(serviceDisplayName, serviceName, staleConfigsOnly, query, runMmOperation) {
-    var self = this;
-    var context = staleConfigsOnly ?
+    const context = staleConfigsOnly ?
       Em.I18n.t('rollingrestart.context.allWithStaleConfigsForSelectedService').format(serviceDisplayName) :
       Em.I18n.t('rollingrestart.context.allForSelectedService').format(serviceDisplayName);
 
@@ -86,18 +85,40 @@ module.exports = {
       staleConfigs: staleConfigsOnly ? staleConfigsOnly : null,
       passiveState: 'OFF',
       displayParams: ['host_components/HostRoles/component_name']
-    }, function (data) {
-      var hostComponents = [];
-      data.items.forEach(function (host) {
-        host.host_components.forEach(function (hostComponent) {
-          hostComponents.push(Em.Object.create({
-            componentName: hostComponent.HostRoles.component_name,
-            hostName: host.Hosts.host_name
-          }))
-        });
-      });
-      self.restartHostComponents(hostComponents, context, "SERVICE", query);
+    }, data => {
+      const hostComponents = this.getRestartComponentsArray(data);
+      this.restartHostComponents(hostComponents, context, 'SERVICE', query);
     });
+  },
+
+  restartCertainServiceHostComponents: function (serviceName, components, hosts, label, query, runMmOperation) {
+    const context = Em.I18n.t('rollingrestart.context.allForSelectedService').format(label);
+    if (runMmOperation) {
+      this.turnOnOffPassiveRequest('ON', Em.I18n.t('passiveState.turnOnFor').format(serviceName), serviceName);
+    }
+    this.getComponentsFromServer({
+      services: serviceName && [serviceName],
+      hosts,
+      components,
+      passiveState: 'OFF',
+      displayParams: ['host_components/HostRoles/component_name']
+    }, data => {
+      const hostComponents = this.getRestartComponentsArray(data);
+      this.restartHostComponents(hostComponents, context, 'SERVICE', query);
+    });
+  },
+
+  getRestartComponentsArray: function (data) {
+    let hostComponents = [];
+    data.items.forEach(host => {
+      host.host_components.forEach(hostComponent => {
+        hostComponents.push(Em.Object.create({
+          componentName: hostComponent.HostRoles.component_name,
+          hostName: host.Hosts.host_name
+        }));
+      });
+    });
+    return hostComponents;
   },
 
   /**
@@ -244,7 +265,8 @@ module.exports = {
           operation_level: operation_level
         },
         success: 'successCallback',
-        error: 'errorCallback'
+        error: 'errorCallback',
+        showLoadingPopup: true
       });
     }
   },
@@ -318,7 +340,8 @@ module.exports = {
         batches: this.getBatchesForRollingRestartRequest(restartHostComponents, batchSize)
       },
       success: 'successCallback',
-      error: 'errorCallback'
+      error: 'errorCallback',
+      showLoadingPopup: true
     });
   },
 
@@ -345,7 +368,7 @@ module.exports = {
         batches.push({
           "order_id" : count + 1,
           "type" : "POST",
-          "uri" : App.apiPrefix + "/clusters/" + App.get('clusterName') + "/requests",
+          "uri" : "/clusters/" + App.get('clusterName') + "/requests",
           "RequestBodyInfo" : {
             "RequestInfo" : {
               "context" : "_PARSE_.ROLLING-RESTART." + componentName + "." + (count + 1) + "." + batchCount,

@@ -21,7 +21,31 @@ var App = require('app');
 App.MainDashboardServiceHiveView = App.MainDashboardServiceView.extend({
   templateName: require('templates/main/service/services/hive'),
   serviceName: 'HIVE',
-  
+
+  viewsToShow: {
+  'AUTO_HIVE20_INSTANCE': {},
+  'TEZ_CLUSTER_INSTANCE': {
+    overwriteLabel: 'app.debugHiveQuery'
+  }},
+  viewLinks: function() {
+    var viewsToShow = this.get('viewsToShow');
+    var links = [];
+    App.router.get('mainViewsController.ambariViews').forEach(function(viewInstance) {
+      var viewMeta = viewsToShow[viewInstance.get('instanceName')];
+      if (viewMeta) {
+        var link = {
+          viewInstance: viewInstance,
+          label: viewInstance.get('label')
+        };
+        if (viewMeta.overwriteLabel) {
+          link.label = Em.I18n.t(viewMeta.overwriteLabel);
+        }
+        links.push(link);
+      }
+    });
+    return links;
+  }.property('App.router.mainViewController.ambariViews'),
+
   didInsertElement: function () {
     var controller = this.get('controller');
     this._super();
@@ -51,8 +75,8 @@ App.MainDashboardServiceHiveView = App.MainDashboardServiceView.extend({
      */
     setEllipsis: function() {
       var $ = this.$();
-      var text =  $.text();
-      var MAX_LENGTH = 32;
+      var text = $.text();
+      var MAX_LENGTH = 96;
       var ellipsis = '...';
       var length = MAX_LENGTH > text.length ? text.length : MAX_LENGTH;
       var start = Math.max(length - ellipsis.length, ellipsis.length);
@@ -80,7 +104,7 @@ App.MainDashboardServiceHiveView = App.MainDashboardServiceView.extend({
     href: "javascript:void(null)",
     attributeBindings: ['data-clipboard-text', 'data-clipboard-action', "href"],
     didInsertElement: function() {
-      var $this =  this.$();
+      var $this = this.$();
       var id = "#" + $this.attr('id');
       var clipboard = new Clipboard(id);
       var options = {

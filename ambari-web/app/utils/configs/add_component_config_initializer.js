@@ -58,8 +58,11 @@ App.AddComponentConfigInitializer = App.HaConfigInitializerClass.extend(App.Host
       'hadoop.registry.zk.quorum': this.getHDPStackOnlyHostsPortConfig('2.2', 'ZOOKEEPER_SERVER', '', '', ',', 'zkClientPort', true),
       'nimbus.seeds': this.getHostsListComponentJSONStringifiedConfig('NIMBUS', true),
       'hadoop.proxyuser.{{webhcatUser}}.hosts': this.getComponentsHostsConfig(['HIVE_SERVER', 'WEBHCAT_SERVER', 'HIVE_METASTORE'], false, true),
-      'hadoop.proxyuser.{{hiveUser}}.hosts': this.getComponentsHostsConfig(['HIVE_SERVER', 'WEBHCAT_SERVER', 'HIVE_METASTORE'], false, true),
-      'hive.metastore.uris': this.getHostsWithPortConfig(['WEBHCAT_SERVER', 'HIVE_METASTORE'], 'thrift://', '', ',thrift://', 'hiveMetastorePort', true)
+      'hadoop.proxyuser.{{hiveUser}}.hosts': this.getComponentsHostsConfig(['HIVE_SERVER', 'WEBHCAT_SERVER', 'HIVE_METASTORE', 'HIVE_SERVER_INTERACTIVE'], false, true),
+      'hive.metastore.uris': this.getHostsWithPortConfig(['HIVE_METASTORE'], 'thrift://', '', ',thrift://', 'hiveMetastorePort', true),
+      'atlas.audit.hbase.zookeeper.quorum': this.getHostsListComponentConfig('ZOOKEEPER_SERVER', true),
+      'atlas.graph.storage.hostname': this.getHostsListComponentConfig('ZOOKEEPER_SERVER', true),
+      'atlas.kafka.zookeeper.connect': this.getHostsWithPortConfig('ZOOKEEPER_SERVER', '', '', ',', 'zkClientPort', true)
     };
   },
 
@@ -72,7 +75,8 @@ App.AddComponentConfigInitializer = App.HaConfigInitializerClass.extend(App.Host
    */
   __defaultUniqueInitializers: {
     'yarn.resourcemanager.zk-address': '_initYarnRMZkAdress',
-    'templeton.hive.properties': '_initTempletonHiveProperties'
+    'templeton.hive.properties': '_initTempletonHiveProperties',
+    'atlas.graph.index.search.solr.zookeeper-url': '_initAtlasGraphIndexSearchSolrZkUrl'
   },
 
   /**
@@ -142,7 +146,10 @@ App.AddComponentConfigInitializer = App.HaConfigInitializerClass.extend(App.Host
    */
   updateSiteObj: function(siteConfigs, configProperty) {
     if (!siteConfigs || !configProperty) return false;
-    App.config.updateHostsListValue(siteConfigs, configProperty.name, configProperty.value);
+    var initializer = this.get('initializers')[configProperty.name],
+      isArray = !!(initializer && (initializer.type === 'json_stringified_value'
+        || Em.isArray(initializer) && initializer.someProperty('type', 'json_stringified_value')));
+    App.config.updateHostsListValue(siteConfigs, configProperty.fileName, configProperty.name, configProperty.value, isArray);
     return true;
   },
 
@@ -225,7 +232,7 @@ App.AddComponentConfigInitializer = App.HaConfigInitializerClass.extend(App.Host
 
   _initTempletonHiveProperties: function(configProperty, localDB, dependecies, initializer) {
     var hostNames = localDB.masterComponentHosts.filter(function(masterComponent) {
-      return ['WEBHCAT_SERVER', 'HIVE_METASTORE'].contains(masterComponent.component) && masterComponent.isInstalled === true;
+      return ['HIVE_METASTORE'].contains(masterComponent.component) && masterComponent.isInstalled === true;
     }).mapProperty('hostName').uniq().sort();
     var hiveMSHosts = hostNames.map(function(hostName) {
       return "thrift://" + hostName + ":" + dependecies.hiveMetastorePort;
@@ -236,6 +243,20 @@ App.AddComponentConfigInitializer = App.HaConfigInitializerClass.extend(App.Host
       recommendedValue: value
     });
     return configProperty;
+  },
+
+  _initAtlasGraphIndexSearchSolrZkUrl: function (configProperty, localDB, dependencies, initializer) {
+    var solr = dependencies.infraSolrZnode;
+    return this._initAsHostsWithPort(configProperty, localDB, dependencies, {
+      component: 'ZOOKEEPER_SERVER',
+      componentExists: true,
+      modifier: {
+        prefix: '',
+        suffix: solr,
+        delimiter: solr + ','
+      },
+      portKey: 'zkClientPort'
+    });
   },
 
   /**
@@ -282,7 +303,11 @@ App.AddZooKeeperComponentsInitializer = App.AddComponentConfigInitializer.create
     'yarn.resourcemanager.zk-address',
     'hive.zookeeper.quorum',
     'storm.zookeeper.servers',
-    'hadoop.registry.zk.quorum'
+    'hadoop.registry.zk.quorum',
+    'atlas.audit.hbase.zookeeper.quorum',
+    'atlas.graph.index.search.solr.zookeeper-url',
+    'atlas.graph.storage.hostname',
+    'atlas.kafka.zookeeper.connect'
   ]
 });
 
@@ -304,8 +329,16 @@ App.AddHiveComponentsInitializer = App.AddComponentConfigInitializer.create({
  */
 App.AddWebHCatComponentsInitializer = App.AddComponentConfigInitializer.create({
   initializeForProperties: [
-    'hive.metastore.uris',
-    'templeton.hive.properties',
     'hadoop.proxyuser.{{webhcatUser}}.hosts'
+  ]
+});
+
+/**
+ * Hive Server Interactive component add initializer.
+ * @instance App.AddHiveServerInteractiveInitializer
+ */
+App.AddHiveServerInteractiveInitializer = App.AddComponentConfigInitializer.create({
+  initializeForProperties: [
+    'hadoop.proxyuser.{{hiveUser}}.hosts'
   ]
 });

@@ -38,10 +38,12 @@ App.hostsMapper = App.QuickDataMapper.create({
     cpu: 'Hosts.cpu_count',
     cpu_physical: 'Hosts.ph_cpu_count',
     memory: 'Hosts.total_mem',
+    has_jce_policy: "Hosts.last_agent_env.hasUnlimitedJcePolicy",
     disk_info: 'Hosts.disk_info',
     disk_total: 'metrics.disk.disk_total',
     disk_free: 'metrics.disk.disk_free',
     health_status: 'Hosts.host_status',
+    state: 'Hosts.host_state',
     load_one: 'metrics.load.load_one',
     load_five: 'metrics.load.load_five',
     load_fifteen: 'metrics.load.load_fifteen',
@@ -50,7 +52,6 @@ App.hostsMapper = App.QuickDataMapper.create({
     mem_total: 'metrics.memory.mem_total',
     mem_free: 'metrics.memory.mem_free',
     last_heart_beat_time: "Hosts.last_heartbeat_time",
-    raw_last_heart_beat_time: "Hosts.last_heartbeat_time",
     os_arch: 'Hosts.os_arch',
     os_type: 'Hosts.os_type',
     ip: 'Hosts.ip',
@@ -65,7 +66,9 @@ App.hostsMapper = App.QuickDataMapper.create({
     work_status: 'HostRoles.state',
     stale_configs: 'HostRoles.stale_configs',
     host_name: 'host_name',
-    admin_state: 'HostRoles.desired_admin_state'
+    public_host_name: 'public_host_name',
+    admin_state: 'HostRoles.desired_admin_state',
+    cluster_id_value: 'metrics.dfs.namenode.ClusterId'
   },
   stackVersionConfig: {
     id: 'HostStackVersions.id',
@@ -99,9 +102,9 @@ App.hostsMapper = App.QuickDataMapper.create({
       var stackVersions = [];
       var componentsIdMap = {};
       var cacheServices = App.cache['services'];
-      var currentServiceComponentsMap = App.get('componentConfigMapper').buildServiceComponentMap(cacheServices);
+      var currentServiceComponentsMap = this.buildServiceComponentMap(cacheServices);
       var newHostComponentsMap = {};
-      var selectedHosts = App.db.getSelectedHosts('mainHostController');
+      var selectedHosts = App.db.getSelectedHosts();
       var clusterName = App.get('clusterName');
       var advancedHostComponents = [];
       var hostComponentLogs = [];
@@ -131,6 +134,7 @@ App.hostsMapper = App.QuickDataMapper.create({
           component.id = id;
           component.host_id = item.Hosts.host_name;
           component.host_name = item.Hosts.host_name;
+          component.public_host_name = item.Hosts.public_host_name;
           components.push(component);
           componentsIdMap[id] = component;
           if (!newHostComponentsMap[serviceName]) {
@@ -168,14 +172,20 @@ App.hostsMapper = App.QuickDataMapper.create({
           ? Em.get(currentVersion.repository_versions[0], 'RepositoryVersions.repository_version') : '';
         for (var j = 0; j < item.stack_versions.length; j++) {
           var stackVersion = item.stack_versions[j];
+          var versionNumber = Em.get(stackVersion.repository_versions[0], 'RepositoryVersions.repository_version');
+          var isDifferentStack = currentVersion && (stackVersion.HostStackVersions.stack !== currentVersion.HostStackVersions.stack);
+          var isCompatible = App.RepositoryVersion.find(Em.get(stackVersion.repository_versions[0], 'RepositoryVersions.id')).get('isCompatible');
           stackVersion.host_name = item.Hosts.host_name;
-          stackVersion.is_visible = stringUtils.compareVersions(Em.get(stackVersion.repository_versions[0], 'RepositoryVersions.repository_version'), currentVersionNumber) >= 0
-            || App.get('supports.displayOlderVersions') || !currentVersionNumber;
+          if (isDifferentStack && !isCompatible) {
+            stackVersion.is_visible = false;
+          } else {
+            stackVersion.is_visible = isDifferentStack
+            || (App.get('supports.displayOlderVersions') || stringUtils.compareVersions(versionNumber, currentVersionNumber) >= 0)
+            || !currentVersionNumber;
+          }
           stackVersions.push(this.parseIt(stackVersion, this.stackVersionConfig));
         }
 
-        var alertsSummary = item.alerts_summary;
-        item.critical_warning_alerts_count = alertsSummary ? (alertsSummary.CRITICAL || 0) + (alertsSummary.WARNING || 0) : 0;
         item.cluster_id = clusterName;
         var existingHost = hostsMap[item.Hosts.host_name];
         // There is no need to override existing index in host detail view since old model(already have indexes) will not be cleared.
@@ -189,12 +199,12 @@ App.hostsMapper = App.QuickDataMapper.create({
           }
         });
         var parsedItem = this.parseIt(item, this.config);
-        parsedItem.is_requested = true;
-        parsedItem.last_heart_beat_time = App.dateTimeWithTimeZone(parsedItem.last_heart_beat_time);
+
         parsedItem.selected = selectedHosts.contains(parsedItem.host_name);
         parsedItem.not_started_components = notStartedComponents;
         parsedItem.components_in_passive_state = componentsInPassiveState;
         parsedItem.components_with_stale_configs = componentsWithStaleConfigs;
+        parsedItem.is_filtered = true;
 
         hostIds[item.Hosts.host_name] = parsedItem;
 
@@ -208,24 +218,29 @@ App.hostsMapper = App.QuickDataMapper.create({
 
       for (var k = 0; k < advancedHostComponents.length; k++) {
         var key = advancedHostComponents[k];
-        if (componentsIdMap[key]) componentsIdMap[key].display_name_advanced = App.HostComponent.find(key).get('displayNameAdvanced');
+        if (componentsIdMap[key]) {
+          var existingRecord = App.HostComponent.find(key);
+          componentsIdMap[key].display_name_advanced = existingRecord.get('displayNameAdvanced');
+          componentsIdMap[key].ha_name_space = existingRecord.get('haNameSpace');
+        }
       }
 
-      App.store.commit();
-      App.store.loadMany(App.HostStackVersion, stackVersions);
-      App.store.loadMany(App.HostComponentLog, hostComponentLogs);
-      App.store.loadMany(App.HostComponent, components);
       //"itemTotal" present only for Hosts page request
       if (!Em.isNone(json.itemTotal)) {
+        App.Host.find().setEach('isFiltered', false);
         App.Host.find().clear();
+        //App.HostComponent.find contains master components which requested across the app hence it should not be cleared
       }
-      App.store.loadMany(App.Host, hostsWithFullInfo);
+      App.store.safeLoadMany(App.HostStackVersion, stackVersions);
+      App.store.safeLoadMany(App.HostComponentLog, hostComponentLogs);
+      App.store.safeLoadMany(App.HostComponent, components);
+      App.store.safeLoadMany(App.Host, hostsWithFullInfo);
       var itemTotal = parseInt(json.itemTotal);
       if (!isNaN(itemTotal)) {
         App.router.set('mainHostController.filteredCount', itemTotal);
       }
       //bind host-components with service records
-      App.get('componentConfigMapper').addNewHostComponents(newHostComponentsMap, cacheServices);
+      this.addNewHostComponents(newHostComponentsMap, cacheServices);
     }
     console.timeEnd('App.hostsMapper execution time');
   },
@@ -237,16 +252,52 @@ App.hostsMapper = App.QuickDataMapper.create({
    */
   setMetrics: function (data) {
     var hosts = this.get('model').find();
-    for (var i = 0; i < hosts.length; i++) {
-      var host = hosts[i];
-      if (host.get('isRequested')) {
-        var hostMetrics = data.items.findProperty('Hosts.host_name', host.get('hostName'));
-        host.setProperties({
-          diskTotal: Em.get(hostMetrics, 'metrics.disk.disk_total'),
-          diskFree: Em.get(hostMetrics, 'metrics.disk.disk_free'),
-          loadOne: Em.get(hostMetrics, 'metrics.load.load_one')
+    for (var i = 0; i < hosts.content.length; i++) {
+      var host = hosts.objectAt(i);
+      var hostMetrics = data.items.findProperty('Hosts.host_name', host.get('hostName'));
+      host.setProperties({
+        diskTotal: Em.get(hostMetrics, 'metrics.disk.disk_total'),
+        diskFree: Em.get(hostMetrics, 'metrics.disk.disk_free'),
+        loadOne: Em.get(hostMetrics, 'metrics.load.load_one')
+      });
+    }
+  },
+
+  /**
+   * build map that include loaded host-components to avoid duplicate loading
+   * @param cacheServices
+   * @return {Object}
+   */
+  buildServiceComponentMap: function (cacheServices) {
+    var loadedServiceComponentsMap = {};
+
+    cacheServices.forEach(function (cacheService) {
+      var componentsMap = {};
+
+      cacheService.host_components.forEach(function (componentId) {
+        componentsMap[componentId] = true;
+      });
+      loadedServiceComponentsMap[cacheService.ServiceInfo.service_name] = componentsMap;
+    });
+    return loadedServiceComponentsMap;
+  },
+
+  /**
+   * add only new host-components to every service
+   * to update service - host-component relations in model
+   * @param {object} newHostComponentsMap
+   * @param {Array} cacheServices
+   * @return {boolean}
+   */
+  addNewHostComponents: function (newHostComponentsMap, cacheServices) {
+    if (!newHostComponentsMap || !cacheServices) return false;
+    cacheServices.forEach(function (service) {
+      if (newHostComponentsMap[service.ServiceInfo.service_name]) {
+        newHostComponentsMap[service.ServiceInfo.service_name].forEach(function (componentId) {
+          service.host_components.push(componentId)
         });
       }
-    }
+    }, this);
+    return true;
   }
 });

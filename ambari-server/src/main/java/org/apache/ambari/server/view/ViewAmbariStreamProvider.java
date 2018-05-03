@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,14 +18,6 @@
 
 package org.apache.ambari.server.view;
 
-import org.apache.ambari.server.controller.AmbariManagementController;
-import org.apache.ambari.server.controller.AmbariSessionManager;
-import org.apache.ambari.server.controller.internal.URLStreamProvider;
-import org.apache.ambari.server.proxy.ProxyService;
-import org.apache.ambari.view.AmbariHttpException;
-import org.apache.ambari.view.AmbariStreamProvider;
-import org.apache.commons.io.IOUtils;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -33,6 +25,16 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.apache.ambari.server.controller.AmbariManagementController;
+import org.apache.ambari.server.controller.AmbariSessionManager;
+import org.apache.ambari.server.controller.internal.URLStreamProvider;
+import org.apache.ambari.server.proxy.ProxyService;
+import org.apache.ambari.view.AmbariHttpException;
+import org.apache.ambari.view.AmbariStreamProvider;
+import org.apache.commons.io.IOUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Provider of an input stream for a request to the Ambari server.
@@ -52,6 +54,8 @@ public class ViewAmbariStreamProvider implements AmbariStreamProvider {
    * The Ambari management controller.
    */
   private final AmbariManagementController controller;
+
+  private static final Logger LOG = LoggerFactory.getLogger(ViewAmbariStreamProvider.class);
 
 
   // ----- Constructor -----------------------------------------------------
@@ -102,7 +106,7 @@ public class ViewAmbariStreamProvider implements AmbariStreamProvider {
       if (headers == null || headers.isEmpty()) {
         headers = Collections.singletonMap(URLStreamProvider.COOKIE, ambariSessionCookie);
       } else {
-        headers = new HashMap<String, String>(headers);
+        headers = new HashMap<>(headers);
 
         String cookies = headers.get(URLStreamProvider.COOKIE);
 
@@ -111,7 +115,7 @@ public class ViewAmbariStreamProvider implements AmbariStreamProvider {
     }
 
     // adapt the headers for the internal URLStreamProvider signature
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     for (Map.Entry<String, String> entry : headers.entrySet()) {
       headerMap.put(entry.getKey(), Collections.singletonList(entry.getValue()));
     }
@@ -122,8 +126,13 @@ public class ViewAmbariStreamProvider implements AmbariStreamProvider {
 
   private InputStream getInputStream(HttpURLConnection connection) throws IOException, AmbariHttpException {
     int responseCode = connection.getResponseCode();
-    if(responseCode >= ProxyService.HTTP_ERROR_RANGE_START){
-      throw new AmbariHttpException(IOUtils.toString(connection.getErrorStream()),responseCode);
+    if (responseCode >= ProxyService.HTTP_ERROR_RANGE_START) {
+      String message = connection.getResponseMessage();
+      if (connection.getErrorStream() != null) {
+        message = IOUtils.toString(connection.getErrorStream());
+      }
+      LOG.error("Got error response for url {}. Response code:{}. {}", connection.getURL(), responseCode, message);
+      throw new AmbariHttpException(message, responseCode);
     }
     return connection.getInputStream();
   }

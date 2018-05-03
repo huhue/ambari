@@ -17,8 +17,6 @@
 }}
 
 <div class="container-fluid">
-  <h1>{{t 'splash.welcome'}}</h1>
-
   {{#if allTestsCompleted }}
     <h3>Service checks completed.</h3>
   {{else}}
@@ -37,7 +35,8 @@
 
   <table class="table">
     <tbody>
-      <tr>
+    {{#if model.serviceCheckPolicy.checkStorage}}
+    <tr>
         <td>
           {{#if storageTestDone}}
             {{#if storageTest}}
@@ -51,8 +50,10 @@
         </td>
         <td>{{t 'splash.storage_test'}}</td>
       </tr>
+    {{/if}}
 
-      <tr>
+    {{#if model.serviceCheckPolicy.checkHdfs}}
+    <tr>
         <td>
           {{#if hdfsTestDone}}
             {{#if hdfsTest}}
@@ -66,8 +67,10 @@
         </td>
         <td>{{t 'splash.hdfs_test'}}</td>
       </tr>
+    {{/if}}
 
-      <tr>
+    {{#if model.serviceCheckPolicy.checkWebhcat}}
+    <tr>
         <td>
           {{#if webhcatTestDone}}
             {{#if webhcatTest}}
@@ -81,6 +84,24 @@
         </td>
         <td>{{t 'splash.webhcat_test'}}</td>
       </tr>
+    {{/if}}
+
+    {{#if model.serviceCheckPolicy.checkHomeDirectory}}
+    <tr>
+        <td>
+          {{#if userhomeTestDone}}
+            {{#if userhomeTest}}
+              <span class="glyphicon glyphicon-ok green"></span>
+            {{else}}
+              <span class="glyphicon glyphicon-remove red"></span>
+            {{/if}}
+          {{else}}
+            <span class="glyphicon glyphicon-arrow-right"></span>
+          {{/if}}
+        </td>
+        <td>{{t 'splash.userhome_test'}}</td>
+      </tr>
+    {{/if}}
 
     </tbody>
   </table>

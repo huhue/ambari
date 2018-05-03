@@ -18,14 +18,15 @@
 
 package org.apache.ambari.server.orm.entities;
 
-import org.apache.ambari.server.controller.internal.StageResourceProvider;
-
-import javax.persistence.metamodel.SingularAttribute;
-import javax.persistence.metamodel.StaticMetamodel;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import javax.persistence.metamodel.SingularAttribute;
+import javax.persistence.metamodel.StaticMetamodel;
+
+import org.apache.ambari.server.controller.internal.StageResourceProvider;
 
 /**
  * The {@link StageEntity_} is a strongly typed metamodel for creating
@@ -40,7 +41,6 @@ public class StageEntity_ {
   public static volatile SingularAttribute<StageEntity, String> logInfo;
   public static volatile SingularAttribute<StageEntity, String> requestContext;
 
-  public static volatile SingularAttribute<StageEntity, byte[]> clusterHostInfo;
   public static volatile SingularAttribute<StageEntity, byte[]> commandParamsStage;
   public static volatile SingularAttribute<StageEntity, byte[]> hostParamsStage;
 
@@ -59,7 +59,7 @@ public class StageEntity_ {
    * @return a mapping of between a resource provider property
    */
   public static Map<String, List<? extends SingularAttribute<StageEntity, ?>>> getPredicateMapping() {
-    Map<String, List<? extends SingularAttribute<StageEntity, ?>>> mapping = new HashMap<String, List<? extends SingularAttribute<StageEntity, ?>>>();
+    Map<String, List<? extends SingularAttribute<StageEntity, ?>>> mapping = new HashMap<>();
 
     mapping.put(StageResourceProvider.STAGE_REQUEST_ID,
         Collections.singletonList(requestId));
@@ -72,9 +72,6 @@ public class StageEntity_ {
 
     mapping.put(StageResourceProvider.STAGE_CONTEXT,
         Collections.singletonList(requestContext));
-
-    mapping.put(StageResourceProvider.STAGE_CLUSTER_HOST_INFO,
-        Collections.singletonList(clusterHostInfo));
 
     mapping.put(StageResourceProvider.STAGE_COMMAND_PARAMS,
         Collections.singletonList(commandParamsStage));

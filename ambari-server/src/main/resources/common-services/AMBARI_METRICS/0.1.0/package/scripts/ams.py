@@ -50,7 +50,7 @@ def ams(name=None):
     XmlConfig("ams-site.xml",
               conf_dir=params.ams_collector_conf_dir,
               configurations=params.config['configurations']['ams-site'],
-              configuration_attributes=params.config['configuration_attributes']['ams-site'],
+              configuration_attributes=params.config['configurationAttributes']['ams-site'],
               owner=params.ams_user,
     )
 
@@ -62,7 +62,7 @@ def ams(name=None):
     XmlConfig( "hbase-site.xml",
                conf_dir = params.ams_collector_conf_dir,
                configurations = merged_ams_hbase_site,
-               configuration_attributes=params.config['configuration_attributes']['ams-hbase-site'],
+               configuration_attributes=params.config['configurationAttributes']['ams-hbase-site'],
                owner = params.ams_user,
     )
 
@@ -87,7 +87,7 @@ def ams(name=None):
       XmlConfig("hdfs-site.xml",
             conf_dir=params.ams_collector_conf_dir,
             configurations=params.config['configurations']['hdfs-site'],
-            configuration_attributes=params.config['configuration_attributes']['hdfs-site'],
+            configuration_attributes=params.config['configurationAttributes']['hdfs-site'],
             owner=params.ams_user,
             group=params.user_group,
             mode=0644
@@ -96,7 +96,7 @@ def ams(name=None):
       XmlConfig("hdfs-site.xml",
             conf_dir=params.hbase_conf_dir,
             configurations=params.config['configurations']['hdfs-site'],
-            configuration_attributes=params.config['configuration_attributes']['hdfs-site'],
+            configuration_attributes=params.config['configurationAttributes']['hdfs-site'],
             owner=params.ams_user,
             group=params.user_group,
             mode=0644
@@ -105,7 +105,7 @@ def ams(name=None):
       XmlConfig("core-site.xml",
                 conf_dir=params.ams_collector_conf_dir,
                 configurations=params.config['configurations']['core-site'],
-                configuration_attributes=params.config['configuration_attributes']['core-site'],
+                configuration_attributes=params.config['configurationAttributes']['core-site'],
                 owner=params.ams_user,
                 group=params.user_group,
                 mode=0644
@@ -114,7 +114,7 @@ def ams(name=None):
       XmlConfig("core-site.xml",
                 conf_dir=params.hbase_conf_dir,
                 configurations=params.config['configurations']['core-site'],
-                configuration_attributes=params.config['configuration_attributes']['core-site'],
+                configuration_attributes=params.config['configurationAttributes']['core-site'],
                 owner=params.ams_user,
                 group=params.user_group,
                 mode=0644
@@ -163,6 +163,31 @@ def ams(name=None):
               create_parents = True
     )
 
+    if params.host_in_memory_aggregation:
+      if params.log4j_props is not None:
+        File(os.path.join(params.ams_monitor_conf_dir, "log4j.properties"),
+             owner=params.ams_user,
+             content=params.log4j_props
+             )
+        pass
+
+      XmlConfig("ams-site.xml",
+              conf_dir=params.ams_monitor_conf_dir,
+              configurations=params.config['configurations']['ams-site'],
+              configuration_attributes=params.config['configurationAttributes']['ams-site'],
+              owner=params.ams_user,
+              group=params.user_group
+              )
+
+      XmlConfig("ssl-server.xml",
+              conf_dir=params.ams_monitor_conf_dir,
+              configurations=params.config['configurations']['ams-ssl-server'],
+              configuration_attributes=params.config['configurationAttributes']['ams-ssl-server'],
+              owner=params.ams_user,
+              group=params.user_group
+              )
+      pass
+
     TemplateConfig(
       os.path.join(params.ams_monitor_conf_dir, "metric_monitor.ini"),
       owner=params.ams_user,
@@ -204,7 +229,7 @@ def ams(name=None, action=None):
     XmlConfig("ams-site.xml",
               conf_dir=params.ams_collector_conf_dir,
               configurations=params.config['configurations']['ams-site'],
-              configuration_attributes=params.config['configuration_attributes']['ams-site'],
+              configuration_attributes=params.config['configurationAttributes']['ams-site'],
               owner=params.ams_user,
               group=params.user_group
     )
@@ -212,7 +237,7 @@ def ams(name=None, action=None):
     XmlConfig("ssl-server.xml",
               conf_dir=params.ams_collector_conf_dir,
               configurations=params.config['configurations']['ams-ssl-server'],
-              configuration_attributes=params.config['configuration_attributes']['ams-ssl-server'],
+              configuration_attributes=params.config['configurationAttributes']['ams-ssl-server'],
               owner=params.ams_user,
               group=params.user_group
     )
@@ -229,7 +254,7 @@ def ams(name=None, action=None):
     XmlConfig( "hbase-site.xml",
                conf_dir = params.ams_collector_conf_dir,
                configurations = merged_ams_hbase_site,
-               configuration_attributes=params.config['configuration_attributes']['ams-hbase-site'],
+               configuration_attributes=params.config['configurationAttributes']['ams-hbase-site'],
                owner = params.ams_user,
                group = params.user_group
     )
@@ -244,7 +269,7 @@ def ams(name=None, action=None):
            mode=0644,
            group=params.user_group,
            owner=params.ams_user,
-           content=params.log4j_props
+           content=InlineTemplate(params.log4j_props)
       )
 
     File(format("{ams_collector_conf_dir}/ams-env.sh"),
@@ -305,7 +330,7 @@ def ams(name=None, action=None):
       XmlConfig("hdfs-site.xml",
             conf_dir=params.ams_collector_conf_dir,
             configurations=params.config['configurations']['hdfs-site'],
-            configuration_attributes=params.config['configuration_attributes']['hdfs-site'],
+            configuration_attributes=params.config['configurationAttributes']['hdfs-site'],
             owner=params.ams_user,
             group=params.user_group,
             mode=0644
@@ -314,16 +339,23 @@ def ams(name=None, action=None):
       XmlConfig("hdfs-site.xml",
             conf_dir=params.hbase_conf_dir,
             configurations=params.config['configurations']['hdfs-site'],
-            configuration_attributes=params.config['configuration_attributes']['hdfs-site'],
+            configuration_attributes=params.config['configurationAttributes']['hdfs-site'],
             owner=params.ams_user,
             group=params.user_group,
             mode=0644
       )
 
+      # Remove spnego configs from core-site if platform does not have python-kerberos library
+      truncated_core_site = {}
+      truncated_core_site.update(params.config['configurations']['core-site'])
+      if is_spnego_enabled(params) and is_redhat_centos_6_plus() == False:
+        truncated_core_site.pop('hadoop.http.authentication.type')
+        truncated_core_site.pop('hadoop.http.filter.initializers')
+
       XmlConfig("core-site.xml",
                 conf_dir=params.ams_collector_conf_dir,
-                configurations=params.config['configurations']['core-site'],
-                configuration_attributes=params.config['configuration_attributes']['core-site'],
+                configurations=truncated_core_site,
+                configuration_attributes=params.config['configurationAttributes']['core-site'],
                 owner=params.ams_user,
                 group=params.user_group,
                 mode=0644
@@ -331,8 +363,8 @@ def ams(name=None, action=None):
 
       XmlConfig("core-site.xml",
                 conf_dir=params.hbase_conf_dir,
-                configurations=params.config['configurations']['core-site'],
-                configuration_attributes=params.config['configuration_attributes']['core-site'],
+                configurations=truncated_core_site,
+                configuration_attributes=params.config['configurationAttributes']['core-site'],
                 owner=params.ams_user,
                 group=params.user_group,
                 mode=0644
@@ -344,6 +376,13 @@ def ams(name=None, action=None):
     pass
 
   elif name == 'monitor':
+
+    if is_spnego_enabled(params) and is_redhat_centos_6_plus():
+      try:
+        import kerberos
+      except ImportError:
+        raise ImportError("python-kerberos package need to be installed to run AMS in SPNEGO mode")
+
     Directory(params.ams_monitor_conf_dir,
               owner=params.ams_user,
               group=params.user_group,
@@ -357,9 +396,37 @@ def ams(name=None, action=None):
               create_parents = True
     )
 
+    if params.host_in_memory_aggregation and params.log4j_props is not None:
+      File(format("{params.ams_monitor_conf_dir}/log4j.properties"),
+           mode=0644,
+           group=params.user_group,
+           owner=params.ams_user,
+           content=InlineTemplate(params.log4j_props)
+           )
+
+      XmlConfig("ams-site.xml",
+              conf_dir=params.ams_monitor_conf_dir,
+              configurations=params.config['configurations']['ams-site'],
+              configuration_attributes=params.config['configurationAttributes']['ams-site'],
+              owner=params.ams_user,
+              group=params.user_group
+              )
+      XmlConfig("ssl-server.xml",
+              conf_dir=params.ams_monitor_conf_dir,
+              configurations=params.config['configurations']['ams-ssl-server'],
+              configuration_attributes=params.config['configurationAttributes']['ams-ssl-server'],
+              owner=params.ams_user,
+              group=params.user_group
+              )
+      pass
+
+    Execute(format("{sudo} chown -R {ams_user}:{user_group} {ams_monitor_log_dir}")
+            )
+
     Directory(params.ams_monitor_pid_dir,
               owner=params.ams_user,
               group=params.user_group,
+              cd_access="a",
               mode=0755,
               create_parents = True
     )
@@ -392,7 +459,7 @@ def ams(name=None, action=None):
          content=InlineTemplate(params.ams_env_sh_template)
     )
 
-    if params.metric_collector_https_enabled:
+    if params.metric_collector_https_enabled or params.is_aggregation_https_enabled:
       export_ca_certs(params.ams_monitor_conf_dir)
 
     pass
@@ -410,6 +477,7 @@ def ams(name=None, action=None):
                 owner=params.ams_user,
                 group=params.user_group,
                 mode=0755,
+                create_parents = True,
                 recursive_ownership = True
                 )
 
@@ -437,6 +505,22 @@ def ams(name=None, action=None):
 
     pass
 
+def is_spnego_enabled(params):
+  if 'core-site' in params.config['configurations'] \
+      and 'hadoop.http.authentication.type' in params.config['configurations']['core-site'] \
+      and params.config['configurations']['core-site']['hadoop.http.authentication.type'] == "kerberos" \
+      and 'hadoop.http.filter.initializers' in params.config['configurations']['core-site'] \
+      and params.config['configurations']['core-site']['hadoop.http.filter.initializers'] == "org.apache.hadoop.security.AuthenticationFilterInitializer":
+    return True
+  return False
+
+def is_redhat_centos_6_plus():
+  import platform
+
+  if platform.dist()[0] in ['redhat', 'centos'] and platform.dist()[1] > '6.0':
+    return True
+  return False
+
 def export_ca_certs(dir_path):
   # export ca certificates on every restart to handle changed truststore content
 
@@ -450,19 +534,23 @@ def export_ca_certs(dir_path):
   truststore_p12 = os.path.join(tmpdir,'truststore.p12')
 
   if (params.metric_truststore_type.lower() == 'jks'):
-    # Convert truststore from JKS to PKCS12
-    cmd = format("{sudo} {java64_home}/bin/keytool -importkeystore -srckeystore {metric_truststore_path} -destkeystore {truststore_p12} -deststoretype PKCS12 -srcstorepass {metric_truststore_password} -deststorepass {metric_truststore_password}")
-    Execute(cmd,
-    )
+    for alias in params.metric_truststore_alias_list:
+      # Convert truststore from JKS to PKCS12
+      cmd = format("{sudo} {java64_home}/bin/keytool -importkeystore -srckeystore {metric_truststore_path} -destkeystore {truststore_p12} -srcalias " + alias + " -deststoretype PKCS12 -srcstorepass {metric_truststore_password} -deststorepass {metric_truststore_password}")
+      Execute(cmd,
+              )
     truststore = truststore_p12
 
   # Export all CA certificates from the truststore to the conf directory
   cmd = format("{sudo} openssl pkcs12 -in {truststore} -out {ca_certs_path} -cacerts -nokeys -passin pass:{metric_truststore_password}")
   Execute(cmd,
   )
-  Execute(('chown', params.ams_user, ca_certs_path),
+  Execute(('chown', format('{ams_user}:{user_group}'), ca_certs_path),
           sudo=True
   )
+  Execute(('chmod', '644', ca_certs_path),
+          sudo = True,
+          )
   Execute(format('{sudo} rm -rf {tmpdir}')
   )
 

@@ -109,7 +109,7 @@ public class CleanupServiceFunctionalTest {
     properties.put("server.jdbc.user.name", "ambari");
     //properties.put("server.jdbc.user.passwd", "bigdata");
     properties.put("server.jdbc.url", "jdbc:postgresql://192.168.59.103:5432/ambari");
-    properties.put(Configuration.SHARED_RESOURCES_DIR_KEY, "/Users/lpuskas/prj/ambari/ambari-server/src/test/resources");
+    properties.put(Configuration.SHARED_RESOURCES_DIR.getKey(), "/Users/lpuskas/prj/ambari/ambari-server/src/test/resources");
 
     return properties;
   }
@@ -132,7 +132,7 @@ public class CleanupServiceFunctionalTest {
   @Test
   public void testRunCleanup() throws Exception {
     // GIVEN
-    CleanupService cleanupService = injector.getInstance(CleanupServiceImpl.class);
+    CleanupService<TimeBasedCleanupPolicy> cleanupService = injector.getInstance(CleanupServiceImpl.class);
     TimeBasedCleanupPolicy cleanupPolicy = new TimeBasedCleanupPolicy("cluster-1", 1455891250758L);
 
     // WHEN

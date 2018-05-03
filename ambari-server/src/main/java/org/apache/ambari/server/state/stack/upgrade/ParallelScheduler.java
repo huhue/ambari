@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -24,7 +24,8 @@ import javax.xml.bind.annotation.XmlElement;
  */
 public class ParallelScheduler {
 
-  public static int DEFAULT_MAX_DEGREE_OF_PARALLELISM = 100;
+  // This setting can be overriden using ambari.properties file
+  public static int DEFAULT_MAX_DEGREE_OF_PARALLELISM = Integer.MAX_VALUE;
 
   @XmlElement(name="max-degree-of-parallelism")
   public int maxDegreeOfParallelism = DEFAULT_MAX_DEGREE_OF_PARALLELISM;

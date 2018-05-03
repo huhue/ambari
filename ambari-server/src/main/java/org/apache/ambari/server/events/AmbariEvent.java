@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -103,9 +103,19 @@ public abstract class AmbariEvent {
     ACTION_EXECUTION_FINISHED,
 
     /**
+     * Sent when request finishes
+     */
+    REQUEST_FINISHED,
+
+    /**
      * The cluster was renamed.
      */
     CLUSTER_RENAME,
+
+    /**
+     * The cluster was successfully provisioned.
+     */
+    CLUSTER_PROVISIONED,
 
     /**
      * The service component recovery enabled field changed.
@@ -113,9 +123,69 @@ public abstract class AmbariEvent {
     SERVICE_COMPONENT_RECOVERY_CHANGED,
 
     /**
+     * Stack upgrade or downgrade finishes
+     */
+    FINALIZE_UPGRADE_FINISH,
+
+    /**
      * Cluster configuration changed.
      */
-    CLUSTER_CONFIG_CHANGED;
+    CLUSTER_CONFIG_CHANGED,
+
+    /**
+     * Cluster configuration finished.
+     */
+    CLUSTER_CONFIG_FINISHED,
+
+    /**
+     * Metrics Collector force refresh needed.
+     */
+    METRICS_COLLECTOR_HOST_DOWN,
+
+    /**
+     * Local user has been created.
+     */
+    USER_CREATED,
+
+    /**
+     * Host status has been changed.
+     */
+    HOST_STATUS_CHANGE,
+
+    /**
+     * Host state has been changed.
+     */
+    HOST_STATE_CHANGE,
+
+    /**
+     * Received new heartbeat with host info.
+     */
+    HOST_HEARTBEAT_UPDATED,
+
+    /**
+     * Ambari configuration changed event;
+     */
+    AMBARI_CONFIGURATION_CHANGED,
+
+    /**
+     * JPA initialized
+     */
+    JPA_INITIALIZED,
+
+    /**
+     * Host component's stale config status has been changed.
+     */
+    STALE_CONFIGS_UPDATE,
+
+    /**
+     * Service component's repo has been changed..
+     */
+    SERVICE_COMPONENT_REPO_CHANGE,
+
+    /**
+     * Service credential store has been enabled or disabled..
+     */
+    SERVICE_CREDENTIAL_STORE_UPDATE;
   }
 
   /**
@@ -126,8 +196,7 @@ public abstract class AmbariEvent {
   /**
    * Constructor.
    *
-   * @param eventType
-   *          the type of event (not {@code null}).
+   * @param eventType the type of event (not {@code null}).
    */
   public AmbariEvent(AmbariEventType eventType) {
     m_eventType = eventType;

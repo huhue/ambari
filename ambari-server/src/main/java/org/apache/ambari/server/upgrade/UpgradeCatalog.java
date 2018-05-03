@@ -18,6 +18,7 @@
 package org.apache.ambari.server.upgrade;
 
 import java.sql.SQLException;
+import java.util.Map;
 
 import org.apache.ambari.server.AmbariException;
 
@@ -45,6 +46,13 @@ public interface UpgradeCatalog {
    * @throws SQLException
    */
   void upgradeData() throws AmbariException, SQLException;
+
+  /**
+   * Set the file name, to store all config changes during upgrade
+   * @param ambariUpgradeConfigUpdatesFileName
+   */
+  void setConfigUpdatesFileName(String ambariUpgradeConfigUpdatesFileName);
+
 
   /**
    * Defines if Upgrade Catalog should be executed last
@@ -81,4 +89,9 @@ public interface UpgradeCatalog {
    * Update schema version in the database to the Target one
    */
   void updateDatabaseSchemaVersion();
+
+  /*
+  Get upgrade json output, which is sent to python executing process.
+   */
+  Map<String,String> getUpgradeJsonOutput();
 }

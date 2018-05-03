@@ -51,7 +51,7 @@ def setup_conf_dir(name=None): # 'master' or 'tserver' or 'monitor' or 'gc' or '
     XmlConfig("accumulo-site.xml",
               conf_dir = dest_conf_dir,
               configurations = configs,
-              configuration_attributes=params.config['configuration_attributes']['accumulo-site'],
+              configuration_attributes=params.config['configurationAttributes']['accumulo-site'],
               owner = params.accumulo_user,
               group = params.user_group,
               mode = 0644
@@ -81,7 +81,7 @@ def setup_conf_dir(name=None): # 'master' or 'tserver' or 'monitor' or 'gc' or '
     XmlConfig( "accumulo-site.xml",
                conf_dir = dest_conf_dir,
                configurations = configs,
-               configuration_attributes=params.config['configuration_attributes']['accumulo-site'],
+               configuration_attributes=params.config['configurationAttributes']['accumulo-site'],
                owner = params.accumulo_user,
                group = params.user_group,
                mode = 0600
@@ -112,6 +112,9 @@ def setup_conf_dir(name=None): # 'master' or 'tserver' or 'monitor' or 'gc' or '
          owner=params.accumulo_user,
          content=InlineTemplate(params.server_env_sh_template)
     )
+
+    if  params.security_enabled:
+      accumulo_TemplateConfig("accumulo_jaas.conf", dest_conf_dir)
 
   # create client.conf file
   configs = {}
@@ -221,7 +224,7 @@ def setup_conf_dir(name=None): # 'master' or 'tserver' or 'monitor' or 'gc' or '
                  logoutput=True,
                  user=params.accumulo_user)
       finally:
-        os.remove(passfile)
+        File(passfile, action = "delete")
 
   if name == 'tracer':
     if params.security_enabled and params.has_secure_user_auth:

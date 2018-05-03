@@ -28,6 +28,8 @@ class TestZookeeperServer(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "ZOOKEEPER/3.4.5/package"
   STACK_VERSION = "2.0.6"
 
+  CONFIG_OVERRIDES = {"serviceName":"ZOOKEEPER", "role":"ZOOKEEPER_SERVER"}
+
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zookeeper_server.py",
                        classname = "ZookeeperServer",
@@ -167,7 +169,7 @@ class TestZookeeperServer(RMFTestCase):
     )
     self.assertResourceCalled('File',
                               '/etc/zookeeper/conf/log4j.properties',
-                              content='log4jproperties\nline2',
+                              content=InlineTemplate(self.getConfig()['configurations']['zookeeper-log4j']['content']),
                               mode=0644,
                               group='hadoop',
                               owner='zookeeper'
@@ -225,10 +227,10 @@ class TestZookeeperServer(RMFTestCase):
     )
     self.assertResourceCalled('File',
                               '/etc/zookeeper/conf/log4j.properties',
-                              content='log4jproperties\nline2',
                               mode=0644,
-                              group='hadoop',
-                              owner='zookeeper'
+                              owner='zookeeper',
+                              content=InlineTemplate(self.getConfig()['configurations']['zookeeper-log4j']['content']),
+                              group='hadoop'
     )
     self.assertResourceCalled('File', '/etc/zookeeper/conf/zookeeper_jaas.conf',
       owner = 'zookeeper',
@@ -247,109 +249,6 @@ class TestZookeeperServer(RMFTestCase):
       group = 'hadoop',
     )
 
-  @patch("resource_management.libraries.functions.security_commons.build_expectations")
-  @patch("resource_management.libraries.functions.security_commons.get_params_from_filesystem")
-  @patch("resource_management.libraries.functions.security_commons.validate_security_config_properties")
-  @patch("resource_management.libraries.functions.security_commons.cached_kinit_executor")
-  @patch("resource_management.libraries.script.Script.put_structured_out")
-  def test_security_status(self, put_structured_out_mock, cached_kinit_executor_mock, validate_security_config_mock, get_params_mock, build_exp_mock):
-    # Test that function works when is called with correct parameters
-
-    security_params = {
-      'zookeeper_jaas': {
-        'Server': {
-          'keyTab': 'path/to/zookeeper/service/keytab',
-          'principal': 'zookeeper_keytab'
-        }
-      }
-    }
-    result_issues = []
-    props_value_check = None
-    props_empty_check = ['Server/keyTab', 'Server/principal']
-    props_read_check = ['Server/keyTab']
-
-    get_params_mock.return_value = security_params
-    validate_security_config_mock.return_value = result_issues
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zookeeper_server.py",
-                       classname = "ZookeeperServer",
-                       command = "security_status",
-                       config_file = "secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-
-    build_exp_mock.assert_called_with('zookeeper_jaas', props_value_check, props_empty_check, props_read_check)
-    put_structured_out_mock.assert_called_with({"securityState": "SECURED_KERBEROS"})
-    self.assertTrue(cached_kinit_executor_mock.call_count, 2)
-    cached_kinit_executor_mock.assert_called_with('/usr/bin/kinit',
-                                                  self.config_dict['configurations']['zookeeper-env']['zk_user'],
-                                                  security_params['zookeeper_jaas']['Server']['keyTab'],
-                                                  security_params['zookeeper_jaas']['Server']['principal'],
-                                                  self.config_dict['hostname'],
-                                                  '/tmp')
-
-    # Testing that the exception throw by cached_executor is caught
-    cached_kinit_executor_mock.reset_mock()
-    cached_kinit_executor_mock.side_effect = Exception("Invalid command")
-
-    try:
-      self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zookeeper_server.py",
-                       classname = "ZookeeperServer",
-                       command = "security_status",
-                       config_file = "secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-      )
-    except:
-      self.assertTrue(True)
-
-    # Testing with a security_params which doesn't contains zookeeper_jaas
-    empty_security_params = {}
-    cached_kinit_executor_mock.reset_mock()
-    get_params_mock.reset_mock()
-    put_structured_out_mock.reset_mock()
-    get_params_mock.return_value = empty_security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zookeeper_server.py",
-                       classname = "ZookeeperServer",
-                       command = "security_status",
-                       config_file = "secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityIssuesFound": "Keytab file or principal are not set property."})
-
-    # Testing with not empty result_issues
-    result_issues_with_params = {
-      'zookeeper_jaas': "Something bad happened"
-    }
-
-    validate_security_config_mock.reset_mock()
-    get_params_mock.reset_mock()
-    validate_security_config_mock.return_value = result_issues_with_params
-    get_params_mock.return_value = security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zookeeper_server.py",
-                       classname = "ZookeeperServer",
-                       command = "security_status",
-                       config_file = "secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-
-    # Testing with security_enable = false
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zookeeper_server.py",
-                       classname = "ZookeeperServer",
-                       command = "security_status",
-                       config_file = "default.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-
-
   def test_pre_upgrade_restart(self):
     config_file = self.get_src_folder()+"/test/python/stacks/2.0.6/configs/default.json"
     with open(config_file, "r") as f:
@@ -360,6 +259,7 @@ class TestZookeeperServer(RMFTestCase):
                        classname = "ZookeeperServer",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES)
     self.assertResourceCalled('Execute',
@@ -381,24 +281,13 @@ class TestZookeeperServer(RMFTestCase):
                        classname = "ZookeeperServer",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES,
-                       call_mocks = [(0, None, ''), (0, None)],
                        mocks_dict = mocks_dict)
 
-    self.assertResourceCalledIgnoreEarlier('Link', ('/etc/zookeeper/conf'), to='/etc/zookeeper/conf.backup')
     self.assertResourceCalled('Execute',
                               ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'zookeeper-server', version), sudo=True)
-
-    self.assertEquals(1, mocks_dict['call'].call_count)
-    self.assertEquals(1, mocks_dict['checked_call'].call_count)
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'zookeeper', '--stack-version', '2.3.0.0-3242', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[0][0][0])
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'zookeeper', '--stack-version', '2.3.0.0-3242', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])
-
     self.assertNoMoreResources()
 
   @patch.object(resource_management.libraries.functions, "get_unique_id_and_date")
@@ -416,6 +305,7 @@ class TestZookeeperServer(RMFTestCase):
                        classname = "ZookeeperServer",
                        command = "post_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES,
                        call_mocks = [

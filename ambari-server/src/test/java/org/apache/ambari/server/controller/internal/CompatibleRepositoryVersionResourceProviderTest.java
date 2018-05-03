@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -25,6 +25,7 @@ import static junit.framework.Assert.assertTrue;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -34,6 +35,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.controller.ResourceProviderFactory;
 import org.apache.ambari.server.controller.predicate.AndPredicate;
@@ -46,8 +49,8 @@ import org.apache.ambari.server.controller.utilities.PredicateBuilder;
 import org.apache.ambari.server.controller.utilities.PropertyHelper;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
-import org.apache.ambari.server.orm.dao.ClusterVersionDAO;
 import org.apache.ambari.server.orm.dao.RepositoryVersionDAO;
+import org.apache.ambari.server.orm.entities.RepoOsEntity;
 import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.orm.entities.StackEntity;
 import org.apache.ambari.server.security.TestAuthenticationFactory;
@@ -66,7 +69,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 
 /**
  * CompatibleRepositoryVersionResourceProvider tests.
@@ -75,14 +77,20 @@ public class CompatibleRepositoryVersionResourceProviderTest {
 
   private static Injector injector;
 
-  private static String jsonStringRedhat6 = "[{\"OperatingSystems\":{\"os_type\":\"redhat6\"},\"repositories\":[]}]";
+  private static final List<RepoOsEntity> osRedhat6 = new ArrayList<>();
+
+  {
+    RepoOsEntity repoOsEntity = new RepoOsEntity();
+    repoOsEntity.setFamily("redhat6");
+    repoOsEntity.setAmbariManaged(true);
+    osRedhat6.add(repoOsEntity);
+  }
   private static StackId stackId11 = new StackId("HDP", "1.1");
   private static StackId stackId22 = new StackId("HDP", "2.2");
 
   @Before
   public void before() throws Exception {
     final AmbariMetaInfo ambariMetaInfo = EasyMock.createMock(AmbariMetaInfo.class);
-    final ClusterVersionDAO clusterVersionDAO = EasyMock.createMock(ClusterVersionDAO.class);
 
     StackEntity hdp11Stack = new StackEntity();
     hdp11Stack.setStackName("HDP");
@@ -90,7 +98,7 @@ public class CompatibleRepositoryVersionResourceProviderTest {
 
     RepositoryVersionEntity entity1 = new RepositoryVersionEntity();
     entity1.setDisplayName("name1");
-    entity1.setOperatingSystems(jsonStringRedhat6);
+    entity1.addRepoOsEntities(osRedhat6);
     entity1.setStack(hdp11Stack);
     entity1.setVersion("1.1.1.1");
     entity1.setId(1L);
@@ -101,7 +109,7 @@ public class CompatibleRepositoryVersionResourceProviderTest {
 
     RepositoryVersionEntity entity2 = new ExtendedRepositoryVersionEntity();
     entity2.setDisplayName("name2");
-    entity2.setOperatingSystems(jsonStringRedhat6);
+    entity2.addRepoOsEntities(osRedhat6);
     entity2.setStack(hdp22Stack);
     entity2.setVersion("2.2.2.2");
     entity2.setId(2L);
@@ -115,7 +123,7 @@ public class CompatibleRepositoryVersionResourceProviderTest {
     final StackInfo stack1 = new StackInfo() {
       @Override
       public Map<String, UpgradePack> getUpgradePacks() {
-        Map<String, UpgradePack> map = new HashMap<String, UpgradePack>();
+        Map<String, UpgradePack> map = new HashMap<>();
 
         UpgradePack pack1 = new UpgradePack() {
 
@@ -189,7 +197,7 @@ public class CompatibleRepositoryVersionResourceProviderTest {
     final StackInfo stack2 = new StackInfo() {
       @Override
       public Map<String, UpgradePack> getUpgradePacks() {
-        Map<String, UpgradePack> map = new HashMap<String, UpgradePack>();
+        Map<String, UpgradePack> map = new HashMap<>();
 
         UpgradePack pack = new UpgradePack() {
           @Override
@@ -219,7 +227,6 @@ public class CompatibleRepositoryVersionResourceProviderTest {
       protected void configure() {
         super.configure();
         bind(AmbariMetaInfo.class).toInstance(ambariMetaInfo);
-        bind(ClusterVersionDAO.class).toInstance(clusterVersionDAO);
         bind(RepositoryVersionDAO.class).toInstance(repoVersionDAO);
         requestStaticInjection(CompatibleRepositoryVersionResourceProvider.class);
       }
@@ -239,11 +246,24 @@ public class CompatibleRepositoryVersionResourceProviderTest {
   }
 
   @After
-  public void after() {
-    injector.getInstance(PersistService.class).stop();
+  public void after() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
     injector = null;
 
     SecurityContextHolder.getContext().setAuthentication(null);
+  }
+
+  @Test
+  public void testVersionInStack() {
+    assertTrue(RepositoryVersionEntity.isVersionInStack(new StackId("HDP", "2.3"), "2.3.0.0"));
+    assertTrue(RepositoryVersionEntity.isVersionInStack(new StackId("HDPWIN", "2.3"), "2.3.0.0"));
+    assertTrue(RepositoryVersionEntity.isVersionInStack(new StackId("HDP", "2.3.GlusterFS"), "2.3.0.0"));
+    assertTrue(RepositoryVersionEntity.isVersionInStack(new StackId("HDF", "2.1"), "2.1.0.0"));
+
+    assertTrue(RepositoryVersionEntity.isVersionInStack(new StackId("HDP", "2.3"), "HDP-2.3.0.0"));
+    assertTrue(RepositoryVersionEntity.isVersionInStack(new StackId("HDPWIN", "2.3"), "HDPWIN-2.3.0.0"));
+    assertTrue(RepositoryVersionEntity.isVersionInStack(new StackId("HDP", "2.3.GlusterFS"), "HDP-2.3.0.0"));
+    assertTrue(RepositoryVersionEntity.isVersionInStack(new StackId("HDF", "2.1"), "HDF-2.1.0.0"));
   }
 
   @Test

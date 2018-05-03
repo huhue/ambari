@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,20 +18,25 @@
 
 package org.apache.ambari.server.api.services;
 
-import org.apache.ambari.server.api.resources.ResourceInstance;
-import org.apache.ambari.server.api.services.parsers.RequestBodyParser;
-import org.apache.ambari.server.api.services.serializers.ResultSerializer;
-import org.apache.ambari.server.state.Clusters;
-import org.apache.ambari.server.state.cluster.ClustersImpl;
-
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.UriInfo;
+import static org.junit.Assert.assertEquals;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.Assert.assertEquals;
+import javax.ws.rs.core.HttpHeaders;
+import javax.ws.rs.core.UriInfo;
+
+import org.apache.ambari.server.api.resources.ResourceInstance;
+import org.apache.ambari.server.api.services.parsers.RequestBodyParser;
+import org.apache.ambari.server.api.services.serializers.ResultSerializer;
+import org.apache.ambari.server.orm.dao.ClusterDAO;
+import org.apache.ambari.server.orm.dao.HostDAO;
+import org.apache.ambari.server.state.Clusters;
+import org.apache.ambari.server.state.cluster.ClusterFactory;
+import org.apache.ambari.server.state.cluster.ClustersImpl;
+import org.apache.ambari.server.state.host.HostFactory;
+import org.easymock.EasyMock;
 
 /**
  * Unit tests for ClusterService.
@@ -41,8 +46,18 @@ public class ClusterServiceTest extends BaseServiceTest {
 
   @Override
   public List<ServiceTestInvocation> getTestInvocations() throws Exception {
-    List<ServiceTestInvocation> listInvocations = new ArrayList<ServiceTestInvocation>();
-    Clusters clusters = new TestClusters();
+    List<ServiceTestInvocation> listInvocations = new ArrayList<>();
+
+    ClusterDAO clusterDAO = EasyMock.createNiceMock(ClusterDAO.class);
+    HostDAO hostDAO = EasyMock.createNiceMock(HostDAO.class);
+
+    EasyMock.expect(clusterDAO.findAll()).andReturn(new ArrayList<>()).atLeastOnce();
+    EasyMock.expect(hostDAO.findAll()).andReturn(new ArrayList<>()).atLeastOnce();
+
+    EasyMock.replay(clusterDAO, hostDAO);
+
+    Clusters clusters = new TestClusters(clusterDAO, EasyMock.createNiceMock(ClusterFactory.class),
+        hostDAO, EasyMock.createNiceMock(HostFactory.class));
 
     ClusterService clusterService;
     Method m;
@@ -78,45 +93,45 @@ public class ClusterServiceTest extends BaseServiceTest {
     args = new Object[] {getHttpHeaders(), getUriInfo(), "clusterName"};
     listInvocations.add(new ServiceTestInvocation(Request.Type.DELETE, clusterService, m, args, null));
 
-    //createArtifact
+    //createClusterArtifact
     clusterService = new TestClusterService(clusters, "clusterName");
-    m = clusterService.getClass().getMethod("createArtifact", String.class, HttpHeaders.class, UriInfo.class, String.class, String.class);
+    m = clusterService.getClass().getMethod("createClusterArtifact", String.class, HttpHeaders.class, UriInfo.class, String.class, String.class);
     args = new Object[] {"body", getHttpHeaders(), getUriInfo(), "clusterName", "artifactName"};
     listInvocations.add(new ServiceTestInvocation(Request.Type.POST, clusterService, m, args, "body"));
 
-    //getArtifact
+    //getClusterArtifact
     clusterService = new TestClusterService(clusters, "clusterName");
-    m = clusterService.getClass().getMethod("getArtifact", String.class, HttpHeaders.class, UriInfo.class, String.class, String.class);
+    m = clusterService.getClass().getMethod("getClusterArtifact", String.class, HttpHeaders.class, UriInfo.class, String.class, String.class);
     args = new Object[] {"body", getHttpHeaders(), getUriInfo(), "clusterName", "artifact_name"};
     listInvocations.add(new ServiceTestInvocation(Request.Type.GET, clusterService, m, args, "body"));
 
-    //getArtifacts
+    //getClusterArtifacts
     clusterService = new TestClusterService(clusters, "clusterName");
-    m = clusterService.getClass().getMethod("getArtifacts", String.class, HttpHeaders.class, UriInfo.class, String.class);
+    m = clusterService.getClass().getMethod("getClusterArtifacts", String.class, HttpHeaders.class, UriInfo.class, String.class);
     args = new Object[] {"body", getHttpHeaders(), getUriInfo(), "clusterName"};
     listInvocations.add(new ServiceTestInvocation(Request.Type.GET, clusterService, m, args, "body"));
 
-    //updateArtifact
+    //updateClusterArtifact
     clusterService = new TestClusterService(clusters, "clusterName");
-    m = clusterService.getClass().getMethod("updateArtifact", String.class, HttpHeaders.class, UriInfo.class, String.class, String.class);
+    m = clusterService.getClass().getMethod("updateClusterArtifact", String.class, HttpHeaders.class, UriInfo.class, String.class, String.class);
     args = new Object[] {"body", getHttpHeaders(), getUriInfo(), "clusterName", "artifactName"};
     listInvocations.add(new ServiceTestInvocation(Request.Type.PUT, clusterService, m, args, "body"));
 
-    //updateArtifacts
+    //updateClusterArtifacts
     clusterService = new TestClusterService(clusters, "clusterName");
-    m = clusterService.getClass().getMethod("updateArtifacts", String.class, HttpHeaders.class, UriInfo.class, String.class);
+    m = clusterService.getClass().getMethod("updateClusterArtifacts", String.class, HttpHeaders.class, UriInfo.class, String.class);
     args = new Object[] {"body", getHttpHeaders(), getUriInfo(), "clusterName"};
     listInvocations.add(new ServiceTestInvocation(Request.Type.PUT, clusterService, m, args, "body"));
 
-    //deleteArtifact
+    //deleteClusterArtifact
     clusterService = new TestClusterService(clusters, "clusterName");
-    m = clusterService.getClass().getMethod("deleteArtifact", String.class, HttpHeaders.class, UriInfo.class, String.class, String.class);
+    m = clusterService.getClass().getMethod("deleteClusterArtifact", String.class, HttpHeaders.class, UriInfo.class, String.class, String.class);
     args = new Object[] {"body", getHttpHeaders(), getUriInfo(), "clusterName", "artifactName"};
     listInvocations.add(new ServiceTestInvocation(Request.Type.DELETE, clusterService, m, args, "body"));
 
-    //deleteArtifacts
+    //deleteClusterArtifacts
     clusterService = new TestClusterService(clusters, "clusterName");
-    m = clusterService.getClass().getMethod("deleteArtifacts", String.class, HttpHeaders.class, UriInfo.class, String.class);
+    m = clusterService.getClass().getMethod("deleteClusterArtifacts", String.class, HttpHeaders.class, UriInfo.class, String.class);
     args = new Object[] {"body", getHttpHeaders(), getUriInfo(), "clusterName"};
     listInvocations.add(new ServiceTestInvocation(Request.Type.DELETE, clusterService, m, args, "body"));
 
@@ -161,6 +176,12 @@ public class ClusterServiceTest extends BaseServiceTest {
   }
 
   private class TestClusters extends ClustersImpl {
+    public TestClusters(ClusterDAO clusterDAO, ClusterFactory clusterFactory, HostDAO hostDAO,
+        HostFactory hostFactory) {
+
+      super(clusterDAO, clusterFactory, hostDAO, hostFactory);
+    }
+
     @Override
     public boolean checkPermission(String clusterName, boolean readOnly) {
       return true;

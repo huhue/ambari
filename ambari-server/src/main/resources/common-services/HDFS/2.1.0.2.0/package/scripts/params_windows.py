@@ -20,6 +20,9 @@ limitations under the License.
 import os
 
 #Used in subsequent imports from params
+from resource_management.libraries.script.script import Script
+from resource_management.libraries.functions.default import default
+from resource_management.libraries.functions.format import format
 from install_params import exclude_packages
 from status_params import *
 
@@ -40,6 +43,13 @@ dfs_data_dir = config['configurations']['hdfs-site']['dfs.datanode.data.dir']
 #decomission
 hdfs_exclude_file = default("/clusterHostInfo/decom_dn_hosts", [])
 exclude_file_path = config['configurations']['hdfs-site']['dfs.hosts.exclude']
+include_file_path = default("/configurations/hdfs-site/dfs.hosts", None)
+hdfs_include_file = None
+manage_include_files = default("/configurations/hdfs-site/manage.include.files", False)
+if include_file_path and manage_include_files:
+  slave_hosts = default("/clusterHostInfo/slave_hosts", [])
+  hdfs_include_file = slave_hosts
+update_files_only = default("/commandParams/update_files_only",False)
 # HDFS High Availability properties
 dfs_ha_enabled = False
 dfs_ha_nameservices = default("/configurations/hdfs-site/dfs.internal.nameservices", None)
@@ -47,7 +57,7 @@ dfs_ha_namenode_ids = default(format("/configurations/hdfs-site/dfs.ha.namenodes
 
 namenode_id = None
 namenode_rpc = None
-hostname = config["hostname"]
+hostname = config['agentLevelParams']['hostname']
 if dfs_ha_namenode_ids:
   dfs_ha_namemodes_ids_list = dfs_ha_namenode_ids.split(",")
   dfs_ha_namenode_ids_array_len = len(dfs_ha_namemodes_ids_list)
@@ -56,7 +66,7 @@ if dfs_ha_namenode_ids:
 if dfs_ha_enabled:
   for nn_id in dfs_ha_namemodes_ids_list:
     nn_host = config['configurations']['hdfs-site'][format('dfs.namenode.rpc-address.{dfs_ha_nameservices}.{nn_id}')]
-    if hostname in nn_host:
+    if hostname.lower() in nn_host.lower():
       namenode_id = nn_id
       namenode_rpc = nn_host
 

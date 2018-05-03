@@ -23,6 +23,7 @@ import re
 import os
 import ambari_simplejson as json # simplejson is much faster comparing to Python 2.6 json module and has the same functions set.
 import socket
+import traceback
 
 from resource_management.libraries.script import Script
 from resource_management.libraries.functions.default import default
@@ -79,7 +80,8 @@ def resolve_ambari_config():
     else:
       raise Exception("No config found at %s" % str(config_path))
   except Exception, err:
-    Logger.warn(err)
+    traceback.print_exc()
+    Logger.warning(err)
 
 
 class ExecuteUpgradeTasks(Script):
@@ -100,8 +102,10 @@ class ExecuteUpgradeTasks(Script):
     version = default('/roleParams/version', None)
 
     # These 2 variables are optional
-    service_package_folder = default('/roleParams/service_package_folder', None)
-    hooks_folder = default('/roleParams/hooks_folder', None)
+    service_package_folder = default('/commandParams/service_package_folder', None)
+    if service_package_folder is None:
+      service_package_folder = default('/serviceLevelParams/service_package_folder', None)
+    hooks_folder = default('/commandParams/hooks_folder', None)
 
     tasks = json.loads(config['roleParams']['tasks'])
     if tasks:
@@ -113,13 +117,15 @@ class ExecuteUpgradeTasks(Script):
         if task.script and task.function:
           file_cache = FileCache(agent_config)
 
-          server_url_prefix = default('/hostLevelParams/jdk_location', "")
+          server_url_prefix = default('/ambariLevelParams/jdk_location', "")
 
           if service_package_folder and hooks_folder:
             command_paths = {
               "commandParams": {
                 "service_package_folder": service_package_folder,
-                "hooks_folder": hooks_folder
+              },
+              "clusterLevelParams": {
+                   "hooks_folder": hooks_folder
               }
             } 
 
@@ -151,6 +157,7 @@ class ExecuteUpgradeTasks(Script):
         if task.command:
           task.command = replace_variables(task.command, host_name, version)
           shell.checked_call(task.command, logoutput=True, quiet=True)
+
 
 if __name__ == "__main__":
   ExecuteUpgradeTasks().execute()

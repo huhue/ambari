@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,9 +17,14 @@
  */
 package org.apache.ambari.server.state;
 
-import javax.xml.bind.annotation.*;
 import java.util.ArrayList;
 import java.util.List;
+
+import javax.xml.bind.annotation.XmlAccessType;
+import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlElement;
+import javax.xml.bind.annotation.XmlElementWrapper;
+import javax.xml.bind.annotation.XmlElements;
 
 import com.google.gson.annotations.SerializedName;
 /**
@@ -41,7 +46,7 @@ public class ServiceOsSpecific {
 
   @XmlElementWrapper(name="packages")
   @XmlElements(@XmlElement(name="package"))
-  private List<Package> packages = new ArrayList<Package>();
+  private List<Package> packages = new ArrayList<>();
 
 
   public String getOsFamily() {
@@ -100,6 +105,10 @@ public class ServiceOsSpecific {
     private String repoid;
     @SerializedName("repoName")
     private String reponame;
+    @SerializedName("distribution")
+    private String distribution;
+    @SerializedName("components")
+    private String components;
 
     private Repo() {
     }
@@ -132,6 +141,14 @@ public class ServiceOsSpecific {
       return reponame;
     }
 
+    public String getDistribution() {
+      return distribution;
+    }
+
+    public String getComponents() {
+      return components;
+    }
+
     @Override
     public boolean equals(Object o) {
       if (this == o) return true;
@@ -143,6 +160,8 @@ public class ServiceOsSpecific {
       if (mirrorslist != null ? !mirrorslist.equals(repo.mirrorslist) : repo.mirrorslist != null) return false;
       if (repoid != null ? !repoid.equals(repo.repoid) : repo.repoid != null) return false;
       if (reponame != null ? !reponame.equals(repo.reponame) : repo.reponame != null) return false;
+      if (distribution != null ? !distribution.equals(repo.distribution) : repo.distribution != null) return false;
+      if (components != null ? !components.equals(repo.components) : repo.components != null) return false;
 
       return true;
     }
@@ -153,6 +172,8 @@ public class ServiceOsSpecific {
       result = 31 * result + (mirrorslist != null ? mirrorslist.hashCode() : 0);
       result = 31 * result + (repoid != null ? repoid.hashCode() : 0);
       result = 31 * result + (reponame != null ? reponame.hashCode() : 0);
+      result = 31 * result + (distribution != null ? distribution.hashCode() : 0);
+      result = 31 * result + (components != null ? components.hashCode() : 0);
       return result;
     }
   }

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -32,6 +32,9 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import javax.persistence.EntityManager;
+
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.ExecutionCommandWrapper;
@@ -55,9 +58,11 @@ import org.apache.ambari.server.orm.entities.UpgradeItemEntity;
 import org.apache.ambari.server.serveraction.AbstractServerAction;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
+import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.ServiceComponentHostEvent;
 import org.apache.ambari.server.state.StackId;
 import org.apache.ambari.server.state.svccomphost.ServiceComponentHostOpInProgressEvent;
+import org.easymock.EasyMock;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -66,7 +71,6 @@ import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Inject;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 import com.google.inject.persist.UnitOfWork;
 import com.google.inject.util.Modules;
 
@@ -120,7 +124,7 @@ public class AutoSkipFailedSummaryActionTest {
   @After
   public void teardown() throws Exception {
     m_injector.getInstance(UnitOfWork.class).end();
-    m_injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabase(m_injector.getProvider(EntityManager.class).get());
   }
 
 
@@ -181,7 +185,7 @@ public class AutoSkipFailedSummaryActionTest {
       anyObject(HostRoleStatus.class), anyLong(), anyLong())).andReturn(skippedTasks).anyTimes();
     replay(hostRoleCommandDAOMock);
 
-    ConcurrentMap<String, Object> requestSharedDataContext = new ConcurrentHashMap<String, Object>();
+    ConcurrentMap<String, Object> requestSharedDataContext = new ConcurrentHashMap<>();
     CommandReport result = action.execute(requestSharedDataContext);
 
     assertNotNull(result.getStructuredOut());
@@ -200,6 +204,18 @@ public class AutoSkipFailedSummaryActionTest {
   public void testAutoSkipFailedSummaryAction__red() throws Exception {
     AutoSkipFailedSummaryAction action = new AutoSkipFailedSummaryAction();
     m_injector.injectMembers(action);
+
+    EasyMock.reset(clusterMock);
+
+    Service hdfsService = createNiceMock(Service.class);
+    expect(hdfsService.getName()).andReturn("HDFS").anyTimes();
+    expect(clusterMock.getServiceByComponentName("DATANODE")).andReturn(hdfsService).anyTimes();
+
+    Service zkService = createNiceMock(Service.class);
+    expect(zkService.getName()).andReturn("ZOOKEEPER").anyTimes();
+    expect(clusterMock.getServiceByComponentName("ZOOKEEPER_CLIENT")).andReturn(zkService).anyTimes();
+
+    replay(clusterMock, hdfsService, zkService);
 
     ServiceComponentHostEvent event = createNiceMock(ServiceComponentHostEvent.class);
 
@@ -258,7 +274,7 @@ public class AutoSkipFailedSummaryActionTest {
       anyObject(HostRoleStatus.class), anyLong(), anyLong())).andReturn(skippedTasks).anyTimes();
     replay(hostRoleCommandDAOMock);
 
-    ConcurrentMap<String, Object> requestSharedDataContext = new ConcurrentHashMap<String, Object>();
+    ConcurrentMap<String, Object> requestSharedDataContext = new ConcurrentHashMap<>();
     CommandReport result = action.execute(requestSharedDataContext);
 
     assertNotNull(result.getStructuredOut());
@@ -267,6 +283,7 @@ public class AutoSkipFailedSummaryActionTest {
     assertEquals("There were 3 skipped failure(s) that must be addressed " +
       "before you can proceed. Please resolve each failure before continuing with the upgrade.",
       result.getStdOut());
+
     assertEquals("{\"failures\":" +
         "{\"service_check\":[\"ZOOKEEPER\"]," +
         "\"host_component\":{" +
@@ -338,7 +355,7 @@ public class AutoSkipFailedSummaryActionTest {
       anyObject(HostRoleStatus.class), anyLong(), anyLong())).andReturn(skippedTasks).anyTimes();
     replay(hostRoleCommandDAOMock);
 
-    ConcurrentMap<String, Object> requestSharedDataContext = new ConcurrentHashMap<String, Object>();
+    ConcurrentMap<String, Object> requestSharedDataContext = new ConcurrentHashMap<>();
     CommandReport result = action.execute(requestSharedDataContext);
 
     assertNotNull(result.getStructuredOut());
@@ -360,6 +377,15 @@ public class AutoSkipFailedSummaryActionTest {
   public void testAutoSkipFailedSummaryAction__red__host_components_only() throws Exception {
     AutoSkipFailedSummaryAction action = new AutoSkipFailedSummaryAction();
     m_injector.injectMembers(action);
+
+    EasyMock.reset(clusterMock);
+
+    Service hdfsService = createNiceMock(Service.class);
+    expect(hdfsService.getName()).andReturn("HDFS").anyTimes();
+    expect(clusterMock.getServiceByComponentName("DATANODE")).andReturn(hdfsService).anyTimes();
+
+    replay(clusterMock, hdfsService);
+
 
     ServiceComponentHostEvent event = createNiceMock(ServiceComponentHostEvent.class);
 
@@ -416,7 +442,7 @@ public class AutoSkipFailedSummaryActionTest {
       anyObject(HostRoleStatus.class), anyLong(), anyLong())).andReturn(skippedTasks).anyTimes();
     replay(hostRoleCommandDAOMock);
 
-    ConcurrentMap<String, Object> requestSharedDataContext = new ConcurrentHashMap<String, Object>();
+    ConcurrentMap<String, Object> requestSharedDataContext = new ConcurrentHashMap<>();
     CommandReport result = action.execute(requestSharedDataContext);
 
     assertNotNull(result.getStructuredOut());

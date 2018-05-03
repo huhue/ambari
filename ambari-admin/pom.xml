@@ -61,11 +61,12 @@
       <plugin>
         <groupId>com.github.eirslett</groupId>
         <artifactId>frontend-maven-plugin</artifactId>
-        <version>0.0.16</version>
+        <version>1.3</version>
         <configuration>
-          <nodeVersion>v0.10.44</nodeVersion>
+          <nodeVersion>v4.5.0</nodeVersion>
           <npmVersion>2.15.0</npmVersion>
           <workingDirectory>src/main/resources/ui/admin-web/</workingDirectory>
+          <npmInheritsProxyConfigFromMaven>false</npmInheritsProxyConfigFromMaven>
         </configuration>
         <executions>
           <execution>
@@ -191,7 +192,7 @@
             <exclude>src/main/resources/ui/admin-web/bower_components/**</exclude>
             <exclude>src/main/resources/ui/admin-web/dist/**</exclude>
             <exclude>src/main/resources/ui/admin-web/node/**</exclude>
-            <exclude>src/main/resources/ui/admin-web/app/assets/data/**</exclude>
+            <exclude>src/main/resources/ui/admin-web/app/assets/**</exclude>
             <exclude>src/main/resources/ui/admin-web/node_modules/**</exclude>
             <exclude>src/main/resources/ui/admin-web/app/bower_components/**</exclude>
             <exclude>src/main/resources/ui/admin-web/test/bower_components/**</exclude>

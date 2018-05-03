@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -27,10 +27,14 @@ import org.apache.ambari.server.agent.DiskInfo;
 import org.apache.ambari.server.agent.HostInfo;
 import org.apache.ambari.server.agent.RecoveryReport;
 import org.apache.ambari.server.controller.HostResponse;
+import org.apache.ambari.server.orm.entities.HostEntity;
 import org.apache.ambari.server.orm.entities.HostVersionEntity;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.state.fsm.InvalidStateTransitionException;
 
 public interface Host extends Comparable {
+
+  HostEntity getHostEntity();
 
   /**
    * @return the hostName
@@ -41,11 +45,6 @@ public interface Host extends Comparable {
    * @return host id
    */
   Long getHostId();
-
-  /**
-   * @param hostName the hostName to set
-   */
-  void setHostName(String hostName);
 
   /**
    * @return the currentPingPort
@@ -177,6 +176,8 @@ public interface Host extends Comparable {
    */
   String getOsFamily();
 
+  String getOSFamilyFromHostAttributes(Map<String, String> hostAttributes);
+
   /**
    * @param osType the osType to set
    */
@@ -249,6 +250,18 @@ public interface Host extends Comparable {
   void setLastRegistrationTime(long lastRegistrationTime);
 
   /**
+   * Time the Ambari Agent was started.
+   * ( Unix timestamp )
+   * @return the lastOnAgentStartRegistrationTime
+   */
+  long getLastAgentStartTime();
+
+  /**
+   * @param lastAgentStartTime the lastAgentStartTime to set
+   */
+  void setLastAgentStartTime(long lastAgentStartTime);
+
+  /**
    * Last time the Ambari Server received a heartbeat from the Host
    * ( Unix timestamp )
    * @return the lastHeartbeatTime
@@ -292,6 +305,12 @@ public interface Host extends Comparable {
    * @param state Host State
    */
   void setState(HostState state);
+
+  /**
+   * Set state of host's state machine.
+   * @param state
+   */
+  void setStateMachineState(HostState state);
 
   /**
    * Get the prefix path of all logs
@@ -338,12 +357,6 @@ public interface Host extends Comparable {
 
   HostResponse convertToResponse();
 
-  boolean isPersisted();
-
-  void persist();
-
-  void refresh();
-
   void importHostInfo(HostInfo hostInfo);
 
   /**
@@ -366,20 +379,20 @@ public interface Host extends Comparable {
 
   /**
    * Get the desired configurations for the host including overrides
+   *
    * @param cluster
+   * @param clusterDesiredConfigs
+   *          the desired configurations for the cluster. Obtaining these can be
+   *          expensive and since this method operates on hosts, it could be
+   *          called 1,000's of times when generating host responses. Therefore,
+   *          the caller should build these once and pass them in. If
+   *          {@code null}, then this method will retrieve them at runtime,
+   *          incurring a performance penality.
    * @return
    * @throws AmbariException
    */
-  Map<String, HostConfig> getDesiredHostConfigs(Cluster cluster) throws AmbariException;
-
-  /**
-   * Get the desired configurations for the host including overrides
-   * @param cluster
-   * @param bypassCache
-   * @return
-   * @throws AmbariException
-   */
-  Map<String, HostConfig> getDesiredHostConfigs(Cluster cluster, boolean bypassCache) throws AmbariException;
+  Map<String, HostConfig> getDesiredHostConfigs(Cluster cluster,
+      Map<String, DesiredConfig> clusterDesiredConfigs) throws AmbariException;
 
   /**
    * Sets the maintenance state for the host.
@@ -399,4 +412,36 @@ public interface Host extends Comparable {
    * @return
    */
   List<HostVersionEntity> getAllHostVersions();
+
+  /**
+   * Gets whether this host has components which advertise their version.
+   *
+   * @param stackId
+   *          the version of the stack to use when checking version
+   *          advertise-ability.
+   * @return {@code true} if at least 1 component on this host advertises its
+   *         version.
+   * @throws AmbariException
+   *           if there is a problem retrieving the component from the stack.
+   * @see ComponentInfo#isVersionAdvertised()
+   */
+  boolean hasComponentsAdvertisingVersions(StackId stackId) throws AmbariException;
+
+  void calculateHostStatus(Long clusterId) throws AmbariException;
+
+  /**
+   * Gets whether all host components whose desired repository version matches
+   * the repository version specified have reported the correct version and are
+   * no longer upgrading.
+   *
+   * @param repositoryVersion
+   *          the repository version to check for (not {@code null}).
+   * @return {@code true} if all components on this host have checked in with
+   *         the correct version if their desired repository matches the one
+   *         specified.
+   *
+   * @throws AmbariException
+   */
+  boolean isRepositoryVersionCorrect(RepositoryVersionEntity repositoryVersion)
+      throws AmbariException;
 }

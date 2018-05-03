@@ -17,26 +17,40 @@
  */
 package org.apache.ambari.server.serveraction.kerberos;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.actionmanager.HostRoleStatus;
 import org.apache.ambari.server.agent.CommandReport;
 import org.apache.ambari.server.controller.internal.ArtifactResourceProvider;
 import org.apache.ambari.server.controller.internal.RequestImpl;
-import org.apache.ambari.server.controller.spi.*;
+import org.apache.ambari.server.controller.spi.ClusterController;
+import org.apache.ambari.server.controller.spi.NoSuchResourceException;
+import org.apache.ambari.server.controller.spi.Predicate;
+import org.apache.ambari.server.controller.spi.Resource;
+import org.apache.ambari.server.controller.spi.ResourceProvider;
 import org.apache.ambari.server.controller.utilities.ClusterControllerHelper;
 import org.apache.ambari.server.controller.utilities.PredicateBuilder;
+import org.apache.ambari.server.orm.dao.KerberosKeytabDAO;
+import org.apache.ambari.server.orm.dao.KerberosPrincipalDAO;
+import org.apache.ambari.server.serveraction.kerberos.stageutils.ResolvedKerberosPrincipal;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.SecurityType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentMap;
+import com.google.inject.Inject;
 
 /**
  * Used to perform Kerberos Cleanup Operations as part of the Unkerberization process
  */
 public class CleanupServerAction extends KerberosServerAction {
+  @Inject
+  KerberosKeytabDAO kerberosKeytabDAO;
+
+  @Inject
+  KerberosPrincipalDAO kerberosPrincipalDAO;
 
   private final static Logger LOG = LoggerFactory.getLogger(CleanupServerAction.class);
 
@@ -45,8 +59,7 @@ public class CleanupServerAction extends KerberosServerAction {
    * <p/>
    * This method is not used since the {@link #processIdentities(java.util.Map)} is not invoked
    *
-   * @param identityRecord           a Map containing the data for the current identity record
-   * @param evaluatedPrincipal       a String indicating the relevant principal
+   * @param resolvedPrincipal        a ResolvedKerberosPrincipal object to process
    * @param operationHandler         a KerberosOperationHandler used to perform Kerberos-related
    *                                 tasks for specific Kerberos implementations
    *                                 (MIT, Active Directory, etc...)
@@ -57,7 +70,7 @@ public class CleanupServerAction extends KerberosServerAction {
    * @throws AmbariException if an error occurs while processing the identity record
    */
   @Override
-  protected CommandReport processIdentity(Map<String, String> identityRecord, String evaluatedPrincipal,
+  protected CommandReport processIdentity(ResolvedKerberosPrincipal resolvedPrincipal,
                                           KerberosOperationHandler operationHandler,
                                           Map<String, String> kerberosConfiguration,
                                           Map<String, Object> requestSharedDataContext)
@@ -98,11 +111,12 @@ public class CleanupServerAction extends KerberosServerAction {
 
     ClusterController clusterController = ClusterControllerHelper.getClusterController();
 
-    ResourceProvider artifactProvider =
-      clusterController.ensureResourceProvider(Resource.Type.Artifact);
+    ResourceProvider artifactProvider = clusterController.ensureResourceProvider(Resource.Type.Artifact);
 
     try {
       artifactProvider.deleteResources(new RequestImpl(null, null, null, null), predicate);
+      kerberosPrincipalDAO.remove(kerberosPrincipalDAO.findAll());
+      kerberosKeytabDAO.remove(kerberosKeytabDAO.findAll());
       LOG.info("Kerberos descriptor removed successfully.");
       actionLog.writeStdOut("Kerberos descriptor removed successfully.");
     } catch (NoSuchResourceException e) {

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,11 +19,11 @@ package org.apache.ambari.server.orm;
 
 import java.util.Properties;
 
-import com.google.inject.persist.PersistService;
-
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.audit.AuditLoggerModule;
 import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.controller.ControllerModule;
+import org.apache.ambari.server.ldap.LdapModule;
 import org.apache.ambari.server.state.Clusters;
 import org.junit.After;
 import org.junit.Assert;
@@ -40,21 +40,21 @@ public class JdbcPropertyTest {
   @Before
   public void configure() {
     properties = new Properties();
-    properties.setProperty(Configuration.SERVER_PERSISTENCE_TYPE_KEY, "in-memory");
-    properties.setProperty(Configuration.METADATA_DIR_PATH, "src/test/resources/stacks");
-    properties.setProperty(Configuration.SERVER_VERSION_FILE, "src/test/resources/version");
-    properties.setProperty(Configuration.OS_VERSION_KEY, "centos5");
-    properties.setProperty(Configuration.SHARED_RESOURCES_DIR_KEY, "src/test/resources/");
+    properties.setProperty(Configuration.SERVER_PERSISTENCE_TYPE.getKey(), "in-memory");
+    properties.setProperty(Configuration.METADATA_DIR_PATH.getKey(), "src/test/resources/stacks");
+    properties.setProperty(Configuration.SERVER_VERSION_FILE.getKey(), "src/test/resources/version");
+    properties.setProperty(Configuration.OS_VERSION.getKey(), "centos5");
+    properties.setProperty(Configuration.SHARED_RESOURCES_DIR.getKey(), "src/test/resources/");
   }
 
   @After
   public void tearDown() throws Exception {
-    injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
   @Test
   public void testNormal() throws Exception {
-    injector = Guice.createInjector(new AuditLoggerModule(), new ControllerModule(properties));
+    injector = Guice.createInjector(new AuditLoggerModule(), new ControllerModule(properties), new LdapModule());
     injector.getInstance(GuiceJpaInitializer.class);
 
     injector.getInstance(Clusters.class);
@@ -63,7 +63,7 @@ public class JdbcPropertyTest {
   @Test
   public void testJdbcProperty() throws Exception {
     properties.setProperty(Configuration.SERVER_JDBC_PROPERTIES_PREFIX + "shutdown", "true");
-    injector = Guice.createInjector(new AuditLoggerModule(), new ControllerModule(properties));
+    injector = Guice.createInjector(new AuditLoggerModule(), new ControllerModule(properties), new LdapModule());
     injector.getInstance(GuiceJpaInitializer.class);
     try {
       injector.getInstance(Clusters.class);

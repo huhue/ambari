@@ -24,11 +24,12 @@
 var App = require('app');
 require('views/common/controls_view');
 
-App.PlainConfigTextField = Ember.View.extend(App.SupportsDependentConfigs, App.WidgetPopoverSupport, App.ValueObserver, {
+//TODO should use only "serviceConfig" binding instead of "config"
+App.PlainConfigTextField = Ember.View.extend(App.SupportsDependentConfigs, App.WidgetPopoverSupport, App.WidgetValueObserver, {
   templateName: require('templates/common/configs/widgets/plain_config_text_field'),
   valueBinding: 'config.value',
   classNames: ['widget-config-plain-text-field'],
-  placeholderBinding: 'config.savedValue',
+  placeholderBinding: 'config.placeholder',
 
   disabled: Em.computed.not('config.isEditable'),
 

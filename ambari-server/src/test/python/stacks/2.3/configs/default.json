@@ -2,21 +2,154 @@
     "roleCommand": "SERVICE_CHECK",
     "clusterName": "c1",
     "hostname": "c6401.ambari.apache.org",
-    "hostLevelParams": {
+    "clusterLevelParams": {
+        "stack_version": "2.3", 
         "not_managed_hdfs_path_list": "[\"/apps/hive/warehouse\",\"/apps/falcon\",\"/mr-history/done\",\"/app-logs\",\"/tmp\"]",
-        "agent_stack_retry_count": "5",
-        "agent_stack_retry_on_unavailability": "false",
-        "jdk_location": "http://c6401.ambari.apache.org:8080/resources/",
-        "ambari_db_rca_password": "mapred",
-        "ambari_db_rca_url": "jdbc:postgresql://c6401.ambari.apache.org/ambarirca",
-        "jce_name": "UnlimitedJCEPolicyJDK7.zip",
-        "stack_version": "2.3",
-        "stack_name": "HDP",
-        "ambari_db_rca_driver": "org.postgresql.Driver",
-        "jdk_name": "jdk-7u67-linux-x64.tar.gz",
-        "ambari_db_rca_username": "mapred",
-        "java_home": "/usr/jdk64/jdk1.7.0_45",
-        "db_name": "ambari"
+        "hooks_folder": "stack-hooks", 
+        "stack_name": "HDP", 
+        "group_list": "[\"hdfs\",\"hadoop\",\"users\"]", 
+        "user_groups": "{\"hive\":[\"hadoop\"], \"oozie\":[\"hadoop\",\"users\"], \"nobody\":[\"hadoop\",\"nobody\"], \"ambari-qa\":[\"hadoop\",\"users\"], \"flume\":[\"hadoop\"], \"hdfs\":[\"hadoop\"], \"storm\":[\"hadoop\"], \"mapred\":[\"hadoop\"], \"hbase\":[\"hadoop\"], \"tez\":[\"hadoop\",\"users\"], \"zookeeper\":[\"hadoop\"], \"falcon\":[\"hadoop\",\"users\"], \"sqoop\":[\"hadoop\"], \"yarn\":[\"hadoop\"], \"hcat\":[\"hadoop\"]}", 
+        "cluster_name": "c1", 
+        "user_list": "[\"ambari-qa\",\"hdfs\"]"
+    },
+    "ambariLevelParams": {
+        "jdk_location": "http://c6401.ambari.apache.org:8080/resources",
+        "agent_stack_retry_count": "5", 
+        "db_driver_filename": "mysql-connector-java.jar", 
+        "agent_stack_retry_on_unavailability": "false", 
+        "ambari_db_rca_url": "jdbc:postgresql://c6401.ambari.apache.org/ambarirca", 
+        "jce_name": "jce_policy-7.zip", 
+        "java_version": "7", 
+        "ambari_db_rca_password": "mapred", 
+        "host_sys_prepped": "false", 
+        "db_name": "ambari", 
+        "oracle_jdbc_url": "http://c6401.ambari.apache.org/resources/ojdbc6.jar",
+        "ambari_db_rca_driver": "org.postgresql.Driver", 
+        "ambari_db_rca_username": "mapred", 
+        "jdk_name": "jdk-7u45-linux-x64.tar.gz", 
+        "java_home": "/usr/jdk64/jdk1.7.0_45", 
+        "mysql_jdbc_url": "http://c6401.ambari.apache.org/resources/mysql-connector-java.jar"
+    },
+    "repositoryFile": {
+        "resolved": true, 
+        "repoVersion": "2.6.4.0-60", 
+        "repositories": [
+            {
+                "mirrorsList": null, 
+                "ambariManaged": true, 
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-60", 
+                "repoName": "HDP", 
+                "components": null, 
+                "osType": "redhat6", 
+                "distribution": null, 
+                "repoId": "HDP-2.6-repo-1"
+            }, 
+            {
+                "mirrorsList": null, 
+                "ambariManaged": true, 
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-60", 
+                "repoName": "HDP-GPL", 
+                "components": null, 
+                "osType": "redhat6", 
+                "distribution": null, 
+                "repoId": "HDP-2.6-GPL-repo-1"
+            }, 
+            {
+                "mirrorsList": null, 
+                "ambariManaged": true, 
+                "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6", 
+                "repoName": "HDP-UTILS", 
+                "components": null, 
+                "osType": "redhat6", 
+                "distribution": null, 
+                "repoId": "HDP-UTILS-1.1.0.22-repo-1"
+            }
+        ], 
+        "feature": {
+            "m_isScoped": true, 
+            "m_isPreInstalled": false
+        }, 
+        "stackName": "HDP", 
+        "repoVersionId": 1
+    },
+    "agentLevelParams": {
+        "public_hostname": "c6401.ambari.apache.org", 
+        "hostname": "c6401.ambari.apache.org", 
+        "agentConfigParams": {
+            "agent": {
+                "parallel_execution": 0, 
+                "use_system_proxy_settings": true
+            }
+        }, 
+        "agentCacheDir": "/var/lib/ambari-agent/cache"
+    },
+    "hostLevelParams": {
+        "recoveryConfig": {
+            "retryGap": "5", 
+            "windowInMinutes": "60", 
+            "maxLifetimeCount": "1024", 
+            "components": "", 
+            "maxCount": "6", 
+            "type": "AUTO_START"
+        }, 
+        "hostRepositories": {
+            "componentRepos": {
+                "NAMENODE": 1, 
+                "SECONDARY_NAMENODE": 1, 
+                "DATANODE": 1, 
+                "HDFS_CLIENT": 1
+            }, 
+            "commandRepos": {
+                "1": {
+                    "resolved": true, 
+                    "repoVersion": "2.1.4.0-60", 
+                    "repositories": [
+                        {
+                            "mirrorsList": null, 
+                            "ambariManaged": true, 
+                            "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.6.4.0-60", 
+                            "repoName": "HDP", 
+                            "components": null, 
+                            "osType": "redhat6", 
+                            "distribution": null, 
+                            "repoId": "HDP-2.6-repo-1"
+                        }, 
+                        {
+                            "mirrorsList": null, 
+                            "ambariManaged": true, 
+                            "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-GPL/centos6/2.x/BUILDS/2.6.4.0-60", 
+                            "repoName": "HDP-GPL", 
+                            "components": null, 
+                            "osType": "redhat6", 
+                            "distribution": null, 
+                            "repoId": "HDP-2.6-GPL-repo-1"
+                        }, 
+                        {
+                            "mirrorsList": null, 
+                            "ambariManaged": true, 
+                            "baseUrl": "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.22/repos/centos6", 
+                            "repoName": "HDP-UTILS", 
+                            "components": null, 
+                            "osType": "redhat6", 
+                            "distribution": null, 
+                            "repoId": "HDP-UTILS-1.1.0.22-repo-1"
+                        }
+                    ], 
+                    "feature": {
+                        "m_isScoped": true, 
+                        "m_isPreInstalled": false
+                    }, 
+                    "stackName": "HDP", 
+                    "repoVersionId": 1
+                }
+            }
+        }
+    },
+    "serviceLevelParams": {
+        "credentialStoreEnabled": false, 
+        "status_commands_timeout": 300, 
+        "version": "2.7.3", 
+        "service_package_folder": "common-services/HDFS/2.1.0.2.0/package"
     },
     "commandType": "EXECUTION_COMMAND",
     "roleParams": {},
@@ -45,6 +178,9 @@
         },
         "yarn-env": {
             "yarn_user": "yarn"
+        },
+        "hbase-env": {
+            "hbase_user": "hbase"
         },
         "mahout-log4j": {
             "content": "\n            #\n            #\n            # Licensed to the Apache Software Foundation (ASF) under one\n            # or more contributor license agreements.  See the NOTICE file\n            # distributed with this work for additional information\n            # regarding copyright ownership.  The ASF licenses this file\n            # to you under the Apache License, Version 2.0 (the\n            # \"License\"); you may not use this file except in compliance\n            # with the License.  You may obtain a copy of the License at\n            #\n            #   http://www.apache.org/licenses/LICENSE-2.0\n            #\n            # Unless required by applicable law or agreed to in writing,\n            # software distributed under the License is distributed on an\n            # \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n            # KIND, either express or implied.  See the License for the\n            # specific language governing permissions and limitations\n            # under the License.\n            #\n            #\n            #\n\n            # Set everything to be logged to the console\n            log4j.rootCategory=WARN, console\n            log4j.appender.console=org.apache.log4j.ConsoleAppender\n            log4j.appender.console.target=System.err\n            log4j.appender.console.layout=org.apache.log4j.PatternLayout\n            log4j.appender.console.layout.ConversionPattern=%d{yy/MM/dd HH:mm:ss} %p %c{1}: %m%n\n\n            # Settings to quiet third party logs that are too verbose\n            log4j.logger.org.eclipse.jetty=WARN\n            log4j.logger.org.apache.spark.repl.SparkIMain$exprTyper=WARN\n            log4j.logger.org.apache.spark.repl.SparkILoop$SparkILoopInterpreter=WARN"
@@ -171,11 +307,21 @@
         "log.index.interval.bytes": "4096",
         "log.retention.hours": "168"
       },
+      "infra-solr-env": {
+        "infra_solr_znode": "/infra-solr",
+        "infra_solr_user": "solr",
+        "infra_solr_group": "solr",
+        "infra_solr_client_log_dir" :"/var/log/ambari-infra-solr-client"
+      },
+      "infra-solr-client-log4j" : {
+        "infra_solr_client_log_dir" : "/var/log/ambari-infra-solr-client",
+        "content" : "content"
+      },
       "application-properties": {
         "atlas.cluster.name" : "c2",
         "atlas.graph.storage.backend": "berkeleyje",
         "atlas.graph.storage.directory": "data/berkley",
-        "atlas.graph.index.search.backend": "elasticsearch",
+        "atlas.graph.index.search.backend": "solr5",
         "atlas.graph.index.search.directory": "data/es",
         "atlas.graph.index.search.elasticsearch.client-only": false,
         "atlas.graph.index.search.elasticsearch.local-mode": true,
@@ -202,6 +348,9 @@
         "atlas.kafka.hook.group.id" : "atlas",
         "atlas.kafka.zookeeper.connect" : "c6401.ambari.apache.org:2181"
       },
+      "zoo.cfg": {
+        "clientPort": "2181"
+      },
       "atlas-env": {
         "content": "# The java implementation to use. If JAVA_HOME is not found we expect java and jar to be in path\nexport JAVA_HOME={{java64_home}}\n# any additional java opts you want to set. This will apply to both client and server operations\nexport METADATA_OPTS={{metadata_opts}}\n# metadata configuration directory\nexport METADATA_CONF={{conf_dir}}\n# Where log files are stored. Defatult is logs directory under the base install location\nexport METADATA_LOG_DIR={{log_dir}}\n# additional classpath entries\nexport METADATACPPATH={{metadata_classpath}}\n# data dir\nexport METADATA_DATA_DIR={{data_dir}}\n# Where do you want to expand the war file. By Default it is in /server/webapp dir under the base install dir.\nexport METADATA_EXPANDED_WEBAPP_DIR={{expanded_war_dir}}",
         "metadata_user": "atlas",
@@ -209,17 +358,15 @@
         "metadata_pid_dir": "/var/run/atlas",
         "metadata_log_dir": "/var/log/atlas",
         "metadata_data_dir": "/var/lib/atlas/data",
-        "metadata_expanded_war_dir": "/var/lib/atlas/server/webapp",
-        "metadata_conf_file": "application.properties",
-        "has_embedded_hbase":"true"
+        "metadata_expanded_war_dir": "/var/lib/atlas/server/webapp"
       },
       "atlas-log4j": {
         "content": "<property><name>content</name><description>Custom log4j.properties</description><value></value></property>",
         "atlas_log_level": "debug",
         "audit_log_level": "OFF"
       },
-      "atlas-hbase-site": {
-        "hbase.master.info.port": "61510"
+      "atlas-solrconfig": {
+        "content": "<property><name>content</name><description>Custom solrconfig properties</description><value></value></property>"
       },
       "ranger-hbase-plugin-properties": {
             "ranger-hbase-plugin-enabled":"yes"
@@ -231,7 +378,7 @@
             "xml_configurations_supported" : "true"
       }
     },
-    "configuration_attributes": {
+    "configurationAttributes": {
         "sqoop-site": {},
         "yarn-site": {
             "final": {
@@ -318,21 +465,27 @@
             "8670",
             "8670"
         ],
-        "rm_host": [
+        "resourcemanager_hosts": [
             "c6402.ambari.apache.org"
         ],
         "all_hosts": [
             "c6401.ambari.apache.org",
             "c6402.ambari.apache.org"
         ],
-      "knox_gateway_hosts": [
-        "jaimin-knox-1.c.pramod-thangali.internal"
-      ],
-      "kafka_broker_hosts": [
-        "c6401.ambari.apache.org"
-      ],
-       "zookeeper_hosts": [
+        "knox_gateway_hosts": [
+          "jaimin-knox-1.c.pramod-thangali.internal"
+        ],
+        "kafka_broker_hosts": [
+          "c6401.ambari.apache.org"
+        ],
+        "infra_solr_hosts": [
+          "c6401.ambari.apache.org"
+        ],
+        "zookeeper_server_hosts": [
          "c6401.ambari.apache.org"
+        ],
+        "atlas_server_hosts": [
+          "c6401.ambari.apache.org"
         ]
 
 }

@@ -30,6 +30,8 @@ class TestHbaseRegionServer(RMFTestCase):
   STACK_VERSION = "2.0.6"
   TMP_PATH = '/hadoop'
 
+  CONFIG_OVERRIDES = {"serviceName":"HBASE", "role":"HBASE_REGIONSERVER"}
+
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/hbase_regionserver.py",
                    classname = "HbaseRegionServer",
@@ -90,6 +92,7 @@ class TestHbaseRegionServer(RMFTestCase):
 
     self.assert_configure_secured()
     self.assertNoMoreResources()
+
 
   def test_start_secured(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/hbase_regionserver.py",
@@ -153,28 +156,21 @@ class TestHbaseRegionServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/etc/hbase/conf',
       configurations = self.getConfig()['configurations']['hbase-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hbase-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['hbase-site']
     )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/etc/hbase/conf',
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['core-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['core-site']
     )
     self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/etc/hbase/conf',
       configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
-    )
-    self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
-      owner = 'hdfs',
-      group = 'hadoop',
-      conf_dir = '/etc/hadoop/conf',
-      configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
     )
     self.assertResourceCalled('File', '/etc/hbase/conf/hbase-policy.xml',
       owner = 'hbase',
@@ -221,7 +217,7 @@ class TestHbaseRegionServer(RMFTestCase):
                               mode=0644,
                               group='hadoop',
                               owner='hbase',
-                              content='log4jproperties\nline2'
+                              content=InlineTemplate('log4jproperties\nline2')
     )
 
   def assert_configure_secured(self):
@@ -249,28 +245,21 @@ class TestHbaseRegionServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/etc/hbase/conf',
       configurations = self.getConfig()['configurations']['hbase-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hbase-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['hbase-site']
     )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/etc/hbase/conf',
       configurations = self.getConfig()['configurations']['core-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['core-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['core-site']
     )
     self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/etc/hbase/conf',
       configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
-    )
-    self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
-      owner = 'hdfs',
-      group = 'hadoop',
-      conf_dir = '/etc/hadoop/conf',
-      configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+      configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
     )
     self.assertResourceCalled('File', '/etc/hbase/conf/hbase-policy.xml',
       owner = 'hbase',
@@ -321,7 +310,7 @@ class TestHbaseRegionServer(RMFTestCase):
                               mode=0644,
                               group='hadoop',
                               owner='hbase',
-                              content='log4jproperties\nline2'
+                              content=InlineTemplate('log4jproperties\nline2')
     )
 
   def test_start_default_22(self):
@@ -358,34 +347,27 @@ class TestHbaseRegionServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hbase-site'])
+      configuration_attributes = self.getConfig()['configurationAttributes']['hbase-site'])
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
                               owner = 'hbase',
                               group = 'hadoop',
                               conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
                               configurations = self.getConfig()['configurations']['core-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['core-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['core-site']
     )
     self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site'])
-
-    self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
-                              owner = 'hdfs',
-                              group = 'hadoop',
-                              conf_dir = '/usr/hdp/current/hadoop-client/conf',
-                              configurations = self.getConfig()['configurations']['hdfs-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site'])
+      configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site'])
 
     self.assertResourceCalled('XmlConfig', 'hbase-policy.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-policy'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hbase-policy'])
+      configuration_attributes = self.getConfig()['configurationAttributes']['hbase-policy'])
 
     self.assertResourceCalled('File', '/usr/hdp/current/hbase-regionserver/conf/hbase-env.sh',
       owner = 'hbase',
@@ -431,7 +413,7 @@ class TestHbaseRegionServer(RMFTestCase):
                               mode=0644,
                               group='hadoop',
                               owner='hbase',
-                              content='log4jproperties\nline2')
+                              content=InlineTemplate('log4jproperties\nline2'))
     self.assertResourceCalled('Execute', '/usr/hdp/current/hbase-regionserver/bin/hbase-daemon.sh --config /usr/hdp/current/hbase-regionserver/conf start regionserver',
       not_if = 'ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hbase/hbase-hbase-regionserver.pid && ps -p `ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E cat /var/run/hbase/hbase-hbase-regionserver.pid` >/dev/null 2>&1',
       user = 'hbase')
@@ -472,34 +454,27 @@ class TestHbaseRegionServer(RMFTestCase):
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hbase-site'])
+      configuration_attributes = self.getConfig()['configurationAttributes']['hbase-site'])
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
                               owner = 'hbase',
                               group = 'hadoop',
                               conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
                               configurations = self.getConfig()['configurations']['core-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['core-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['core-site']
     )
     self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hdfs-site'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site'])
-
-    self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
-                              owner = 'hdfs',
-                              group = 'hadoop',
-                              conf_dir = '/usr/hdp/current/hadoop-client/conf',
-                              configurations = self.getConfig()['configurations']['hdfs-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site'])
+      configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site'])
 
     self.assertResourceCalled('XmlConfig', 'hbase-policy.xml',
       owner = 'hbase',
       group = 'hadoop',
       conf_dir = '/usr/hdp/current/hbase-regionserver/conf',
       configurations = self.getConfig()['configurations']['hbase-policy'],
-      configuration_attributes = self.getConfig()['configuration_attributes']['hbase-policy'])
+      configuration_attributes = self.getConfig()['configurationAttributes']['hbase-policy'])
 
     self.assertResourceCalled('File', '/usr/hdp/current/hbase-regionserver/conf/hbase-env.sh',
       owner = 'hbase',
@@ -547,7 +522,7 @@ class TestHbaseRegionServer(RMFTestCase):
                               mode=0644,
                               group='hadoop',
                               owner='hbase',
-                              content='log4jproperties\nline2')
+                              content=InlineTemplate('log4jproperties\nline2'))
 
     self.assertResourceCalled('Package', 'phoenix_2_2_*', retry_count=5, retry_on_repo_unavailability=False)
 
@@ -556,110 +531,6 @@ class TestHbaseRegionServer(RMFTestCase):
       user = 'hbase')
 
     self.assertNoMoreResources()
-
-
-  @patch("resource_management.libraries.functions.security_commons.build_expectations")
-  @patch("resource_management.libraries.functions.security_commons.get_params_from_filesystem")
-  @patch("resource_management.libraries.functions.security_commons.validate_security_config_properties")
-  @patch("resource_management.libraries.functions.security_commons.cached_kinit_executor")
-  @patch("resource_management.libraries.script.Script.put_structured_out")
-  def test_security_status(self, put_structured_out_mock, cached_kinit_executor_mock, validate_security_config_mock, get_params_mock, build_exp_mock):
-    # Test that function works when is called with correct parameters
-
-    security_params = {
-      'hbase-site': {
-        'hbase.regionserver.keytab.file': '/path/to/hbase_keytab',
-        'hbase.regionserver.kerberos.principal': 'hbase_principal'
-      }
-    }
-
-    result_issues = []
-    props_value_check = {"hbase.security.authentication": "kerberos",
-                           "hbase.security.authorization": "true"}
-    props_empty_check = ["hbase.regionserver.keytab.file",
-                           "hbase.regionserver.kerberos.principal"]
-
-    props_read_check = ["hbase.regionserver.keytab.file"]
-
-    get_params_mock.return_value = security_params
-    validate_security_config_mock.return_value = result_issues
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/hbase_regionserver.py",
-                   classname = "HbaseRegionServer",
-                   command = "security_status",
-                   config_file="secured.json",
-                   stack_version = self.STACK_VERSION,
-                   target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-
-    build_exp_mock.assert_called_with('hbase-site', props_value_check, props_empty_check, props_read_check)
-    put_structured_out_mock.assert_called_with({"securityState": "SECURED_KERBEROS"})
-    cached_kinit_executor_mock.called_with('/usr/bin/kinit',
-                                           self.config_dict['configurations']['hbase-env']['hbase_user'],
-                                           security_params['hbase-site']['hbase.regionserver.keytab.file'],
-                                           security_params['hbase-site']['hbase.regionserver.kerberos.principal'],
-                                           self.config_dict['hostname'],
-                                           '/tmp')
-
-     # Testing that the exception throw by cached_executor is caught
-    cached_kinit_executor_mock.reset_mock()
-    cached_kinit_executor_mock.side_effect = Exception("Invalid command")
-
-    try:
-      self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/hbase_regionserver.py",
-                   classname = "HbaseRegionServer",
-                   command = "security_status",
-                   config_file="secured.json",
-                   stack_version = self.STACK_VERSION,
-                   target = RMFTestCase.TARGET_COMMON_SERVICES
-      )
-    except:
-      self.assertTrue(True)
-
-    # Testing with a security_params which doesn't contains hbase-site
-    empty_security_params = {}
-    cached_kinit_executor_mock.reset_mock()
-    get_params_mock.reset_mock()
-    put_structured_out_mock.reset_mock()
-    get_params_mock.return_value = empty_security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/hbase_regionserver.py",
-                   classname = "HbaseRegionServer",
-                   command = "security_status",
-                   config_file="secured.json",
-                   stack_version = self.STACK_VERSION,
-                   target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityIssuesFound": "Keytab file or principal are not set property."})
-
-    # Testing with not empty result_issues
-    result_issues_with_params = {
-      'hbase-site' : "Something bad happened"
-    }
-
-    validate_security_config_mock.reset_mock()
-    get_params_mock.reset_mock()
-    validate_security_config_mock.return_value = result_issues_with_params
-    get_params_mock.return_value = security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/hbase_regionserver.py",
-                   classname = "HbaseRegionServer",
-                   command = "security_status",
-                   config_file="secured.json",
-                   stack_version = self.STACK_VERSION,
-                   target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-
-    # Testing with security_enable = false
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/hbase_regionserver.py",
-                   classname = "HbaseRegionServer",
-                   command = "security_status",
-                   config_file="default.json",
-                   stack_version = self.STACK_VERSION,
-                   target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
 
   def test_pre_upgrade_restart(self):
     config_file = self.get_src_folder()+"/test/python/stacks/2.0.6/configs/default.json"
@@ -671,6 +542,7 @@ class TestHbaseRegionServer(RMFTestCase):
                        classname = "HbaseRegionServer",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES)
     self.assertResourceCalled('Execute',
@@ -711,19 +583,10 @@ class TestHbaseRegionServer(RMFTestCase):
                        classname = "HbaseRegionServer",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES,
-                       call_mocks = [(0, None, ''), (0, None), (0, None), (0, None)],
                        mocks_dict = mocks_dict)
 
     self.assertResourceCalledIgnoreEarlier('Execute', ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'hbase-regionserver', version), sudo=True)
-
-    self.assertEquals(1, mocks_dict['call'].call_count)
-    self.assertEquals(3, mocks_dict['checked_call'].call_count)
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'hbase', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[1][0][0])
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'hbase', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])
 

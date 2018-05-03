@@ -21,8 +21,12 @@ import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.ambari.server.configuration.Configuration.DatabaseType;
+import org.apache.commons.lang.builder.EqualsBuilder;
+import org.apache.commons.lang.builder.HashCodeBuilder;
+import org.eclipse.jdt.internal.compiler.ast.FieldDeclaration;
 import org.eclipse.persistence.internal.databaseaccess.FieldTypeDefinition;
 import org.eclipse.persistence.sessions.DatabaseSession;
 
@@ -68,6 +72,17 @@ public interface DBAccessor {
    */
   void createIndex(String indexName, String tableName,
                           String... columnNames) throws SQLException;
+
+  /**
+   * Create new index
+   * @param indexName The name of the index to be created
+   * @param tableName The database table the index to be created on
+   * @param columnNames The columns included into the index
+   * @param isUnique Specifies whether unique index is to be created.
+   * @throws SQLException Exception in case the index creation fails.
+   */
+  void createIndex(String indexName, String tableName, boolean isUnique,
+                   String... columnNames) throws SQLException;
 
   /**
    * Add foreign key for a relation
@@ -138,8 +153,22 @@ public interface DBAccessor {
                               String referenceTableName,
                               String[] referenceColumns,
                               boolean ignoreFailure) throws SQLException;
+
   /**
-   * Add column to existing table
+   * Adds a column to an existing table. This method will honor the
+   * {@link DBColumnInfo#isNullable} and {@link DBColumnInfo#getDefaultValue()}
+   * methods and create a new column that has a {@code DEFAULT} constraint.
+   * <p/>
+   * Oracle is, of course, the exception here since their syntax doesn't conform
+   * to widely accepted SQL standards. Because they switch the order of the
+   * {@code NULL} constraint and the {@code DEFAULT} constraint, we need to
+   * create the table in a non-atomic fashion. This is because the EclipseLink
+   * {@link FieldDeclaration} class hard codes the order of the constraints. In
+   * the case of Oracle, we alter the nullability of the table after its
+   * creation.
+   * <p/>
+   * No work is performed if the column already exists.
+   *
    * @param tableName
    * @param columnInfo
    * @throws SQLException
@@ -156,6 +185,16 @@ public interface DBAccessor {
    */
   void addUniqueConstraint(String tableName, String constraintName, String... columnNames)
     throws SQLException;
+
+  /**
+   * Add unique table constraint
+   * @param constraintName name of the constraint
+   * @param tableName name of the table
+   * @param columnNames list of columns
+   * @throws SQLException
+   */
+  void updateUniqueConstraint(String tableName, String constraintName, String... columnNames)
+      throws SQLException;
 
   /**
    *
@@ -297,6 +336,72 @@ public interface DBAccessor {
   void executeQuery(String query, boolean ignoreFailure) throws SQLException;
 
   /**
+   * Execute prepared statements
+   * @param query query to execute
+   * @param arguments list of arguments for prepared statement
+   * @throws SQLException
+   */
+  void executePreparedQuery(String query, Object...arguments) throws SQLException;
+
+  /**
+   * Execute prepared update statements
+   * @param query query to execute
+   * @param ignoreFailure determines if exceptions during query execution should be ignored
+   * @param arguments list of arguments for prepared statement
+   * @throws SQLException
+   */
+  void executePreparedQuery(String query, boolean ignoreFailure, Object...arguments) throws SQLException;
+
+  /**
+   * Execute prepared update statements
+   * @param query query to execute
+   * @param arguments list of arguments for prepared statement
+   * @throws SQLException
+   */
+  void executePreparedUpdate(String query, Object...arguments) throws SQLException;
+
+  /**
+   * Execute prepared statements which will not ignore failures
+   * @param query
+   * @param ignoreFailure
+   * @param arguments
+   * @throws SQLException
+   */
+  void executePreparedUpdate(String query, boolean ignoreFailure, Object...arguments) throws SQLException;
+
+  /**
+   * Execute select {@code columnName} from {@code tableName}
+   * where {@code columnNames} values = {@code values}
+   *
+   * @param tableName            the table name
+   * @param columnName           the name of the column with the data to select
+   * @param conditionColumnNames an array of column names to use in the where clause
+   * @param conditionValues      an array of value to pair with the column names in conditionColumnNames
+   * @param ignoreFailure        true to ignore failures executing the query; false otherwise (errors building the query will be thrown, however)
+   * @return a list of integers
+   * @throws SQLException
+   */
+  List<Integer> getIntColumnValues(String tableName, String columnName, String[] conditionColumnNames,
+                                   String[] conditionValues, boolean ignoreFailure) throws SQLException;
+
+  /**
+   * Execute select {@code keyColumnName}, {@code valueColumnName} from {@code tableName}
+   * where {@code columnNames} values = {@code values}
+   *
+   * @param tableName            the table name
+   * @param keyColumnName        the name of the column with the key data to select
+   * @param valueColumnName      the name of the column with the value data to select
+   * @param conditionColumnNames an array of column names to use in the where clause
+   * @param conditionValues      an array of value to pair with the column names in conditionColumnNames
+   * @param ignoreFailure        true to ignore failures executing the query; false otherwise (errors building the query will be thrown, however)
+   * @return a map of key to values
+   * @throws SQLException
+   */
+  Map<Long, String> getKeyToStringColumnMap(String tableName, String keyColumnName, String valueColumnName,
+                                            String[] conditionColumnNames, String[] conditionValues,
+                                            boolean ignoreFailure) throws SQLException;
+
+  /**
    * Drop table from schema
    * @param tableName
    * @throws SQLException
@@ -326,9 +431,14 @@ public interface DBAccessor {
   void dropSequence(String sequenceName) throws SQLException;
 
   /**
-   * Drop a FK constraint from table
-   * @param tableName name of the table
-   * @param constraintName name of the constraint
+   * Drops a FK constraint from a table. In the case of
+   * {@link DatabaseType#MYSQL}, this will also ensure that any associated
+   * indexes are also dropped.
+   *
+   * @param tableName
+   *          name of the table
+   * @param constraintName
+   *          name of the constraint
    * @throws SQLException
    */
   void dropFKConstraint(String tableName, String constraintName) throws SQLException;
@@ -500,9 +610,8 @@ public interface DBAccessor {
    *          the name of the table (not {@code null}).
    * @param columnName
    *          the name of the column to retrieve type for (not {@code null}).
-   * @return the integer representation of the column type from {@link Types}.
+   * @return the integer representation of the column type
    * @throws SQLException
-   * @see {@link Types}
    */
   int getColumnType(String tableName, String columnName)
       throws SQLException;
@@ -580,11 +689,87 @@ public interface DBAccessor {
    */
   void dropPKConstraint(String tableName, String defaultConstraintName) throws SQLException;
 
+  /**
+   * Adds a default constraint to an existing column.
+   *
+   * @param tableName
+   *          the table where the column is defined (not {@code null}).
+   * @param column
+   *          the column information which contains the default value (not
+   *          {@code null}).
+   * @throws SQLException
+   */
+  void addDefaultConstraint(String tableName, DBColumnInfo column) throws SQLException;
+
+  /**
+   * Move column data from {@code sourceTableName} to {@code targetTableName} using {@code sourceIDFieldName} and
+   * {@code targetIDFieldName} keys to match right rows
+   *
+   * @param sourceTableName
+   *          the source table name
+   * @param sourceColumn
+   *          the source column name
+   * @param sourceIDFieldName
+   *          the source id key filed name matched with {@code targetIDFieldName}
+   * @param targetTableName
+   *          the target table name
+   * @param targetColumn
+   *          the target column name
+   * @param targetIDFieldName
+   *          the target id key name matched with {@code sourceIDFieldName}
+   * @param initialValue
+   *          initial value for null-contained cells
+   * @throws SQLException
+   */
+  void moveColumnToAnotherTable(String sourceTableName, DBColumnInfo sourceColumn, String sourceIDFieldName,
+       String targetTableName, DBColumnInfo targetColumn, String targetIDFieldName, Object initialValue) throws SQLException;
+
+  /**
+   * Copy column from {@code targetTable} by matching
+   * table keys {@code sourceIDColumnName} and {@code targetIDColumnName}
+   * and condition {@code sourceConditionFieldName} = {@code condition}
+   *
+   * @param sourceTableName          the source table name
+   * @param sourceColumn             the source column name
+   * @param sourceIDFieldName1       the source id key filed name matched with {@code targetIDFieldName1}
+   * @param sourceIDFieldName2       the source id key filed name matched with {@code targetIDFieldName2}
+   * @param sourceIDFieldName3       the source id key filed name matched with {@code targetIDFieldName3}
+   * @param targetTableName          the target table name
+   * @param targetColumn             the target column name
+   * @param targetIDFieldName1       the target id key name matched with {@code sourceIDFieldName1}
+   * @param targetIDFieldName2       the target id key name matched with {@code sourceIDFieldName2}
+   * @param targetIDFieldName3       the target id key name matched with {@code sourceIDFieldName3}
+   * @param sourceConditionFieldName source key column name which should match {@code condition}
+   * @param condition                value which should match {@code sourceConditionFieldName}
+   * @param initialValue             initial value for null-contained cells
+   * @throws SQLException
+   */
+  void copyColumnToAnotherTable(String sourceTableName, DBColumnInfo sourceColumn, String sourceIDFieldName1, String sourceIDFieldName2, String sourceIDFieldName3,
+                                String targetTableName, DBColumnInfo targetColumn, String targetIDFieldName1, String targetIDFieldName2, String targetIDFieldName3,
+                                String sourceConditionFieldName, String condition, Object initialValue) throws SQLException;
+
+  /**
+   * Remove all rows from the table
+   *
+   * @param tableName name of the table
+   */
+  void clearTable(String tableName) throws SQLException;
+
+  /**
+   * Reset all rows with {@code value} for {@code columnName} column
+   *
+   * @param tableName  name of the table
+   * @param columnName name of the column name to be update
+   * @param value      data to use for update
+   */
+  void clearTableColumn(String tableName, String columnName, Object value) throws SQLException;
+
   enum DbType {
     ORACLE,
     MYSQL,
     POSTGRES,
     DERBY,
+    H2,
     UNKNOWN
   }
 
@@ -593,6 +778,12 @@ public interface DBAccessor {
    * @return @DbType
    */
   DbType getDbType();
+
+  /**
+   * Get database schema name
+   * @return @dbSchema
+   */
+  String getDbSchema();
 
   /**
    * Capture column type
@@ -681,6 +872,33 @@ public interface DBAccessor {
 
     public void setDbType(FieldTypeDefinition dbType) {
       this.dbType = dbType;
+    }
+
+    @Override
+    public int hashCode() {
+      return new HashCodeBuilder(17, 37)
+          .append(name)
+          .append(type)
+          .append(length)
+          .append(isNullable)
+          .append(defaultValue)
+          .append(dbType)
+          .toHashCode();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      DBColumnInfo that = (DBColumnInfo) o;
+      return new EqualsBuilder()
+          .append(name, that.name)
+          .append(type, that.type)
+          .append(length, that.length)
+          .append(isNullable, that.isNullable)
+          .append(defaultValue, that.defaultValue)
+          .append(dbType, that.dbType)
+          .isEquals();
     }
   }
 

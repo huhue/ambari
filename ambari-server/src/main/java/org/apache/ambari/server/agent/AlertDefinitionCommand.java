@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,17 +17,16 @@
  */
 package org.apache.ambari.server.agent;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.state.Cluster;
-import org.apache.ambari.server.state.Config;
 import org.apache.ambari.server.state.ConfigHelper;
 import org.apache.ambari.server.state.alert.AlertDefinition;
 import org.apache.ambari.server.state.alert.AlertDefinitionHash;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.gson.annotations.SerializedName;
 
 /**
@@ -48,13 +47,18 @@ public class AlertDefinitionCommand extends AgentCommand {
   @SerializedName("hostName")
   private final String m_hostName;
 
+  @SerializedName("publicHostName")
+  private final String m_publicHostName;
+
   @SerializedName("hash")
   private final String m_hash;
 
   @SerializedName("alertDefinitions")
+  @JsonProperty("alertDefinitions")
   private final List<AlertDefinition> m_definitions;
 
   @SerializedName("configurations")
+  @JsonProperty("configurations")
   private Map<String, Map<String, String>> m_configurations;
 
   /**
@@ -63,17 +67,19 @@ public class AlertDefinitionCommand extends AgentCommand {
    * @param clusterName
    *          the name of the cluster this response is for (
    * @param hostName
+   * @param publicHostName
    * @param hash
    * @param definitions
    *
    * @see AlertDefinitionHash
    */
-  public AlertDefinitionCommand(String clusterName, String hostName,
+  public AlertDefinitionCommand(String clusterName, String hostName, String publicHostName,
       String hash, List<AlertDefinition> definitions) {
     super(AgentCommandType.ALERT_DEFINITION_COMMAND);
 
     m_clusterName = clusterName;
     m_hostName = hostName;
+    m_publicHostName = publicHostName;
     m_hash = hash;
     m_definitions = definitions;
   }
@@ -109,6 +115,7 @@ public class AlertDefinitionCommand extends AgentCommand {
    *
    * @return the cluster name (not {@code null}).
    */
+  @JsonProperty("clusterName")
   public String getClusterName() {
     return m_clusterName;
   }
@@ -118,6 +125,7 @@ public class AlertDefinitionCommand extends AgentCommand {
    *
    * @return the host name (not {@code null}).
    */
+  @JsonProperty("hostName")
   public String getHostName() {
     return m_hostName;
   }
@@ -130,39 +138,8 @@ public class AlertDefinitionCommand extends AgentCommand {
    */
   public void addConfigs(ConfigHelper configHelper, Cluster cluster)
     throws AmbariException {
-
-    m_configurations = new HashMap<String, Map<String, String>>();
-
-    Map<String, Map<String, String>> allConfigTags =
-        configHelper.getEffectiveDesiredTags(cluster, m_hostName);
-
-    for(Config clusterConfig: cluster.getAllConfigs()) {
-      if (null == clusterConfig) {
-        // !!! hard to believe
-        continue;
-      }
-
-      Map<String, String> props = new HashMap<String, String>(clusterConfig.getProperties());
-
-      Map<String, Map<String, String>> configTags = new HashMap<String,
-              Map<String, String>>();
-
-      for (Map.Entry<String, Map<String, String>> entry : allConfigTags.entrySet()) {
-        if (entry.getKey().equals(clusterConfig.getType())) {
-          configTags.put(clusterConfig.getType(), entry.getValue());
-        }
-      }
-
-      Map<String, Map<String, String>> properties = configHelper
-              .getEffectiveConfigProperties(cluster, configTags);
-
-      if (!properties.isEmpty()) {
-        for (Map<String, String> propertyMap : properties.values()) {
-          props.putAll(propertyMap);
-        }
-      }
-
-      m_configurations.put(clusterConfig.getType(), props);
-    }
+    Map<String, Map<String, String>> configTags = configHelper.getEffectiveDesiredTags(cluster, m_hostName);
+    Map<String, Map<String, String>> configurations = configHelper.getEffectiveConfigProperties(cluster, configTags);
+    m_configurations = configurations;
   }
 }

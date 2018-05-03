@@ -1,3 +1,4 @@
+<?xml version="1.0"?>
 <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
 <!--
 /**
@@ -23,5 +24,6 @@
     <name>supports_hive_dr</name>
     <value>true</value>
     <description>Enable support of Falcon Hive DR</description>
+    <on-ambari-upgrade add="true"/>
   </property>
 </configuration>

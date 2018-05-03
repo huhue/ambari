@@ -31,6 +31,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -38,6 +39,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.ActionDBAccessor;
@@ -53,6 +56,7 @@ import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.svccomphost.ServiceComponentHostServerActionEvent;
 import org.apache.ambari.server.utils.StageUtils;
 import org.easymock.IAnswer;
+import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -81,6 +85,11 @@ public class ServerActionExecutorTest {
   @BeforeClass
   public static void beforeClass() throws Exception {
     injector = Guice.createInjector(new MockModule());
+  }
+
+  @After
+  public void tearDown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
     /**
@@ -118,13 +127,13 @@ public class ServerActionExecutorTest {
     final Request request = createMockRequest();
     stageFactory = createNiceMock(StageFactory.class);
 
-    final Stage stage = stageFactory.createNew(1, "/tmp", "cluster1", 978, "context", CLUSTER_HOST_INFO,
+    final Stage stage = stageFactory.createNew(1, "/tmp", "cluster1", 978, "context",
         "{\"host_param\":\"param_value\"}", "{\"stage_param\":\"param_value\"}");
 
     stage.addServerActionCommand(ManualStageAction.class.getName(),
         null, Role.AMBARI_SERVER_ACTION, RoleCommand.EXECUTE, "cluster1",
         new ServiceComponentHostServerActionEvent(StageUtils.getHostName(), System.currentTimeMillis()),
-        Collections.<String, String> emptyMap(), null, null, 1200, false, false);
+        Collections.emptyMap(), null, null, 1200, false, false);
 
     final List<Stage> stages = new ArrayList<Stage>() {
       {
@@ -259,7 +268,7 @@ public class ServerActionExecutorTest {
   private ActionDBAccessor createMockActionDBAccessor(final Request request, final List<Stage> stages) {
     ActionDBAccessor db = mock(ActionDBAccessor.class);
 
-    when(db.getStagesInProgress()).thenReturn(stages);
+    when(db.getFirstStageInProgressPerRequest()).thenReturn(stages);
     doAnswer(new Answer() {
       @Override
       public Object answer(InvocationOnMock invocation) throws Throwable {
@@ -309,14 +318,13 @@ public class ServerActionExecutorTest {
                                                 final int timeout) {
     stageFactory = createNiceMock(StageFactory.class);
     expect(stageFactory.createNew(anyLong(), anyObject(String.class), anyObject(String.class),
-        anyLong(), anyObject(String.class), anyObject(String.class),
-        anyObject(String.class), anyObject(String.class))).
+        anyLong(), anyObject(String.class), anyObject(String.class), anyObject(String.class))).
         andAnswer(new IAnswer<Stage>() {
 
           @Override
           public Stage answer() throws Throwable {
             Stage stage = stageFactory.createNew(requestId, "/tmp", "cluster1",
-                1L, requestContext, CLUSTER_HOST_INFO, "{}", "{}");
+                1L, requestContext, "{}", "{}");
 
             stage.setStageId(stageId);
             stage.addServerActionCommand(MockServerAction.class.getName(), null,
@@ -329,7 +337,7 @@ public class ServerActionExecutorTest {
           }
         });
 
-    Stage stage = stageFactory.createNew(requestId, "", "", 1L, "", "", "", "");
+    Stage stage = stageFactory.createNew(requestId, "", "", 1L, "", "", "");
     return stage;
   }
 

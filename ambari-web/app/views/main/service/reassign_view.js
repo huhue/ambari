@@ -23,38 +23,6 @@ App.ReassignMasterView = Em.View.extend(App.WizardMenuMixin, {
 
   templateName: require('templates/main/service/reassign'),
 
-  isStep1Disabled: function () {
-    return this.isStepDisabled(1);
-  }.property('controller.isStepDisabled.@each.value').cacheable(),
-
-  isStep2Disabled: function () {
-    return this.isStepDisabled(2);
-  }.property('controller.isStepDisabled.@each.value').cacheable(),
-
-  isStep3Disabled: function () {
-    return this.isStepDisabled(3);
-  }.property('controller.isStepDisabled.@each.value').cacheable(),
-
-  isStep4Disabled: function () {
-    return this.isStepDisabled(4);
-  }.property('controller.isStepDisabled.@each.value').cacheable(),
-
-  isStep5Disabled: function () {
-    return this.isStepDisabled(5);
-  }.property('controller.isStepDisabled.@each.value').cacheable(),
-
-  isStep6Disabled: function () {
-    return this.isStepDisabled(6);
-  }.property('controller.isStepDisabled.@each.value').cacheable(),
-
-  isStep7Disabled: function () {
-    return this.isStepDisabled(7);
-  }.property('controller.isStepDisabled.@each.value').cacheable(),
-
-  isStepDisabled: function (index) {
-    return this.get('controller.isStepDisabled').findProperty('step', index).get('value');
-  },
-
   isLoaded: false,
 
   willInsertElement: function() {
@@ -81,15 +49,11 @@ App.ReassignMasterView = Em.View.extend(App.WizardMenuMixin, {
     data.items.forEach(function (item) {
       hosts[item.Hosts.host_name] = {
         name: item.Hosts.host_name,
-        cpu: item.Hosts.cpu_count,
-        memory: item.Hosts.total_mem,
-        disk_info: item.Hosts.disk_info,
-        maintenance_state: item.Hosts.maintenance_state,
         bootStatus: "REGISTERED",
         isInstalled: true
       };
     });
-    App.db.setHosts(hosts);
+    this.get('controller').setDBProperty('hosts', hosts);
     this.set('controller.content.hosts', hosts);
     this.set('isLoaded', true);
   },

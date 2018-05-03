@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -33,6 +33,9 @@ import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
 
+import javax.persistence.EntityManager;
+
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.controller.AlertCurrentRequest;
 import org.apache.ambari.server.controller.AlertHistoryRequest;
 import org.apache.ambari.server.controller.internal.AlertHistoryResourceProvider;
@@ -71,7 +74,6 @@ import org.junit.Test;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 import com.google.inject.persist.UnitOfWork;
 
 /**
@@ -197,9 +199,9 @@ public class AlertsDAOTest {
    *
    */
   @After
-  public void teardown() {
+  public void teardown() throws Exception {
     m_injector.getInstance(UnitOfWork.class).end();
-    m_injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabase(m_injector.getProvider(EntityManager.class).get());
     m_injector = null;
   }
 
@@ -503,7 +505,7 @@ public class AlertsDAOTest {
    */
   @Test
   public void testFindByState() {
-    List<AlertState> allStates = new ArrayList<AlertState>();
+    List<AlertState> allStates = new ArrayList<>();
     allStates.add(AlertState.OK);
     allStates.add(AlertState.WARNING);
     allStates.add(AlertState.CRITICAL);
@@ -1353,7 +1355,7 @@ public class AlertsDAOTest {
         m_componentFactory, m_schFactory, HOSTNAME);
     m_alertHelper.populateData(m_cluster);
 
-    List<SortRequestProperty> sortProperties = new ArrayList<SortRequestProperty>();
+    List<SortRequestProperty> sortProperties = new ArrayList<>();
     SortRequest sortRequest = new SortRequestImpl(sortProperties);
     AlertHistoryRequest request = new AlertHistoryRequest();
     request.Sort = sortRequest;

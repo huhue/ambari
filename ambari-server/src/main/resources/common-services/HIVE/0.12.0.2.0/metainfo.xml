@@ -185,12 +185,12 @@
           <customCommands>
             <customCommand>
               <name>CLEAN</name>
-                <commandScript>
-                  <script>scripts/mysql_server.py</script>
-                  <scriptType>PYTHON</scriptType>
-                  <timeout>600</timeout>
-            </commandScript>
-                </customCommand>
+              <commandScript>
+                <script>scripts/mysql_server.py</script>
+                <scriptType>PYTHON</scriptType>
+                <timeout>600</timeout>
+              </commandScript>
+            </customCommand>
           </customCommands>
         </component>
 
@@ -225,14 +225,22 @@
               <fileName>hive-exec-log4j.properties</fileName>
               <dictionaryName>hive-exec-log4j</dictionaryName>
             </configFile>
+            <configFile>
+              <type>env</type>
+              <fileName>parquet-logging.properties</fileName>
+              <dictionaryName>parquet-logging</dictionaryName>
+              <optional>true</optional>
+            </configFile>
           </configFiles>
           <configuration-dependencies>
             <config-type>hive-site</config-type>
           </configuration-dependencies>
         </component>
+        
         <component>
           <name>HCAT</name>
           <displayName>HCat Client</displayName>
+          <cardinality>0+</cardinality>
           <category>CLIENT</category>
           <versionAdvertised>true</versionAdvertised>
           <commandScript>
@@ -268,15 +276,10 @@
             <package>
               <name>webhcat-tar-pig</name>
             </package>
-            <package>
-              <name>mysql-connector-java</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_mysl_connector</condition>
-            </package>
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>amazon2015,redhat6,suse11,suse12</osFamily>
+          <osFamily>amazonlinux2,redhat6,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>mysql</name>
@@ -285,7 +288,7 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>amazon2015,redhat6,debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>amazonlinux2,redhat6,debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>mysql-server</name>
@@ -295,15 +298,10 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>redhat7</osFamily>
+          <osFamily>redhat7,amazonlinux2</osFamily>
           <packages>
             <package>
-              <name>mysql-community-release</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_mysql</condition>
-            </package>
-            <package>
-              <name>mysql-community-server</name>
+              <name>mariadb-server</name>
               <skipUpgrade>true</skipUpgrade>
               <condition>should_install_mysql</condition>
             </package>
@@ -333,18 +331,37 @@
       </requiredServices>
 
       <configuration-dependencies>
+        <config-type>core-site</config-type>
         <config-type>hive-log4j</config-type>
         <config-type>hive-exec-log4j</config-type>
         <config-type>hive-env</config-type>
         <config-type>hivemetastore-site.xml</config-type>
         <config-type>webhcat-site</config-type>
         <config-type>webhcat-env</config-type>
+        <config-type>parquet-logging</config-type>
         <config-type>ranger-hive-plugin-properties</config-type>
         <config-type>ranger-hive-audit</config-type>
         <config-type>ranger-hive-policymgr-ssl</config-type>
         <config-type>ranger-hive-security</config-type>
         <config-type>mapred-site</config-type>
+        <config-type>application.properties</config-type>
+        <config-type>druid-common</config-type>
       </configuration-dependencies>
+
+      <themes>
+        <theme>
+          <fileName>credentials.json</fileName>
+          <default>true</default>
+        </theme>
+        <theme>
+          <fileName>database.json</fileName>
+          <default>true</default>
+        </theme>
+        <theme>
+          <fileName>directories.json</fileName>
+          <default>true</default>
+        </theme>
+      </themes>
     </service>
   </services>
 </metainfo>

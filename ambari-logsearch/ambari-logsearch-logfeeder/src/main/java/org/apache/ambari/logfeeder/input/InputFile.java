@@ -18,545 +18,496 @@
  */
 package org.apache.ambari.logfeeder.input;
 
-import java.io.BufferedReader;
-import java.io.EOFException;
-import java.io.File;
-import java.io.FileFilter;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-
-import org.apache.ambari.logfeeder.LogFeederUtil;
+import org.apache.ambari.logfeeder.conf.LogEntryCacheConfig;
+import org.apache.ambari.logfeeder.conf.LogFeederProps;
+import org.apache.ambari.logfeeder.input.monitor.LogFileDetachMonitor;
+import org.apache.ambari.logfeeder.input.monitor.LogFilePathUpdateMonitor;
 import org.apache.ambari.logfeeder.input.reader.LogsearchReaderFactory;
-import org.apache.commons.io.filefilter.WildcardFileFilter;
+import org.apache.ambari.logfeeder.input.file.FileCheckInHelper;
+import org.apache.ambari.logfeeder.input.file.ProcessFileHelper;
+import org.apache.ambari.logfeeder.input.file.ResumeLineNumberHelper;
+import org.apache.ambari.logfeeder.plugin.filter.Filter;
+import org.apache.ambari.logfeeder.plugin.input.Input;
+import org.apache.ambari.logfeeder.util.FileUtil;
+import org.apache.ambari.logfeeder.util.LogFeederUtil;
+import org.apache.ambari.logsearch.config.api.model.inputconfig.InputFileBaseDescriptor;
+import org.apache.ambari.logsearch.config.api.model.inputconfig.InputFileDescriptor;
+import org.apache.commons.lang.BooleanUtils;
+import org.apache.commons.lang.ObjectUtils;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
 import org.apache.solr.common.util.Base64;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class InputFile extends Input {
-  static private Logger logger = Logger.getLogger(InputFile.class);
+import java.io.BufferedReader;
+import java.io.File;
+import java.util.*;
 
-  // String startPosition = "beginning";
-  String logPath = null;
-  boolean isStartFromBegining = true;
+public class InputFile extends Input<LogFeederProps, InputFileMarker> {
 
-  boolean isReady = false;
-  File[] logPathFiles = null;
-  Object fileKey = null;
-  String base64FileKey = null;
+  private static final Logger LOG = LoggerFactory.getLogger(InputFile.class);
 
-  private boolean isRolledOver = false;
-  boolean addWildCard = false;
+  private static final boolean DEFAULT_TAIL = true;
+  private static final boolean DEFAULT_USE_EVENT_MD5 = false;
+  private static final boolean DEFAULT_GEN_EVENT_MD5 = true;
+  private static final int DEFAULT_CHECKPOINT_INTERVAL_MS = 5 * 1000;
 
-  long lastCheckPointTimeMS = 0;
-  int checkPointIntervalMS = 5 * 1000; // 5 seconds
-  RandomAccessFile checkPointWriter = null;
-  Map<String, Object> jsonCheckPoint = null;
+  private static final int DEFAULT_DETACH_INTERVAL_MIN = 300;
+  private static final int DEFAULT_DETACH_TIME_MIN = 2000;
+  private static final int DEFAULT_LOG_PATH_UPDATE_INTERVAL_MIN = 5;
 
-  File checkPointFile = null;
+  private boolean isReady;
 
-  private InputMarker lastCheckPointInputMarker = null;
+  private boolean tail;
 
-  private String checkPointExtension = ".cp";
+  private String filePath;
+  private File[] logFiles;
+  private String logPath;
+  private Object fileKey;
+  private String base64FileKey;
+  private String checkPointExtension;
+  private int checkPointIntervalMS;
+  private int detachIntervalMin;
+  private int detachTimeMin;
+  private int pathUpdateIntervalMin;
+  private Integer maxAgeMin;
 
-  @Override
-  public void init() throws Exception {
-    logger.info("init() called");
-    statMetric.metricsName = "input.files.read_lines";
-    readBytesMetric.metricsName = "input.files.read_bytes";
-    checkPointExtension = LogFeederUtil.getStringProperty(
-      "logfeeder.checkpoint.extension", checkPointExtension);
+  private Map<String, File> checkPointFiles = new HashMap<>();
+  private Map<String, Long> lastCheckPointTimeMSs = new HashMap<>();
+  private Map<String, Map<String, Object>> jsonCheckPoints = new HashMap<>();
+  private Map<String, InputFileMarker> lastCheckPointInputMarkers = new HashMap<>();
 
-    // Let's close the file and set it to true after we start monitoring it
-    setClosed(true);
-    logPath = getStringValue("path");
-    tail = getBooleanValue("tail", tail);
-    addWildCard = getBooleanValue("add_wild_card", addWildCard);
-    checkPointIntervalMS = getIntValue("checkpoint.interval.ms",
-      checkPointIntervalMS);
+  private Thread thread;
+  private Thread logFileDetacherThread;
+  private Thread logFilePathUpdaterThread;
+  private ThreadGroup threadGroup;
 
-    if (logPath == null || logPath.isEmpty()) {
-      logger.error("path is empty for file input. "
-        + getShortDescription());
-      return;
-    }
+  private boolean multiFolder = false;
+  private Map<String, List<File>> folderMap;
+  private Map<String, InputFile> inputChildMap = new HashMap<>();
 
-    String startPosition = getStringValue("start_position");
-    if (StringUtils.isEmpty(startPosition)
-      || startPosition.equalsIgnoreCase("beginning")
-      || startPosition.equalsIgnoreCase("begining")) {
-      isStartFromBegining = true;
-    }
-
-    if (!tail) {
-      // start position end doesn't apply if we are not tailing
-      isStartFromBegining = true;
-    }
-
-    setFilePath(logPath);
-    boolean isFileReady = isReady();
-
-    logger.info("File to monitor " + logPath + ", tail=" + tail
-      + ", addWildCard=" + addWildCard + ", isReady=" + isFileReady);
-
-    super.init();
-  }
-
-  /*
-   * (non-Javadoc)
-   * 
-   * @see org.apache.ambari.logfeeder.input.Input#isReady()
-   */
   @Override
   public boolean isReady() {
     if (!isReady) {
       // Let's try to check whether the file is available
-      logPathFiles = getActualFiles(logPath);
-      if (logPathFiles != null && logPathFiles.length > 0
-        && logPathFiles[0].isFile()) {
-
-        if (isTail() && logPathFiles.length > 1) {
-          logger.warn("Found multiple files (" + logPathFiles.length
-            + ") for the file filter " + filePath
-            + ". Will use only the first one. Using "
-            + logPathFiles[0].getAbsolutePath());
+      logFiles = getActualInputLogFiles();
+      Map<String, List<File>> foldersMap = FileUtil.getFoldersForFiles(logFiles);
+      setFolderMap(foldersMap);
+      if (!ArrayUtils.isEmpty(logFiles) && logFiles[0].isFile()) {
+        if (tail && logFiles.length > 1) {
+          LOG.warn("Found multiple files (" + logFiles.length + ") for the file filter " + filePath +
+            ". Will follow only the first one. Using " + logFiles[0].getAbsolutePath());
         }
-        logger.info("File filter " + filePath + " expanded to "
-          + logPathFiles[0].getAbsolutePath());
+        LOG.info("File filter " + filePath + " expanded to " + logFiles[0].getAbsolutePath());
         isReady = true;
       } else {
-        logger.debug(logPath + " file doesn't exist. Ignoring for now");
+        LOG.debug(logPath + " file doesn't exist. Ignoring for now");
       }
     }
     return isReady;
   }
 
-  private File[] getActualFiles(String searchPath) {
-    if (addWildCard) {
-      if (!searchPath.endsWith("*")) {
-        searchPath = searchPath + "*";
-      }
-    }
-    File checkFile = new File(searchPath);
-    if (checkFile.isFile()) {
-      return new File[]{checkFile};
-    }
-    // Let's do wild card search
-    // First check current folder
-    File checkFiles[] = findFileForWildCard(searchPath, new File("."));
-    if (checkFiles == null || checkFiles.length == 0) {
-      // Let's check from the parent folder
-      File parentDir = (new File(searchPath)).getParentFile();
-      if (parentDir != null) {
-        String wildCard = (new File(searchPath)).getName();
-        checkFiles = findFileForWildCard(wildCard, parentDir);
-      }
-    }
-    return checkFiles;
-  }
-
-  private File[] findFileForWildCard(String searchPath, File dir) {
-    logger.debug("findFileForWildCard(). filePath=" + searchPath + ", dir="
-      + dir + ", dir.fullpath=" + dir.getAbsolutePath());
-    FileFilter fileFilter = new WildcardFileFilter(searchPath);
-    return dir.listFiles(fileFilter);
+  @Override
+  public void setReady(boolean isReady) {
+    this.isReady = isReady;
   }
 
   @Override
-  synchronized public void checkIn(InputMarker inputMarker) {
-    super.checkIn(inputMarker);
-    if (checkPointWriter != null) {
+  public String getNameForThread() {
+    if (filePath != null) {
       try {
-        int lineNumber = LogFeederUtil.objectToInt(
-          jsonCheckPoint.get("line_number"), 0, "line_number");
-        if (lineNumber > inputMarker.lineNumber) {
-          // Already wrote higher line number for this input
-          return;
-        }
-        // If interval is greater than last checkPoint time, then write
-        long currMS = System.currentTimeMillis();
-        if (!isClosed()
-          && (currMS - lastCheckPointTimeMS) < checkPointIntervalMS) {
-          // Let's save this one so we can update the check point file
-          // on flush
-          lastCheckPointInputMarker = inputMarker;
-          return;
-        }
-        lastCheckPointTimeMS = currMS;
-
-        jsonCheckPoint.put("line_number", ""
-          + new Integer(inputMarker.lineNumber));
-        jsonCheckPoint.put("last_write_time_ms", "" + new Long(currMS));
-        jsonCheckPoint.put("last_write_time_date", new Date());
-
-        String jsonStr = LogFeederUtil.getGson().toJson(jsonCheckPoint);
-
-        // Let's rewind
-        checkPointWriter.seek(0);
-        checkPointWriter.writeInt(jsonStr.length());
-        checkPointWriter.write(jsonStr.getBytes());
-
-        if (isClosed()) {
-          final String LOG_MESSAGE_KEY = this.getClass()
-            .getSimpleName() + "_FINAL_CHECKIN";
-          LogFeederUtil.logErrorMessageByInterval(
-            LOG_MESSAGE_KEY,
-            "Wrote final checkPoint, input="
-              + getShortDescription()
-              + ", checkPointFile="
-              + checkPointFile.getAbsolutePath()
-              + ", checkPoint=" + jsonStr, null, logger,
-            Level.INFO);
-        }
-      } catch (Throwable t) {
-        final String LOG_MESSAGE_KEY = this.getClass().getSimpleName()
-          + "_CHECKIN_EXCEPTION";
-        LogFeederUtil
-          .logErrorMessageByInterval(LOG_MESSAGE_KEY,
-            "Caught exception checkIn. , input="
-              + getShortDescription(), t, logger,
-            Level.ERROR);
+        return (getType() + "=" + (new File(filePath)).getName());
+      } catch (Throwable ex) {
+        LOG.warn("Couldn't get basename for filePath=" + filePath, ex);
       }
     }
-
+    return super.getNameForThread() + ":" + getType();
   }
 
   @Override
-  public void checkIn() {
-    super.checkIn();
-    if (lastCheckPointInputMarker != null) {
+  public synchronized void checkIn(InputFileMarker inputMarker) {
+    FileCheckInHelper.checkIn(this, inputMarker);
+  }
+
+  @Override
+  public void lastCheckIn() {
+    for (InputFileMarker lastCheckPointInputMarker : lastCheckPointInputMarkers.values()) {
       checkIn(lastCheckPointInputMarker);
     }
   }
 
   @Override
-  public void rollOver() {
-    logger.info("Marking this input file for rollover. "
-      + getShortDescription());
-    isRolledOver = true;
+  public String getStatMetricName() {
+    return "input.files.read_lines";
   }
 
-  /*
-   * (non-Javadoc)
-   * 
-   * @see org.apache.ambari.logfeeder.input.Input#monitor()
-   */
   @Override
-  void start() throws Exception {
-    if (logPathFiles == null || logPathFiles.length == 0) {
+  public String getReadBytesMetricName() {
+    return "input.files.read_bytes";
+  }
+
+  @Override
+  public boolean monitor() {
+    if (isReady()) {
+      if (multiFolder) {
+        try {
+          threadGroup = new ThreadGroup(getNameForThread());
+          if (getFolderMap() != null) {
+            for (Map.Entry<String, List<File>> folderFileEntry : getFolderMap().entrySet()) {
+              startNewChildInputFileThread(folderFileEntry);
+            }
+            logFilePathUpdaterThread = new Thread(new LogFilePathUpdateMonitor((InputFile) this, pathUpdateIntervalMin, detachTimeMin), "logfile_path_updater=" + filePath);
+            logFilePathUpdaterThread.setDaemon(true);
+            logFileDetacherThread = new Thread(new LogFileDetachMonitor((InputFile) this, detachIntervalMin, detachTimeMin), "logfile_detacher=" + filePath);
+            logFileDetacherThread.setDaemon(true);
+
+            logFilePathUpdaterThread.start();
+            logFileDetacherThread.start();
+          }
+        } catch (Exception e) {
+          throw new RuntimeException(e);
+        }
+      } else {
+        LOG.info("Starting thread. " + getShortDescription());
+        thread = new Thread(this, getNameForThread());
+        thread.start();
+      }
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  @Override
+  public InputFileMarker getInputMarker() {
+    return null;
+  }
+
+  @Override
+  public void init(LogFeederProps logFeederProps) throws Exception {
+    super.init(logFeederProps);
+    LOG.info("init() called");
+
+    checkPointExtension = logFeederProps.getCheckPointExtension();
+
+    // Let's close the file and set it to true after we start monitoring it
+    setClosed(true);
+    logPath = getInputDescriptor().getPath();
+    checkPointIntervalMS = (int) ObjectUtils.defaultIfNull(((InputFileBaseDescriptor)getInputDescriptor()).getCheckpointIntervalMs(), DEFAULT_CHECKPOINT_INTERVAL_MS);
+    detachIntervalMin = (int) ObjectUtils.defaultIfNull(((InputFileDescriptor)getInputDescriptor()).getDetachIntervalMin(), DEFAULT_DETACH_INTERVAL_MIN * 60);
+    detachTimeMin = (int) ObjectUtils.defaultIfNull(((InputFileDescriptor)getInputDescriptor()).getDetachTimeMin(), DEFAULT_DETACH_TIME_MIN * 60);
+    pathUpdateIntervalMin = (int) ObjectUtils.defaultIfNull(((InputFileDescriptor)getInputDescriptor()).getPathUpdateIntervalMin(), DEFAULT_LOG_PATH_UPDATE_INTERVAL_MIN * 60);
+    maxAgeMin = (int) ObjectUtils.defaultIfNull(((InputFileDescriptor)getInputDescriptor()).getMaxAgeMin(), 0);
+    boolean initDefaultFields = BooleanUtils.toBooleanDefaultIfNull(getInputDescriptor().isInitDefaultFields(), false);
+    setInitDefaultFields(initDefaultFields);
+    if (StringUtils.isEmpty(logPath)) {
+      LOG.error("path is empty for file input. " + getShortDescription());
       return;
     }
 
-    if (isTail()) {
-      // Just process the first file
-      processFile(logPathFiles[0]);
+    setFilePath(logPath);
+    // Check there can have pattern in folder
+    if (getFilePath() != null && getFilePath().contains("/")) {
+      int lastIndexOfSlash = getFilePath().lastIndexOf("/");
+      String folderBeforeLogName = getFilePath().substring(0, lastIndexOfSlash);
+      if (folderBeforeLogName.contains("*")) {
+        LOG.info("Found regex in folder path ('" + getFilePath() + "'), will check against multiple folders.");
+        setMultiFolder(true);
+      }
+    }
+    boolean isFileReady = isReady();
+    LOG.info("File to monitor " + logPath + ", tail=" + tail + ", isReady=" + isFileReady);
+
+    LogEntryCacheConfig cacheConfig = logFeederProps.getLogEntryCacheConfig();
+    initCache(
+      cacheConfig.isCacheEnabled(),
+      cacheConfig.getCacheKeyField(),
+      cacheConfig.getCacheSize(),
+      cacheConfig.isCacheLastDedupEnabled(),
+      cacheConfig.getCacheDedupInterval(),
+      getFilePath());
+
+    tail = BooleanUtils.toBooleanDefaultIfNull(getInputDescriptor().isTail(), DEFAULT_TAIL);
+    setUseEventMD5(BooleanUtils.toBooleanDefaultIfNull(getInputDescriptor().isUseEventMd5AsId(), DEFAULT_USE_EVENT_MD5));
+    setGenEventMD5(BooleanUtils.toBooleanDefaultIfNull(getInputDescriptor().isGenEventMd5(), DEFAULT_GEN_EVENT_MD5));
+  }
+
+  @Override
+  public void start() throws Exception {
+    boolean isProcessFile = BooleanUtils.toBooleanDefaultIfNull(((InputFileDescriptor)getInputDescriptor()).getProcessFile(), true);
+    if (isProcessFile) {
+      for (int i = logFiles.length - 1; i >= 0; i--) {
+        File file = logFiles[i];
+        if (i == 0 || !tail) {
+          try {
+            processFile(file, i == 0);
+            if (isClosed() || isDrain()) {
+              LOG.info("isClosed or isDrain. Now breaking loop.");
+              break;
+            }
+          } catch (Throwable t) {
+            LOG.error("Error processing file=" + file.getAbsolutePath(), t);
+          }
+        }
+      }
+      close();
     } else {
-      for (File file : logPathFiles) {
+      copyFiles(logFiles);
+    }
+  }
+
+  public int getResumeFromLineNumber() {
+    return ResumeLineNumberHelper.getResumeFromLineNumber(this);
+  }
+
+  public void processFile(File logPathFile, boolean follow) throws Exception {
+    ProcessFileHelper.processFile(this, logPathFile, follow);
+  }
+
+  public BufferedReader openLogFile(File logFile) throws Exception {
+    BufferedReader br = new BufferedReader(LogsearchReaderFactory.INSTANCE.getReader(logFile));
+    fileKey = getFileKeyFromLogFile(logFile);
+    base64FileKey = Base64.byteArrayToBase64(fileKey.toString().getBytes());
+    LOG.info("fileKey=" + fileKey + ", base64=" + base64FileKey + ". " + getShortDescription());
+    return br;
+  }
+
+  public Object getFileKeyFromLogFile(File logFile) {
+    return FileUtil.getFileKey(logFile);
+  }
+
+  private void copyFiles(File[] files) {
+    boolean isCopyFile = BooleanUtils.toBooleanDefaultIfNull(((InputFileDescriptor)getInputDescriptor()).getCopyFile(), false);
+    if (isCopyFile && files != null) {
+      for (File file : files) {
         try {
-          processFile(file);
+          InputFileMarker marker = new InputFileMarker(this, null, 0);
+          getOutputManager().copyFile(file, marker);
           if (isClosed() || isDrain()) {
-            logger.info("isClosed or isDrain. Now breaking loop.");
+            LOG.info("isClosed or isDrain. Now breaking loop.");
             break;
           }
         } catch (Throwable t) {
-          logger.error(
-            "Error processing file=" + file.getAbsolutePath(),
-            t);
+          LOG.error("Error processing file=" + file.getAbsolutePath(), t);
         }
       }
     }
-    // Call the close for the input. Which should flush to the filters and
-    // output
-    close();
+  }
+
+  public void startNewChildInputFileThread(Map.Entry<String, List<File>> folderFileEntry) throws CloneNotSupportedException {
+    LOG.info("Start child input thread - " + folderFileEntry.getKey());
+    InputFile clonedObject = (InputFile) this.clone();
+    String folderPath = folderFileEntry.getKey();
+    String filePath = new File(getFilePath()).getName();
+    String fullPathWithWildCard = String.format("%s/%s", folderPath, filePath);
+    if (clonedObject.getMaxAgeMin() != 0 && FileUtil.isFileTooOld(new File(fullPathWithWildCard), clonedObject.getMaxAgeMin().longValue())) {
+      LOG.info(String.format("File ('%s') is too old (max age min: %d), monitor thread not starting...", getFilePath(), clonedObject.getMaxAgeMin()));
+    } else {
+      clonedObject.setMultiFolder(false);
+      clonedObject.logFiles = folderFileEntry.getValue().toArray(new File[0]); // TODO: works only with tail
+      clonedObject.logPath = fullPathWithWildCard;
+      clonedObject.setLogFileDetacherThread(null);
+      clonedObject.setLogFilePathUpdaterThread(null);
+      clonedObject.setInputChildMap(new HashMap<>());
+      copyFilters(clonedObject, getFirstFilter());
+      Thread thread = new Thread(threadGroup, clonedObject, "file=" + fullPathWithWildCard);
+      clonedObject.setThread(thread);
+      inputChildMap.put(fullPathWithWildCard, clonedObject);
+      thread.start();
+    }
+  }
+
+  private void copyFilters(InputFile clonedInput, Filter firstFilter) {
+    if (firstFilter != null) {
+      try {
+        LOG.info("Cloning filters for input=" + clonedInput.logPath);
+        Filter newFilter = (Filter) firstFilter.clone();
+        newFilter.setInput(clonedInput);
+        clonedInput.setFirstFilter(newFilter);
+        Filter actFilter = firstFilter;
+        Filter actClonedFilter = newFilter;
+        while (actFilter != null) {
+          if (actFilter.getNextFilter() != null) {
+            actFilter = actFilter.getNextFilter();
+            Filter newClonedFilter = (Filter) actFilter.clone();
+            newClonedFilter.setInput(clonedInput);
+            actClonedFilter.setNextFilter(newClonedFilter);
+            actClonedFilter = newClonedFilter;
+          } else {
+            actClonedFilter.setNextFilter(null);
+            actFilter = null;
+          }
+        }
+        LOG.info("Cloning filters has finished for input=" + clonedInput.logPath);
+      } catch (Exception e) {
+        LOG.error("Could not clone filters for input=" + clonedInput.logPath);
+      }
+    }
+  }
+
+  public void stopChildInputFileThread(String folderPathKey) {
+    LOG.info("Stop child input thread - " + folderPathKey);
+    String filePath = new File(getFilePath()).getName();
+    String fullPathWithWildCard = String.format("%s/%s", folderPathKey, filePath);
+    if (inputChildMap.containsKey(fullPathWithWildCard)) {
+      InputFile inputFile = inputChildMap.get(fullPathWithWildCard);
+      inputFile.setClosed(true);
+      if (inputFile.getThread() != null && inputFile.getThread().isAlive()) {
+        inputFile.getThread().interrupt();
+      }
+      inputChildMap.remove(fullPathWithWildCard);
+    } else {
+      LOG.warn(fullPathWithWildCard + " not found as an input child.");
+    }
+  }
+
+  @Override
+  public boolean isEnabled() {
+    return BooleanUtils.isNotFalse(getInputDescriptor().isEnabled());
+  }
+
+  @Override
+  public String getShortDescription() {
+    return "input:source=" + getInputDescriptor().getSource() + ", path=" +
+      (!ArrayUtils.isEmpty(logFiles) ? logFiles[0].getAbsolutePath() : logPath);
+  }
+
+  @Override
+  public boolean logConfigs() {
+    LOG.info("Printing Input=" + getShortDescription());
+    LOG.info("description=" + getInputDescriptor().getPath());
+    return true;
   }
 
   @Override
   public void close() {
     super.close();
-    logger.info("close() calling checkPoint checkIn(). "
-      + getShortDescription());
-    checkIn();
+    LOG.info("close() calling checkPoint checkIn(). " + getShortDescription());
+    lastCheckIn();
+    setClosed(true);
   }
 
-  private void processFile(File logPathFile) throws FileNotFoundException,
-    IOException {
-    logger.info("Monitoring logPath=" + logPath + ", logPathFile="
-      + logPathFile);
-    BufferedReader br = null;
-    checkPointFile = null;
-    checkPointWriter = null;
-    jsonCheckPoint = null;
-    int resumeFromLineNumber = 0;
-
-    int lineCount = 0;
-    try {
-      setFilePath(logPathFile.getAbsolutePath());
-//      br = new BufferedReader(new FileReader(logPathFile));
-      br = new BufferedReader(LogsearchReaderFactory.INSTANCE.getReader(logPathFile));
-
-      // Whether to send to output from the beginning.
-      boolean resume = isStartFromBegining;
-
-      // Seems FileWatch is not reliable, so let's only use file key
-      // comparison
-      // inputMgr.monitorSystemFileChanges(this);
-      fileKey = getFileKey(logPathFile);
-      base64FileKey = Base64.byteArrayToBase64(fileKey.toString()
-        .getBytes());
-      logger.info("fileKey=" + fileKey + ", base64=" + base64FileKey
-        + ". " + getShortDescription());
-
-      if (isTail()) {
-        try {
-          // Let's see if there is a checkpoint for this file
-          logger.info("Checking existing checkpoint file. "
-            + getShortDescription());
-
-          String fileBase64 = Base64.byteArrayToBase64(fileKey
-            .toString().getBytes());
-          String checkPointFileName = fileBase64
-            + checkPointExtension;
-          File checkPointFolder = inputMgr.getCheckPointFolderFile();
-          checkPointFile = new File(checkPointFolder,
-            checkPointFileName);
-          checkPointWriter = new RandomAccessFile(checkPointFile,
-            "rw");
-
-          try {
-            int contentSize = checkPointWriter.readInt();
-            byte b[] = new byte[contentSize];
-            int readSize = checkPointWriter.read(b, 0, contentSize);
-            if (readSize != contentSize) {
-              logger.error("Couldn't read expected number of bytes from checkpoint file. expected="
-                + contentSize
-                + ", read="
-                + readSize
-                + ", checkPointFile="
-                + checkPointFile
-                + ", input=" + getShortDescription());
-            } else {
-              // Create JSON string
-              String jsonCheckPointStr = new String(b, 0,
-                readSize);
-              jsonCheckPoint = LogFeederUtil
-                .toJSONObject(jsonCheckPointStr);
-
-              resumeFromLineNumber = LogFeederUtil.objectToInt(
-                jsonCheckPoint.get("line_number"), 0,
-                "line_number");
-
-              if (resumeFromLineNumber > 0) {
-                // Let's read from last line read
-                resume = false;
-              }
-              logger.info("CheckPoint. checkPointFile="
-                + checkPointFile + ", json="
-                + jsonCheckPointStr
-                + ", resumeFromLineNumber="
-                + resumeFromLineNumber + ", resume="
-                + resume);
-            }
-          } catch (EOFException eofEx) {
-            logger.info("EOFException. Will reset checkpoint file "
-              + checkPointFile.getAbsolutePath() + " for "
-              + getShortDescription());
-          }
-          if (jsonCheckPoint == null) {
-            // This seems to be first time, so creating the initial
-            // checkPoint object
-            jsonCheckPoint = new HashMap<String, Object>();
-            jsonCheckPoint.put("file_path", filePath);
-            jsonCheckPoint.put("file_key", fileBase64);
-          }
-
-        } catch (Throwable t) {
-          logger.error(
-            "Error while configuring checkpoint file. Will reset file. checkPointFile="
-              + checkPointFile, t);
-        }
-      }
-
-      setClosed(false);
-      int sleepStep = 2;
-      int sleepIteration = 0;
-      while (true) {
-        try {
-          if (isDrain()) {
-            break;
-          }
-
-          String line = br.readLine();
-          if (line == null) {
-            if (!resume) {
-              resume = true;
-            }
-            sleepIteration++;
-            try {
-              // Since FileWatch service is not reliable, we will
-              // check
-              // file inode every n seconds after no write
-              if (sleepIteration > 4) {
-                Object newFileKey = getFileKey(logPathFile);
-                if (newFileKey != null) {
-                  if (fileKey == null
-                    || !newFileKey.equals(fileKey)) {
-                    logger.info("File key is different. Calling rollover. oldKey="
-                      + fileKey
-                      + ", newKey="
-                      + newFileKey
-                      + ". "
-                      + getShortDescription());
-                    // File has rotated.
-                    rollOver();
-                  }
-                }
-              }
-              // Flush on the second iteration
-              if (!tail && sleepIteration >= 2) {
-                logger.info("End of file. Done with filePath="
-                  + logPathFile.getAbsolutePath()
-                  + ", lineCount=" + lineCount);
-                flush();
-                break;
-              } else if (sleepIteration == 2) {
-                flush();
-              } else if (sleepIteration >= 2) {
-                if (isRolledOver) {
-                  isRolledOver = false;
-                  // Close existing file
-                  try {
-                    logger.info("File is rolled over. Closing current open file."
-                      + getShortDescription()
-                      + ", lineCount=" + lineCount);
-                    br.close();
-                  } catch (Exception ex) {
-                    logger.error("Error closing file"
-                      + getShortDescription());
-                    break;
-                  }
-                  try {
-                    // Open new file
-                    logger.info("Opening new rolled over file."
-                      + getShortDescription());
-//                    br = new BufferedReader(new FileReader(
-//                            logPathFile));
-                    br = new BufferedReader(LogsearchReaderFactory.
-                      INSTANCE.getReader(logPathFile));
-                    lineCount = 0;
-                    fileKey = getFileKey(logPathFile);
-                    base64FileKey = Base64
-                      .byteArrayToBase64(fileKey
-                        .toString().getBytes());
-                    logger.info("fileKey=" + fileKey
-                      + ", base64=" + base64FileKey
-                      + ", " + getShortDescription());
-                  } catch (Exception ex) {
-                    logger.error("Error opening rolled over file. "
-                      + getShortDescription());
-                    // Let's add this to monitoring and exit
-                    // this
-                    // thread
-                    logger.info("Added input to not ready list."
-                      + getShortDescription());
-                    isReady = false;
-                    inputMgr.addToNotReady(this);
-                    break;
-                  }
-                  logger.info("File is successfully rolled over. "
-                    + getShortDescription());
-                  continue;
-                }
-              }
-              Thread.sleep(sleepStep * 1000);
-              sleepStep = (sleepStep * 2);
-              sleepStep = sleepStep > 10 ? 10 : sleepStep;
-            } catch (InterruptedException e) {
-              logger.info("Thread interrupted."
-                + getShortDescription());
-            }
-          } else {
-            lineCount++;
-            sleepStep = 1;
-            sleepIteration = 0;
-
-            if (!resume && lineCount > resumeFromLineNumber) {
-              logger.info("Resuming to read from last line. lineCount="
-                + lineCount
-                + ", input="
-                + getShortDescription());
-              resume = true;
-            }
-            if (resume) {
-              InputMarker marker = new InputMarker();
-              marker.fileKey = fileKey;
-              marker.base64FileKey = base64FileKey;
-              marker.filePath = filePath;
-              marker.input = this;
-              marker.lineNumber = lineCount;
-              outputLine(line, marker);
-            }
-          }
-        } catch (Throwable t) {
-          final String LOG_MESSAGE_KEY = this.getClass()
-            .getSimpleName() + "_READ_LOOP_EXCEPTION";
-          LogFeederUtil.logErrorMessageByInterval(LOG_MESSAGE_KEY,
-            "Caught exception in read loop. lineNumber="
-              + lineCount + ", input="
-              + getShortDescription(), t, logger,
-            Level.ERROR);
-
-        }
-      }
-    } finally {
-      if (br != null) {
-        logger.info("Closing reader." + getShortDescription()
-          + ", lineCount=" + lineCount);
-        try {
-          br.close();
-        } catch (Throwable t) {
-          // ignore
-        }
-      }
-    }
+  public File[] getActualInputLogFiles() {
+    return FileUtil.getInputFilesByPattern(logPath);
   }
 
-  /**
-   * @param logPathFile2
-   * @return
-   */
-  static public Object getFileKey(File file) {
-    try {
-      Path fileFullPath = Paths.get(file.getAbsolutePath());
-      if (fileFullPath != null) {
-        BasicFileAttributes basicAttr = Files.readAttributes(
-          fileFullPath, BasicFileAttributes.class);
-        return basicAttr.fileKey();
-      }
-    } catch (Throwable ex) {
-      logger.error("Error getting file attributes for file=" + file, ex);
-    }
-    return file.toString();
+  public String getFilePath() {
+    return filePath;
   }
 
-  /*
-   * (non-Javadoc)
-   * 
-   * @see org.apache.ambari.logfeeder.input.Input#getShortDescription()
-   */
+  public void setFilePath(String filePath) {
+    this.filePath = filePath;
+  }
+
+  public String getLogPath() {
+    return logPath;
+  }
+
+  public Object getFileKey() {
+    return fileKey;
+  }
+
+  public String getBase64FileKey() throws Exception {
+    return base64FileKey;
+  }
+
+  public void setFileKey(Object fileKey) {
+    this.fileKey = fileKey;
+  }
+
+  public boolean isTail() {
+    return tail;
+  }
+
+  public File[] getLogFiles() {
+    return logFiles;
+  }
+
+  public void setBase64FileKey(String base64FileKey) {
+    this.base64FileKey = base64FileKey;
+  }
+
+  public void setLogFiles(File[] logFiles) {
+    this.logFiles = logFiles;
+  }
+
+  public String getCheckPointExtension() {
+    return checkPointExtension;
+  }
+
+  public int getCheckPointIntervalMS() {
+    return checkPointIntervalMS;
+  }
+
+  public Map<String, File> getCheckPointFiles() {
+    return checkPointFiles;
+  }
+
+  public Map<String, Long> getLastCheckPointTimeMSs() {
+    return lastCheckPointTimeMSs;
+  }
+
+  public Map<String, Map<String, Object>> getJsonCheckPoints() {
+    return jsonCheckPoints;
+  }
+
+  public Map<String, InputFileMarker> getLastCheckPointInputMarkers() {
+    return lastCheckPointInputMarkers;
+  }
+
+  public boolean isMultiFolder() {
+    return multiFolder;
+  }
+
+  public void setMultiFolder(boolean multiFolder) {
+    this.multiFolder = multiFolder;
+  }
+
+  public Map<String, List<File>> getFolderMap() {
+    return folderMap;
+  }
+
+  public void setFolderMap(Map<String, List<File>> folderMap) {
+    this.folderMap = folderMap;
+  }
+
+  public Map<String, InputFile> getInputChildMap() {
+    return inputChildMap;
+  }
+
+  public void setInputChildMap(Map<String, InputFile> inputChildMap) {
+    this.inputChildMap = inputChildMap;
+  }
+
   @Override
-  public String getShortDescription() {
-    return "input:source="
-      + getStringValue("source")
-      + ", path="
-      + (logPathFiles != null && logPathFiles.length > 0 ? logPathFiles[0]
-      .getAbsolutePath() : getStringValue("path"));
+  public Thread getThread() {
+    return thread;
   }
+
+  @Override
+  public void setThread(Thread thread) {
+    this.thread = thread;
+  }
+
+  public Thread getLogFileDetacherThread() {
+    return logFileDetacherThread;
+  }
+
+  public void setLogFileDetacherThread(Thread logFileDetacherThread) {
+    this.logFileDetacherThread = logFileDetacherThread;
+  }
+
+  public Thread getLogFilePathUpdaterThread() {
+    return logFilePathUpdaterThread;
+  }
+
+  public void setLogFilePathUpdaterThread(Thread logFilePathUpdaterThread) {
+    this.logFilePathUpdaterThread = logFilePathUpdaterThread;
+  }
+
+  public Integer getMaxAgeMin() {
+    return maxAgeMin;
+  }
+
 }

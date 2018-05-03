@@ -19,10 +19,20 @@ Ambari Agent
 
 """
 
-from resource_management import *
+from resource_management.libraries.script.script import Script
+from resource_management.core.resources.system import Execute, Directory, File, Link
+from resource_management.core.resources import Package
+from resource_management.core.source import Template
+from resource_management.core.resources.service import ServiceConfig
+from resource_management.libraries.resources.xml_config import XmlConfig
+
+from resource_management.core.exceptions import Fail
+from resource_management.core.logger import Logger
+from resource_management.libraries.functions.format import format
 import os
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
 from ambari_commons import OSConst
+from resource_management.libraries.functions.lzo_utils import install_lzo_if_needed
 
 @OsFamilyFuncImpl(os_family=OsFamilyImpl.DEFAULT)
 def hdfs(name=None):
@@ -46,6 +56,23 @@ def hdfs(name=None):
   )
 
   if params.security_enabled:
+    File(os.path.join(params.hadoop_conf_dir, 'hdfs_dn_jaas.conf'),
+         owner=params.hdfs_user,
+         group=params.user_group,
+         content=Template("hdfs_dn_jaas.conf.j2")
+    )
+    File(os.path.join(params.hadoop_conf_dir, 'hdfs_nn_jaas.conf'),
+         owner=params.hdfs_user,
+         group=params.user_group,
+         content=Template("hdfs_nn_jaas.conf.j2")
+    )
+    if params.dfs_ha_enabled:
+      File(os.path.join(params.hadoop_conf_dir, 'hdfs_jn_jaas.conf'),
+           owner=params.hdfs_user,
+           group=params.user_group,
+           content=Template("hdfs_jn_jaas.conf.j2")
+      )
+
     tc_mode = 0644
     tc_owner = "root"
   else:
@@ -56,7 +83,7 @@ def hdfs(name=None):
     XmlConfig("hadoop-policy.xml",
               conf_dir=params.hadoop_conf_dir,
               configurations=params.config['configurations']['hadoop-policy'],
-              configuration_attributes=params.config['configuration_attributes']['hadoop-policy'],
+              configuration_attributes=params.config['configurationAttributes']['hadoop-policy'],
               owner=params.hdfs_user,
               group=params.user_group
     )
@@ -65,7 +92,7 @@ def hdfs(name=None):
     XmlConfig("ssl-client.xml",
               conf_dir=params.hadoop_conf_dir,
               configurations=params.config['configurations']['ssl-client'],
-              configuration_attributes=params.config['configuration_attributes']['ssl-client'],
+              configuration_attributes=params.config['configurationAttributes']['ssl-client'],
               owner=params.hdfs_user,
               group=params.user_group
     )
@@ -80,7 +107,7 @@ def hdfs(name=None):
     XmlConfig("ssl-client.xml",
               conf_dir=params.hadoop_conf_secure_dir,
               configurations=params.config['configurations']['ssl-client'],
-              configuration_attributes=params.config['configuration_attributes']['ssl-client'],
+              configuration_attributes=params.config['configurationAttributes']['ssl-client'],
               owner=params.hdfs_user,
               group=params.user_group
     )
@@ -89,7 +116,7 @@ def hdfs(name=None):
     XmlConfig("ssl-server.xml",
               conf_dir=params.hadoop_conf_dir,
               configurations=params.config['configurations']['ssl-server'],
-              configuration_attributes=params.config['configuration_attributes']['ssl-server'],
+              configuration_attributes=params.config['configurationAttributes']['ssl-server'],
               owner=params.hdfs_user,
               group=params.user_group
     )
@@ -97,7 +124,7 @@ def hdfs(name=None):
   XmlConfig("hdfs-site.xml",
             conf_dir=params.hadoop_conf_dir,
             configurations=params.config['configurations']['hdfs-site'],
-            configuration_attributes=params.config['configuration_attributes']['hdfs-site'],
+            configuration_attributes=params.config['configurationAttributes']['hdfs-site'],
             owner=params.hdfs_user,
             group=params.user_group
   )
@@ -105,7 +132,7 @@ def hdfs(name=None):
   XmlConfig("core-site.xml",
             conf_dir=params.hadoop_conf_dir,
             configurations=params.config['configurations']['core-site'],
-            configuration_attributes=params.config['configuration_attributes']['core-site'],
+            configuration_attributes=params.config['configurationAttributes']['core-site'],
             owner=params.hdfs_user,
             group=params.user_group,
             mode=0644
@@ -116,10 +143,7 @@ def hdfs(name=None):
        content=Template("slaves.j2")
   )
   
-  if params.lzo_enabled and len(params.lzo_packages) > 0:
-      Package(params.lzo_packages,
-              retry_on_repo_unavailability=params.agent_stack_retry_on_unavailability,
-              retry_count=params.agent_stack_retry_count)
+  install_lzo_if_needed()
       
 def install_snappy():
   import params
@@ -132,6 +156,52 @@ def install_snappy():
   Link(params.so_target_x64,
        to=params.so_src_x64,
   )
+
+class ConfigStatusParser():
+    def __init__(self):
+        self.reconfig_successful = False
+
+    def handle_new_line(self, line, is_stderr):
+        if is_stderr:
+            return
+
+        if line.startswith('SUCCESS: Changed property'):
+            self.reconfig_successful = True
+
+        Logger.info('[reconfig] %s' % (line))
+
+@OsFamilyFuncImpl(os_family=OsFamilyImpl.DEFAULT)
+def reconfig(componentName, componentAddress):
+    import params
+
+    if params.security_enabled:
+        Execute(params.nn_kinit_cmd,
+                user=params.hdfs_user
+                )
+
+    nn_reconfig_cmd = format('hdfs --config {hadoop_conf_dir} dfsadmin -reconfig {componentName} {componentAddress} start')
+
+    Execute (nn_reconfig_cmd,
+             user=params.hdfs_user,
+             logoutput=True,
+             path=params.hadoop_bin_dir
+             )
+
+    nn_reconfig_cmd = format('hdfs --config {hadoop_conf_dir} dfsadmin -reconfig {componentName} {componentAddress} status')
+    config_status_parser = ConfigStatusParser()
+    Execute (nn_reconfig_cmd,
+             user=params.hdfs_user,
+             logoutput=False,
+             path=params.hadoop_bin_dir,
+             on_new_line=config_status_parser.handle_new_line
+             )
+
+
+    if not config_status_parser.reconfig_successful:
+        Logger.info('Reconfiguration failed')
+        raise Fail('Reconfiguration failed!')
+
+    Logger.info('Reconfiguration successfully completed.')
 
 @OsFamilyFuncImpl(os_family=OSConst.WINSRV_FAMILY)
 def hdfs(component=None):
@@ -148,6 +218,14 @@ def hdfs(component=None):
          owner=params.hdfs_user,
          mode="f",
          )
+
+    if params.hdfs_include_file:
+      File(params.include_file_path,
+         content=Template("include_hosts_list.j2"),
+         owner=params.hdfs_user,
+         mode="f",
+         )
+      pass
   if params.service_map.has_key(component):
     service_name = params.service_map[component]
     ServiceConfig(service_name,
@@ -161,7 +239,7 @@ def hdfs(component=None):
               configurations=params.config['configurations']['hadoop-policy'],
               owner=params.hdfs_user,
               mode="f",
-              configuration_attributes=params.config['configuration_attributes']['hadoop-policy']
+              configuration_attributes=params.config['configurationAttributes']['hadoop-policy']
     )
 
   XmlConfig("hdfs-site.xml",
@@ -169,5 +247,5 @@ def hdfs(component=None):
             configurations=params.config['configurations']['hdfs-site'],
             owner=params.hdfs_user,
             mode="f",
-            configuration_attributes=params.config['configuration_attributes']['hdfs-site']
+            configuration_attributes=params.config['configurationAttributes']['hdfs-site']
   )

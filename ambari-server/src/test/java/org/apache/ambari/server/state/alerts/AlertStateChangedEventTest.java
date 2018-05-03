@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -23,7 +23,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.ambari.server.controller.RootServiceResponseFactory.Services;
+import org.apache.ambari.server.H2DatabaseCleaner;
+import org.apache.ambari.server.controller.RootService;
 import org.apache.ambari.server.events.AggregateAlertRecalculateEvent;
 import org.apache.ambari.server.events.AlertEvent;
 import org.apache.ambari.server.events.AlertStateChangeEvent;
@@ -52,12 +53,12 @@ import org.easymock.EasyMockSupport;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import com.google.inject.Binder;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Module;
-import com.google.inject.persist.PersistService;
 import com.google.inject.util.Modules;
 
 import junit.framework.Assert;
@@ -68,6 +69,7 @@ import junit.framework.Assert;
  * should only be created when received alerts which have a firmness of
  * {@link AlertFirmness#HARD}.
  */
+@Category({ category.AlertTest.class})
 public class AlertStateChangedEventTest extends EasyMockSupport {
 
   private AlertEventPublisher eventPublisher;
@@ -99,7 +101,7 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
    */
   @After
   public void teardown() throws Exception {
-    injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
     injector = null;
   }
 
@@ -117,8 +119,8 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
 
     AlertTargetEntity alertTarget = createNiceMock(AlertTargetEntity.class);
     AlertGroupEntity alertGroup = createMock(AlertGroupEntity.class);
-    List<AlertGroupEntity> groups = new ArrayList<AlertGroupEntity>();
-    Set<AlertTargetEntity> targets = new HashSet<AlertTargetEntity>();
+    List<AlertGroupEntity> groups = new ArrayList<>();
+    Set<AlertTargetEntity> targets = new HashSet<>();
 
     targets.add(alertTarget);
     groups.add(alertGroup);
@@ -132,8 +134,9 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
         dispatchDao.findGroupsByDefinition(EasyMock.anyObject(AlertDefinitionEntity.class))).andReturn(
         groups).once();
 
-    dispatchDao.createNotices((List<AlertNoticeEntity>) EasyMock.anyObject());
-    EasyMock.expectLastCall().once();
+    EasyMock.expect(
+        dispatchDao.createNotices((List<AlertNoticeEntity>) EasyMock.anyObject())).andReturn(
+      new ArrayList<>()).once();
 
     AlertDefinitionEntity definition = getMockAlertDefinition();
 
@@ -168,8 +171,8 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
   public void testAlertNoticeSkippedForTarget() throws Exception {
     AlertTargetEntity alertTarget = createMock(AlertTargetEntity.class);
     AlertGroupEntity alertGroup = createMock(AlertGroupEntity.class);
-    List<AlertGroupEntity> groups = new ArrayList<AlertGroupEntity>();
-    Set<AlertTargetEntity> targets = new HashSet<AlertTargetEntity>();
+    List<AlertGroupEntity> groups = new ArrayList<>();
+    Set<AlertTargetEntity> targets = new HashSet<>();
 
     targets.add(alertTarget);
     groups.add(alertGroup);
@@ -220,8 +223,8 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
   public void testAlertNoticeSkippedForDisabledTarget() throws Exception {
     AlertTargetEntity alertTarget = createMock(AlertTargetEntity.class);
     AlertGroupEntity alertGroup = createMock(AlertGroupEntity.class);
-    List<AlertGroupEntity> groups = new ArrayList<AlertGroupEntity>();
-    Set<AlertTargetEntity> targets = new HashSet<AlertTargetEntity>();
+    List<AlertGroupEntity> groups = new ArrayList<>();
+    Set<AlertTargetEntity> targets = new HashSet<>();
 
     targets.add(alertTarget);
     groups.add(alertGroup);
@@ -381,8 +384,8 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
 
     AlertTargetEntity alertTarget = createNiceMock(AlertTargetEntity.class);
     AlertGroupEntity alertGroup = createMock(AlertGroupEntity.class);
-    List<AlertGroupEntity> groups = new ArrayList<AlertGroupEntity>();
-    Set<AlertTargetEntity> targets = new HashSet<AlertTargetEntity>();
+    List<AlertGroupEntity> groups = new ArrayList<>();
+    Set<AlertTargetEntity> targets = new HashSet<>();
 
     targets.add(alertTarget);
     groups.add(alertGroup);
@@ -430,8 +433,8 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
 
     AlertTargetEntity alertTarget = createNiceMock(AlertTargetEntity.class);
     AlertGroupEntity alertGroup = createMock(AlertGroupEntity.class);
-    List<AlertGroupEntity> groups = new ArrayList<AlertGroupEntity>();
-    Set<AlertTargetEntity> targets = new HashSet<AlertTargetEntity>();
+    List<AlertGroupEntity> groups = new ArrayList<>();
+    Set<AlertTargetEntity> targets = new HashSet<>();
 
     targets.add(alertTarget);
     groups.add(alertGroup);
@@ -481,8 +484,8 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
 
     AlertTargetEntity alertTarget = createNiceMock(AlertTargetEntity.class);
     AlertGroupEntity alertGroup = createMock(AlertGroupEntity.class);
-    List<AlertGroupEntity> groups = new ArrayList<AlertGroupEntity>();
-    Set<AlertTargetEntity> targets = new HashSet<AlertTargetEntity>();
+    List<AlertGroupEntity> groups = new ArrayList<>();
+    Set<AlertTargetEntity> targets = new HashSet<>();
 
     targets.add(alertTarget);
     groups.add(alertGroup);
@@ -498,11 +501,13 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
     // create the definition for the AMBARI service
     AlertDefinitionEntity definition = createNiceMock(AlertDefinitionEntity.class);
     EasyMock.expect(definition.getDefinitionId()).andReturn(1L).anyTimes();
-    EasyMock.expect(definition.getServiceName()).andReturn(Services.AMBARI.name()).anyTimes();
+    EasyMock.expect(definition.getServiceName()).andReturn(RootService.AMBARI.name()).anyTimes();
     EasyMock.expect(definition.getLabel()).andReturn("ambari-foo-alert").anyTimes();
     EasyMock.expect(definition.getDescription()).andReturn("Ambari Foo Alert").anyTimes();
 
-    dispatchDao.createNotices((List<AlertNoticeEntity>) EasyMock.anyObject());
+    EasyMock.expect(
+        dispatchDao.createNotices((List<AlertNoticeEntity>) EasyMock.anyObject())).andReturn(
+      new ArrayList<>()).once();
 
     AlertCurrentEntity current = getMockedAlertCurrentEntity();
     AlertHistoryEntity history = createNiceMock(AlertHistoryEntity.class);
@@ -535,7 +540,7 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
     Cluster cluster = createMock(Cluster.class);
 
     EasyMock.expect(clusters.getClusterById(EasyMock.anyLong())).andReturn(cluster).atLeastOnce();
-    EasyMock.expect(cluster.getUpgradeEntity()).andReturn(null).anyTimes();
+    EasyMock.expect(cluster.getUpgradeInProgress()).andReturn(null).anyTimes();
     EasyMock.expect(cluster.isUpgradeSuspended()).andReturn(false).anyTimes();
   }
 
@@ -551,7 +556,7 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
     EasyMock.reset(clusters);
 
     EasyMock.expect(clusters.getClusterById(EasyMock.anyLong())).andReturn(cluster).atLeastOnce();
-    EasyMock.expect(cluster.getUpgradeEntity()).andReturn(new UpgradeEntity()).anyTimes();
+    EasyMock.expect(cluster.getUpgradeInProgress()).andReturn(new UpgradeEntity()).anyTimes();
     EasyMock.expect(cluster.isUpgradeSuspended()).andReturn(false).anyTimes();
   }
 
@@ -567,7 +572,7 @@ public class AlertStateChangedEventTest extends EasyMockSupport {
     EasyMock.reset(clusters);
 
     EasyMock.expect(clusters.getClusterById(EasyMock.anyLong())).andReturn(cluster).atLeastOnce();
-    EasyMock.expect(cluster.getUpgradeEntity()).andReturn(null).anyTimes();
+    EasyMock.expect(cluster.getUpgradeInProgress()).andReturn(EasyMock.createMock(UpgradeEntity.class)).anyTimes();
     EasyMock.expect(cluster.isUpgradeSuspended()).andReturn(true).anyTimes();
   }
 

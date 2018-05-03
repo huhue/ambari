@@ -22,7 +22,7 @@ var hostsManagement = require('utils/hosts');
 var stringUtils = require('utils/string_utils');
 require('utils/configs/add_component_config_initializer');
 
-App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDownload, App.InstallComponent, App.InstallNewVersion, {
+App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDownload, App.InstallComponent, App.InstallNewVersion, App.CheckHostMixin, App.TrackRequestMixin, {
 
   name: 'mainHostDetailsController',
 
@@ -33,16 +33,28 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   content: null,
 
   /**
+   * Is check host procedure finished
+   * @type {bool}
+   */
+  checkHostFinished: null,
+
+  /**
    * Does user come from hosts page
    * @type {bool}
    */
   isFromHosts: false,
 
   /**
-   * Are we adding hive server2 component
+   * Determines whether we are adding Hive Server2 component
    * @type {bool}
    */
   addHiveServer: false,
+
+  /**
+   * Determines whether we are adding ZooKeeper Server component
+   * @type {bool}
+   */
+  addZooKeeperServer: false,
 
   /**
    * path to page visited before
@@ -66,6 +78,180 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    * @type {bool}
    */
   isOozieServerAddable: true,
+
+  isConfigsLoadingInProgress: false,
+
+  addDeleteComponentsMap: {
+    'ZOOKEEPER_SERVER': {
+      addPropertyName: 'addZooKeeperServer',
+      deletePropertyName: 'fromDeleteZkServer',
+      configTagsCallbackName: 'loadZookeeperConfigs',
+      configsCallbackName: 'saveZkConfigs'
+    },
+    'HIVE_METASTORE': {
+      deletePropertyName: 'deleteHiveMetaStore',
+      hostPropertyName: 'hiveMetastoreHost',
+      configTagsCallbackName: 'loadHiveConfigs',
+      configsCallbackName: 'onLoadHiveConfigs'
+    },
+    'WEBHCAT_SERVER': {
+      deletePropertyName: 'deleteWebHCatServer',
+      hostPropertyName: 'webhcatServerHost',
+      configTagsCallbackName: 'loadWebHCatConfigs',
+      configsCallbackName: 'onLoadHiveConfigs'
+    },
+    'HIVE_SERVER': {
+      addPropertyName: 'addHiveServer',
+      deletePropertyName: 'deleteHiveServer',
+      configTagsCallbackName: 'loadHiveConfigs',
+      configsCallbackName: 'onLoadHiveConfigs'
+    },
+    'NIMBUS': {
+      deletePropertyName: 'deleteNimbusHost',
+      hostPropertyName: 'nimbusHost',
+      configTagsCallbackName: 'loadStormConfigs',
+      configsCallbackName: 'onLoadStormConfigs'
+    },
+    'ATLAS_SERVER': {
+      deletePropertyName: 'deleteAtlasServer',
+      hostPropertyName: 'atlasServer',
+      configTagsCallbackName: 'loadAtlasConfigs',
+      configsCallbackName: 'onLoadAtlasConfigs'
+    },
+    'RANGER_KMS_SERVER': {
+      deletePropertyName: 'deleteRangerKMSServer',
+      hostPropertyName: 'rangerKMSServerHost',
+      configTagsCallbackName: 'loadRangerConfigs',
+      configsCallbackName: 'onLoadRangerConfigs'
+    }
+  },
+
+  zooKeeperRelatedServices: [
+    {
+      serviceName: 'HIVE',
+      typesToLoad: ['hive-site', 'webhcat-site'],
+      typesToSave: ['hive-site', 'webhcat-site']
+    },
+    {
+      serviceName: 'YARN',
+      typesToLoad: ['yarn-site', 'zoo.cfg'],
+      typesToSave: ['yarn-site']
+    },
+    {
+      serviceName: 'HBASE',
+      typesToLoad: ['hbase-site'],
+      typesToSave: ['hbase-site']
+    },
+    {
+      serviceName: 'ACCUMULO',
+      typesToLoad: ['accumulo-site'],
+      typesToSave: ['accumulo-site']
+    },
+    {
+      serviceName: 'KAFKA',
+      typesToLoad: ['kafka-broker'],
+      typesToSave: ['kafka-broker']
+    },
+    {
+      serviceName: 'ATLAS',
+      typesToLoad: ['application-properties', 'infra-solr-env'],
+      typesToSave: ['application-properties']
+    },
+    {
+      serviceName: 'STORM',
+      typesToLoad: ['storm-site'],
+      typesToSave: ['storm-site']
+    }
+  ],
+
+  /**
+   * Determines whether adding/deleting host component requires configs changes
+   * @type {Boolean}
+   */
+  isReconfigureRequired: false,
+
+  /**
+   * Contains component-related config properties loaded from server
+   * @type {Object|null}
+   */
+  configs: null,
+
+  /**
+   * Array of all properties affected by adding/deleting host component
+   * @type {Array}
+   */
+  allPropertiesToChange: [],
+
+  /**
+   * Array of editable properties affected by adding/deleting host component
+   * @type {Array}
+   */
+  recommendedPropertiesToChange: [],
+
+  /**
+   * Array of non-editable properties affected by adding/deleting host component
+   * @type {Array}
+   */
+  requiredPropertiesToChange: [],
+
+  /**
+   * Properties affected by adding/deleting host component, grouped by service, formatted for PUT call
+   * @type {Array}
+   */
+  groupedPropertiesToChange: [],
+
+  hasPropertiesToChange: Em.computed.or('recommendedPropertiesToChange.length', 'requiredPropertiesToChange.length'),
+
+  addDeleteComponentPopupBody: Em.View.extend({
+    templateName: require('templates/main/host/details/addDeleteComponentPopup'),
+    commonMessage: '',
+    manualKerberosWarning: App.get('router.mainAdminKerberosController.isManualKerberos') ?
+      Em.I18n.t('hosts.host.manualKerberosWarning') : '',
+    lastComponent: false,
+    lastComponentError: '',
+    fromServiceSummary: false,
+    selectedHost: null,
+    anyHostsWithoutComponent: true
+  }),
+
+  saveLoadedConfigs: function (data) {
+    this.set('configs', {
+      items: data.items.map((item) => {
+        return {
+          type: item.type,
+          properties_attributes: item.properties_attributes,
+          properties: Em.copy(item.properties)
+        }
+      })
+    });
+  },
+
+  clearConfigsChanges: function (shouldKeepLoadedConfigs) {
+    var arrayNames = ['allPropertiesToChange', 'recommendedPropertiesToChange', 'requiredPropertiesToChange', 'groupedPropertiesToChange'];
+    this.abortRequests();
+    arrayNames.forEach(function (arrayName) {
+      this.get(arrayName).clear();
+    }, this);
+    this.set('isReconfigureRequired', false);
+    if (!shouldKeepLoadedConfigs) {
+      this.set('configs', null);
+    }
+  },
+
+  applyConfigsCustomization: function () {
+    this.get('recommendedPropertiesToChange').forEach(function (property) {
+      var value = property.saveRecommended ? property.recommendedValue : property.initialValue,
+        filename = property.propertyFileName;
+      if (this.get('groupedPropertiesToChange.length')) {
+        var group = this.get('groupedPropertiesToChange').find(function (item) {
+          return item.properties.hasOwnProperty(filename);
+        });
+        if (group) {
+          group.properties[filename][property.propertyName] = value;
+        }
+      }
+    }, this);
+  },
 
   /**
    * Open dashboard page
@@ -96,11 +282,11 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    */
   startComponent: function (event) {
     var self = this;
+    var component = event.context;
     return App.showConfirmationPopup(function () {
-      var component = event.context;
       var context = Em.I18n.t('requestInfo.startHostComponent') + " " + component.get('displayName');
       self.sendComponentCommand(component, context, App.HostComponentStatus.started);
-    });
+    }, Em.I18n.t('question.sure.start').format(component.get('displayName')));
   },
 
   /**
@@ -110,20 +296,19 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    */
   stopComponent: function (event) {
     var self = this;
-    if (event.context.get('componentName') == 'NAMENODE' ) {
+    var component = event.context;
+    if (event.context.get('componentName') === 'NAMENODE' ) {
       this.checkNnLastCheckpointTime(function () {
         return App.showConfirmationPopup(function () {
-          var component = event.context;
           var context = Em.I18n.t('requestInfo.stopHostComponent') + " " + component.get('displayName');
           self.sendComponentCommand(component, context, App.HostComponentStatus.stopped);
-        });
+        }, Em.I18n.t('question.sure.stop').format(component.get('displayName')));
       });
     } else {
       return App.showConfirmationPopup(function () {
-        var component = event.context;
         var context = Em.I18n.t('requestInfo.stopHostComponent') + " " + component.get('displayName');
         self.sendComponentCommand(component, context, App.HostComponentStatus.stopped);
-      });
+      }, Em.I18n.t('question.sure.stop').format(component.get('displayName')));
     }
   },
   /**
@@ -154,7 +339,8 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
       sender: this,
       data: data,
       success: 'sendComponentCommandSuccessCallback',
-      error: 'ajaxErrorCallback'
+      error: 'ajaxErrorCallback',
+      showLoadingPopup: true
     });
   },
 
@@ -182,13 +368,17 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     var dfd = $.Deferred();
     var miscController = App.MainAdminServiceAccountsController.create();
     miscController.loadUsers();
-    var interval = setInterval(function () {
+    miscController.addObserver('dataIsLoaded', this, function() {
       if (miscController.get('dataIsLoaded') && miscController.get('users')) {
-        self.set('hdfsUser', miscController.get('users').findProperty('name', 'hdfs_user').get('value'));
+        if (miscController.get('users').someProperty('name', 'hdfs_user')) {
+          self.set('hdfsUser', miscController.get('users').findProperty('name', 'hdfs_user').get('value'));
+        } else {
+          self.set('hdfsUser', '&lt;hdfs-user&gt;');
+        }
         dfd.resolve();
-        clearInterval(interval);
+        miscController.destroy();
       }
-    }, 10);
+    });
     return dfd.promise();
   },
 
@@ -207,7 +397,9 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         self.getHdfsUser().done(function() {
           var msg = Em.Object.create({
             confirmMsg: Em.I18n.t('services.service.stop.HDFS.warningMsg.checkPointTooOld').format(App.nnCheckpointAgeAlertThreshold) +
-              Em.I18n.t('services.service.stop.HDFS.warningMsg.checkPointTooOld.instructions').format(isNNCheckpointTooOld, self.get('hdfsUser')),
+              Em.I18n.t('services.service.stop.HDFS.warningMsg.checkPointTooOld.makeSure') +
+              Em.I18n.t('services.service.stop.HDFS.warningMsg.checkPointTooOld.instructions.singleHost.login').format(isNNCheckpointTooOld) +
+              Em.I18n.t('services.service.stop.HDFS.warningMsg.checkPointTooOld.instructions').format(self.get('hdfsUser')),
             confirmButton: Em.I18n.t('common.next')
           });
           return App.showConfirmationFeedBackPopup(callback, msg);
@@ -216,7 +408,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         // not available
         return App.showConfirmationPopup(
           callback, Em.I18n.t('services.service.stop.HDFS.warningMsg.checkPointNA'), null,
-          Em.I18n.t('common.warning'), Em.I18n.t('common.proceedAnyway'), true
+          Em.I18n.t('common.warning'), Em.I18n.t('common.proceedAnyway'), 'danger'
         );
       } else {
         // still young
@@ -240,7 +432,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     var lastCheckpointTime = Em.get(data, 'metrics.dfs.FSNamesystem.LastCheckpointTime');
     var hostName = Em.get(data, 'HostRoles.host_name');
 
-    if (Em.get(data, 'metrics.dfs.FSNamesystem.HAState') == 'active') {
+    if (Em.get(data, 'metrics.dfs.FSNamesystem.HAState') === 'active') {
       if (!lastCheckpointTime) {
         this.set("isNNCheckpointTooOld", null);
       } else {
@@ -254,7 +446,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
           this.set("isNNCheckpointTooOld", false);
         }
       }
-    } else if (Em.get(data, 'metrics.dfs.FSNamesystem.HAState') == 'standby') {
+    } else if (Em.get(data, 'metrics.dfs.FSNamesystem.HAState') === 'standby') {
       this.set("isNNCheckpointTooOld", false);
     }
   },
@@ -305,44 +497,76 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     if ($(event.target).closest('li').hasClass('disabled')) {
       return;
     }
-    var self = this;
-    var component = event.context;
-    var componentName = component.get('componentName');
-    var displayName = component.get('displayName');
-    var isLastComponent = (this.getTotalComponent(component) === 1);
+    const component = event.context;
+    const componentName = component.get('componentName');
+    const componentsMapItem = this.get('addDeleteComponentsMap')[componentName];
+
+    if (componentsMapItem) {
+      this.deleteAndReconfigureComponent(componentsMapItem, component);
+    } else if (componentName === 'JOURNALNODE') {
+      return App.showConfirmationPopup(function () {
+        App.router.transitionTo('main.services.manageJournalNode');
+      }, Em.I18n.t('hosts.host.deleteComponent.popup.deleteJournalNodeMsg'));
+    } else {
+      return this.showReconfigurationPopupPreDelete(component, () => this._doDeleteHostComponent(componentName));
+    }
+  },
+
+  /**
+   *
+   * @param {object} componentsMapItem
+   * @param {App.HostComponent} component
+   * @returns {App.ModalPopup}
+   */
+  deleteAndReconfigureComponent: function(componentsMapItem, component) {
+    if (componentsMapItem.deletePropertyName) {
+      this.set(componentsMapItem.deletePropertyName, true);
+    }
+    this.loadComponentRelatedConfigs(componentsMapItem.configTagsCallbackName, componentsMapItem.configsCallbackName);
+    return this.showReconfigurationPopupPreDelete(component, () => {
+      this._doDeleteHostComponent(component.get('componentName')).done(() => {
+        this.applyConfigsCustomization();
+        this.putConfigsToServer(this.get('groupedPropertiesToChange'), component.get('componentName'));
+        this.clearConfigsChanges();
+      });
+    });
+  },
+
+  showReconfigurationPopupPreDelete: function (component, primary = Em.K, commonMessage) {
+    const isLastComponent = (this.getTotalComponent(component) === 1),
+      componentDisplayName = component.get('displayName');
+
     return App.ModalPopup.show({
       header: Em.I18n.t('popup.confirmation.commonHeader'),
+      controller: this,
+      hasPropertiesToChange: false,
+      classNameBindings: ['controller.hasPropertiesToChange:common-modal-wrapper', 'controller.hasPropertiesToChange:modal-full-width'],
+      modalDialogClasses: function () {
+        return this.get('controller.hasPropertiesToChange') ? ['modal-lg'] : [];
+      }.property('controller.hasPropertiesToChange'),
       primary: Em.I18n.t('hosts.host.deleteComponent.popup.confirm'),
-      bodyClass: Em.View.extend({
-        templateName: require('templates/main/host/details/deleteComponentPopup')
+      bodyClass: this.get('addDeleteComponentPopupBody').extend({
+        commonMessage: commonMessage || Em.I18n.t('hosts.host.deleteComponent.popup.msg1').format(componentDisplayName),
+        recommendedPropertiesToChange: this.get('recommendedPropertiesToChange'),
+        requiredPropertiesToChange: this.get('requiredPropertiesToChange'),
+        lastComponentError: Em.I18n.t('hosts.host.deleteComponent.popup.warning').format(componentDisplayName),
+        lastComponent: isLastComponent
       }),
-      isHiveMetastore: componentName == 'HIVE_METASTORE',
-      isWebHCatServer: componentName == 'WEBHCAT_SERVER',
-      isNimbus: componentName == 'NIMBUS',
-      isRangerKMSServer: componentName == 'RANGER_KMS_SERVER',
-      isZkServer: componentName == 'ZOOKEEPER_SERVER',
-
-      deleteHiveMetastoreMsg: Em.I18n.t('hosts.host.deleteComponent.popup.deleteHiveMetastore'),
-      deleteWebHCatServerMsg: Em.I18n.t('hosts.host.deleteComponent.popup.deleteWebHCatServer'),
-      deleteNimbusMsg: Em.I18n.t('hosts.host.deleteComponent.popup.deleteNimbus'),
-      deleteRangerKMSServereMsg: Em.I18n.t('hosts.host.deleteComponent.popup.deleteRangerKMSServer'),
-      lastComponentError: Em.I18n.t('hosts.host.deleteComponent.popup.warning').format(displayName),
-      deleteComponentMsg: Em.I18n.t('hosts.host.deleteComponent.popup.msg1').format(displayName),
-      deleteZkServerMsg: Em.I18n.t('hosts.host.deleteComponent.popup.deleteZooKeeperServer'),
-
-      isChecked: false,
-      disablePrimary: Em.computed.not('isChecked'),
-      lastComponent: function () {
-        this.set('isChecked', !isLastComponent);
-        return isLastComponent;
-      }.property(),
-
+      isChecked: !isLastComponent,
+      disablePrimary: function () {
+        return (this.get('controller.isReconfigureRequired') && this.get('controller.isConfigsLoadingInProgress')) || !this.get('isChecked');
+      }.property('controller.isReconfigureRequired', 'controller.isConfigsLoadingInProgress', 'isChecked'),
       onPrimary: function () {
-        var popup = this;
-        self._doDeleteHostComponent(component, function () {
-          self.set('redrawComponents', true);
-          popup.hide();
-        });
+        this._super();
+        primary();
+      },
+      onSecondary: function () {
+        this._super();
+        this.get('controller').clearConfigsChanges();
+      },
+      onClose: function () {
+        this._super();
+        this.get('controller').clearConfigsChanges();
       }
     });
   },
@@ -374,62 +598,36 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   /**
    * Deletes the given host component, or all host components.
    *
-   * @param {object|null} component  When <code>null</code> all host components are deleted.
-   * @return  <code>null</code> when components get deleted.
-   *          <code>{xhr: XhrObj, url: "http://", method: "DELETE"}</code>
-   *          when components failed to get deleted.
+   * @param {string} componentName
+   * @return  {$.ajax}
    * @method _doDeleteHostComponent
    */
-  _doDeleteHostComponent: function (component, callback) {
-    callback = callback || Em.K;
-    App.ajax.send({
-      name: (Em.isNone(component)) ? 'common.delete.host' : 'common.delete.host_component',
+  _doDeleteHostComponent: function (componentName) {
+    return App.ajax.send({
+      name: (Em.isNone(componentName)) ? 'common.delete.host' : 'common.delete.host_component',
       sender: this,
       data: {
-        componentName: (component) ? component.get('componentName') : '',
+        componentName: componentName || '',
         hostName: this.get('content.hostName')
       },
       success: '_doDeleteHostComponentSuccessCallback',
-      error: '_doDeleteHostComponentErrorCallback'
-    }).then(callback, callback);
+      error: '_doDeleteHostComponentErrorCallback',
+      showLoadingPopup: true
+    });
   },
 
   /**
-   * Result of delete component(s) request
+   * Error of delete component(s) request
    * @type {object}
    */
-  _deletedHostComponentResult: null,
+  _deletedHostComponentError: null,
 
   /**
    * Success callback for delete host component request
    * @method _doDeleteHostComponentSuccessCallback
    */
   _doDeleteHostComponentSuccessCallback: function (response, request, data) {
-    var self = this;
-    this.set('_deletedHostComponentResult', null);
-    this.removeHostComponentModel(data.componentName, data.hostName);
-    if (data.componentName == 'ZOOKEEPER_SERVER') {
-      this.set('fromDeleteZkServer', true);
-      this.updateStormConfigs();
-      self.isServiceMetricsLoaded(function () {
-        self.loadConfigs();
-      });
-    } else if (data.componentName == 'HIVE_METASTORE') {
-      this.set('deleteHiveMetaStore', true);
-      this.loadConfigs('loadHiveConfigs');
-    } else if (data.componentName == 'WEBHCAT_SERVER') {
-      this.set('deleteWebHCatServer', true);
-      this.loadConfigs('loadWebHCatConfigs');
-    } else if (data.componentName == 'HIVE_SERVER') {
-      this.set('deleteHiveServer', true);
-      this.loadConfigs('loadHiveConfigs');
-    } else if (data.componentName == 'NIMBUS') {
-      this.set('deleteNimbusHost', true);
-      this.loadConfigs('loadStormConfigs');
-    } else if (data.componentName == 'RANGER_KMS_SERVER') {
-      this.set('deleteRangerKMSServer', true);
-      this.loadConfigs('loadRangerConfigs');
-    }
+    this.set('_deletedHostComponentError', null);
   },
 
   /**
@@ -437,23 +635,11 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    * @param {object} xhr
    * @param {string} textStatus
    * @param {object} errorThrown
+   * @param {object} data
    * @method _doDeleteHostComponentErrorCallback
    */
   _doDeleteHostComponentErrorCallback: function (xhr, textStatus, errorThrown, data) {
-    this.set('_deletedHostComponentResult', {xhr: xhr, url: data.url, method: 'DELETE'});
-  },
-
-  /**
-   * Remove host component data from App.HostComponent model.
-   *
-   * @param {String} componentName
-   * @param {String} hostName
-   */
-  removeHostComponentModel: function (componentName, hostName) {
-    var component = App.HostComponent.find().filterProperty('componentName', componentName).findProperty('hostName', hostName);
-    var serviceInCache = App.cache['services'].findProperty('ServiceInfo.service_name', component.get('service.serviceName'));
-    serviceInCache.host_components = serviceInCache.host_components.without(component.get('id'));
-    App.serviceMapper.deleteRecord(component);
+    this.set('_deletedHostComponentError', {xhr: xhr, url: data.url, method: 'DELETE'});
   },
 
   /**
@@ -487,7 +673,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         success: 'upgradeComponentSuccessCallback',
         error: 'ajaxErrorCallback'
       });
-    });
+    }, Em.I18n.t('question.sure.upgrade').format(component.get('displayName')));
   },
 
   /**
@@ -511,27 +697,25 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    */
   restartComponent: function (event) {
     var component = event.context;
-    if (event.context.get('componentName') == 'NAMENODE') {
+    if (event.context.get('componentName') === 'NAMENODE') {
       this.checkNnLastCheckpointTime(function () {
         return App.showConfirmationPopup(function () {
           batchUtils.restartHostComponents([component], Em.I18n.t('rollingrestart.context.selectedComponentOnSelectedHost').format(component.get('displayName')), "HOST_COMPONENT");
-        });
+        }, Em.I18n.t('question.sure.restart').format(component.get('displayName')));
       });
     } else {
       return App.showConfirmationPopup(function () {
         batchUtils.restartHostComponents([component], Em.I18n.t('rollingrestart.context.selectedComponentOnSelectedHost').format(component.get('displayName')), "HOST_COMPONENT");
-      });
+      }, Em.I18n.t('question.sure.restart').format(component.get('displayName')));
     }
   },
 
   /**
    * add component as <code>addComponent<code> method but perform
-   * kdc sessionstate if cluster is secure;
+   * kdc session state if cluster is secure;
    * @param event
    */
   addComponentWithCheck: function (event) {
-    var componentName = event.context ? event.context.get('componentName') : "";
-    event.hiveMetastoreHost = (componentName == "HIVE_METASTORE" && !!this.get('content.hostName')) ? this.get('content.hostName') : null;
     App.get('router.mainAdminKerberosController').getSecurityType(function (event) {
       App.get('router.mainAdminKerberosController').getKDCSessionState(this.addComponent.bind(this, event));
     }.bind(this, event));
@@ -543,121 +727,160 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    */
   addComponent: function (event) {
     var
-      returnFunc,
-      self = this,
       component = event.context,
-      hostName = event.selectedHost || this.get('content.hostName'),
+      hostName = this.get('content.hostName'),
       componentName = component.get('componentName'),
-      missedComponents = event.selectedHost ? [] : this.checkComponentDependencies(componentName, {
+      missedComponents = event.fromServiceSummary ? [] : this.checkComponentDependencies(componentName, {
         scope: 'host',
         installedComponents: this.get('content.hostComponents').mapProperty('componentName')
       }),
       isManualKerberos = App.get('router.mainAdminKerberosController.isManualKerberos'),
-      manualKerberosWarning = isManualKerberos ? Em.I18n.t('hosts.host.manualKerberosWarning') : '';
+      manualKerberosWarning = isManualKerberos ? Em.I18n.t('hosts.host.manualKerberosWarning') : '',
+      componentsMapItem = this.get('addDeleteComponentsMap')[componentName];
 
-    if (!!missedComponents.length) {
-      var popupMessage = Em.I18n.t('host.host.addComponent.popup.dependedComponents.body').format(component.get('displayName'),
+    if (missedComponents.length) {
+      const popupMessage = Em.I18n.t('host.host.addComponent.popup.dependedComponents.body').format(component.get('displayName'),
         stringUtils.getFormattedStringFromArray(missedComponents.map(function (cName) {
           return App.StackServiceComponent.find(cName).get('displayName');
         })));
       return App.showAlertPopup(Em.I18n.t('host.host.addComponent.popup.dependedComponents.header'), popupMessage);
     }
 
-    switch (componentName) {
-      case 'ZOOKEEPER_SERVER':
-        returnFunc = App.showConfirmationPopup(function () {
-          self.installHostComponentCall(self.get('content.hostName'), component)
-        }, Em.I18n.t('hosts.host.addComponent.' + componentName) + manualKerberosWarning);
-        break;
-      case 'HIVE_METASTORE':
-        returnFunc = App.showConfirmationPopup(function () {
-          self.set('hiveMetastoreHost', hostName);
-          self.loadConfigs("loadHiveConfigs");
-        }, Em.I18n.t('hosts.host.addComponent.' + componentName) + manualKerberosWarning);
-        break;
-      case 'WEBHCAT_SERVER':
-        returnFunc = App.showConfirmationPopup(function () {
-          self.set('webhcatServerHost', hostName);
-          self.loadConfigs("loadWebHCatConfigs");
-        }, Em.I18n.t('hosts.host.addComponent.' + componentName) + manualKerberosWarning);
-        break;
-      case 'NIMBUS':
-        returnFunc = App.showConfirmationPopup(function () {
-          self.set('nimbusHost', hostName);
-          self.loadConfigs("loadStormConfigs");
-        }, Em.I18n.t('hosts.host.addComponent.' + componentName) + manualKerberosWarning);
-        break;
-      case 'RANGER_KMS_SERVER':
-        returnFunc = App.showConfirmationPopup(function () {
-          self.set('rangerKMSServerHost', hostName);
-          self.loadConfigs("loadRangerConfigs");
-        }, Em.I18n.t('hosts.host.addComponent.' + componentName) + manualKerberosWarning);
-        break;
-      default:
-        returnFunc = this.addClientComponent(component, isManualKerberos);
+    if (componentsMapItem) {
+      this.addAndReconfigureComponent(componentsMapItem, hostName, component, event.fromServiceSummary);
+    } else if (componentName === 'JOURNALNODE') {
+      return App.showConfirmationPopup(function () {
+        App.router.transitionTo('main.services.manageJournalNode');
+      }, Em.I18n.t('hosts.host.addComponent.' + componentName) + manualKerberosWarning);
+    } else {
+      return this.showAddComponentPopup(component, hostName, () => {
+        // hostname should be taken via this.get('content.hostName') because the host could be selected later
+        this.installHostComponentCall(this.get('content.hostName'), component);
+      }, event.fromServiceSummary);
     }
-    return returnFunc;
-  },
-
-  /**
-   * Send command to server to install client on selected host
-   * @param {App.HostComponent} component
-   * @param {boolean} isManualKerberos
-   * @returns {*}
-   */
-  addClientComponent: function (component, isManualKerberos) {
-    var self = this,
-      displayName = this.formatClientsMessage(component);
-
-    return this.showAddComponentPopup(displayName, isManualKerberos, function () {
-      self.installHostComponentCall(self.get('content.hostName'), component);
-    });
   },
 
   /**
    *
-   * @param {string} displayName
-   * @param {boolean} isManualKerberos
-   * @param {Function} primary
+   * @param {object} componentsMapItem
+   * @param {string} hostName
+   * @param {App.HostComponent} component
+   * @param {boolean} fromServiceSummary
    * @returns {*}
    */
-  showAddComponentPopup: function (displayName, isManualKerberos, primary) {
-    isManualKerberos = isManualKerberos || false;
+  addAndReconfigureComponent: function(componentsMapItem, hostName, component, fromServiceSummary) {
+    if (componentsMapItem.hostPropertyName) {
+      this.set(componentsMapItem.hostPropertyName, hostName);
+    }
+    if (componentsMapItem.addPropertyName) {
+      this.set(componentsMapItem.addPropertyName, true);
+    }
+    this.loadComponentRelatedConfigs(componentsMapItem.configTagsCallbackName, componentsMapItem.configsCallbackName);
+    return this.showAddComponentPopup(component, hostName, () => {
+      this.installAndReconfigureComponent(hostName, component, componentsMapItem);
+    }, fromServiceSummary);
+  },
+
+  /**
+   *
+   * @param {string} hostName
+   * @param {App.HostComponent} component
+   * @param {object} componentsMapItem
+   */
+  installAndReconfigureComponent: function(hostName, component, componentsMapItem) {
+    this.applyConfigsCustomization();
+    this.installHostComponentCall(hostName, component).done(() => {
+      this.putConfigsToServer(this.get('groupedPropertiesToChange'), component.get('componentName'));
+    }).always(() => {
+      this.set(componentsMapItem.addPropertyName, false);
+      this.clearConfigsChanges();
+    });
+  },
+
+  showAddComponentPopup: function (component, hostName, primary, fromServiceSummary) {
+    var self = this,
+      componentName = component.get('componentName'),
+      componentDisplayName = component.get('displayName'),
+      componentsMapItem = this.get('addDeleteComponentsMap')[componentName],
+      commonMessage = Em.I18n.t('hosts.host.addComponent.msg').format(componentDisplayName);
 
     return App.ModalPopup.show({
-      primary: Em.I18n.t('hosts.host.addComponent.popup.confirm'),
       header: Em.I18n.t('popup.confirmation.commonHeader'),
-
-      addComponentMsg: Em.I18n.t('hosts.host.addComponent.msg').format(displayName),
-
-      manualKerberosWarning: isManualKerberos ? Em.I18n.t('hosts.host.manualKerberosWarning') : '',
-
-      bodyClass: Em.View.extend({
-        templateName: require('templates/main/host/details/addComponentPopup')
+      controller: self,
+      hasPropertiesToChange: false,
+      classNameBindings: ['hasPropertiesToChange:common-modal-wrapper', 'hasPropertiesToChange:modal-full-width'],
+      modalDialogClasses: function () {
+        return this.get('controller.hasPropertiesToChange') ? ['modal-lg'] : [];
+      }.property('controller.hasPropertiesToChange'),
+      primary: Em.I18n.t('hosts.host.addComponent.popup.confirm'),
+      bodyClass: self.get('addDeleteComponentPopupBody').extend({
+        commonMessage: commonMessage,
+        fromServiceSummary: fromServiceSummary,
+        addComponentMsg: Em.I18n.t('hosts.host.addComponent.msg').format(componentDisplayName),
+        selectHostMsg: Em.I18n.t('services.summary.selectHostForComponent').format(componentDisplayName),
+        thereIsNoHostsMsg: Em.I18n.t('services.summary.allHostsAlreadyRunComponent').format(componentDisplayName),
+        hostsWithoutComponent: function () {
+          if (this.get('fromServiceSummary')) {
+            const hostsWithComponent = App.HostComponent.find().filterProperty('componentName', componentName).mapProperty('hostName');
+            return App.get('allHostNames').filter((hostname) => !hostsWithComponent.contains(hostname));
+          } else {
+            return [];
+          }
+        }.property('fromServiceSummary'),
+        anyHostsWithoutComponent: Em.computed.or('!fromServiceSummary', 'hostsWithoutComponent.length'),
+        selectedHostObserver: function () {
+          hostName = this.get('selectedHost');
+          if (!self.get('content')) {
+            self.set('content', {});
+          }
+          self.setProperties({
+            'content.hostName': hostName
+          });
+          if (componentsMapItem) {
+            const configs = self.get('configs');
+            const params = configs && configs.params || {};
+            if (componentsMapItem.hostPropertyName) {
+              self.set(componentsMapItem.hostPropertyName, hostName);
+            }
+            if (componentsMapItem.addPropertyName) {
+              self.set(componentsMapItem.addPropertyName, true);
+            }
+            if (configs) {
+              self.clearConfigsChanges(true);
+              self.set('isReconfigureRequired', true);
+              self.set('isConfigsLoadingInProgress', true);
+              self[componentsMapItem.configsCallbackName](configs, null, params);
+            } else {
+              self.loadComponentRelatedConfigs(componentsMapItem.configTagsCallbackName, componentsMapItem.configsCallbackName);
+            }
+          }
+        }.observes('selectedHost')
       }),
-
+      disablePrimary: Em.computed.and('controller.isReconfigureRequired', 'controller.isConfigsLoadingInProgress'),
       onPrimary: function () {
-        this.hide();
-        primary();
+        this._super();
+        if (primary) {
+          primary();
+        }
+      },
+      onSecondary: function () {
+        this._super();
+        self.clearConfigsChanges();
+      },
+      onClose: function () {
+        this._super();
+        self.clearConfigsChanges();
       }
     });
   },
 
-  /**
-   * format message for operation of adding clients
-   * @param client
-   */
-  formatClientsMessage: function (client) {
-    var displayName = Em.isNone(client.get('displayName')) ? '' : client.get('displayName');
-    var subComponentNames = client.get('subComponentNames');
-    if (subComponentNames && subComponentNames.length > 0) {
-      var dns = [];
-      subComponentNames.forEach(function (scn) {
-        dns.push(App.format.role(scn, false));
-      });
-      displayName += " (" + dns.join(", ") + ")";
-    }
-    return displayName;
+  loadComponentRelatedConfigs: function (configTagsCallbackName, configsCallbackName) {
+    this.clearConfigsChanges();
+    this.set('isReconfigureRequired', true);
+    this.set('isConfigsLoadingInProgress', true);
+    this.isServiceMetricsLoaded(() => {
+      this.loadConfigs(configTagsCallbackName, configsCallbackName);
+    });
   },
 
   /**
@@ -671,23 +894,12 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     if (!data || !data.Requests || !data.Requests.id) {
       return false;
     }
-    var self = this;
 
     if (App.get('testMode')) {
       this.mimicWorkStatusChange(params.component, App.HostComponentStatus.installing, App.HostComponentStatus.stopped);
     }
 
-    this.showBackgroundOperationsPopup(function () {
-      if (params.componentName === 'ZOOKEEPER_SERVER' || params.componentName === 'HIVE_SERVER') {
-        self.set(params.componentName === 'ZOOKEEPER_SERVER' ? 'zkRequestId' : 'hiveRequestId', data.Requests.id);
-        self.addObserver(
-          'App.router.backgroundOperationsController.serviceTimestamp',
-          self,
-          (params.componentName === 'ZOOKEEPER_SERVER' ? self.checkZkConfigs : self.checkHiveDone)
-        );
-        params.componentName === 'ZOOKEEPER_SERVER' ? self.checkZkConfigs() : self.checkHiveDone();
-      }
-    });
+    this.showBackgroundOperationsPopup();
     return true;
   },
 
@@ -700,22 +912,6 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     var hosts = [data.context];
     var operationData = {message: Em.I18n.t('hosts.host.details.setRackId')};
     hostsManagement.setRackInfo(operationData, hosts, rack);
-  },
-
-  /**
-   * Call load tags
-   * @method checkHiveDone
-   */
-  checkHiveDone: function () {
-    var bg = App.router.get('backgroundOperationsController.services').findProperty('id', this.get('hiveRequestId'));
-    if (bg && !bg.get('isRunning')) {
-      var self = this;
-      this.removeObserver('App.router.backgroundOperationsController.serviceTimestamp', this, this.checkHiveDone);
-      setTimeout(function () {
-        self.set('addHiveServer', true);
-        self.loadConfigs("loadHiveConfigs");
-      }, App.get('componentsUpdateInterval'));
-    }
   },
 
   /**
@@ -738,7 +934,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   /**
    * get Oozie database config and set databaseType
    * @param {object} data
-   * @method onLoadHiveConfigs
+   * @method onLoadOozieConfigs
    */
   onLoadOozieConfigs: function (data) {
     var configs = {};
@@ -753,17 +949,39 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   /**
    * Success callback for Storm load configs request
    * @param {object} data
+   * @param {object} opt
+   * @param {object} params
    * @method loadStormConfigs
    */
-  loadStormConfigs: function (data) {
-    App.ajax.send({
+  loadStormConfigs: function (data, opt, params) {
+    var request = App.ajax.send({
       name: 'admin.get.all_configurations',
       sender: this,
       data: {
         urlParams: '(type=storm-site&tag=' + data.Clusters.desired_configs['storm-site'].tag + ')'
       },
-      success: 'onLoadStormConfigs'
+      success: params.callback
     });
+    this.trackRequest(request);
+  },
+
+  /**
+   * Success callback for Atlas load configs request
+   * @param {object} data
+   * @param {object} opt
+   * @param {object} params
+   * @method loadAtlasConfigs
+   */
+  loadAtlasConfigs: function (data, opt, params) {
+    var request = App.ajax.send({
+      name: 'admin.get.all_configurations',
+      sender: this,
+      data: {
+        urlParams: '(type=application-properties&tag=' + data.Clusters.desired_configs['application-properties'].tag + ')'
+      },
+      success: params.callback
+    });
+    this.trackRequest(request);
   },
 
   /**
@@ -774,10 +992,12 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   updateZkConfigs: function (configs) {
     var portValue = configs['zoo.cfg'] && Em.get(configs['zoo.cfg'], 'clientPort');
     var zkPort = typeof portValue === 'undefined' ? '2181' : portValue;
+    var infraSolrZnode = configs['infra-solr-env'] ? Em.get(configs['infra-solr-env'], 'infra_solr_znode') : '/ambari-solr';
     var initializer = App.AddZooKeeperComponentsInitializer;
     var hostComponentsTopology = {
       masterComponentHosts: []
     };
+    var propertiesToChange = this.get('allPropertiesToChange');
     var masterComponents = this.bootstrapHostsMapping('ZOOKEEPER_SERVER');
     if (this.get('fromDeleteHost') || this.get('fromDeleteZkServer')) {
       this.set('fromDeleteHost', false);
@@ -786,23 +1006,42 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
       if (!Em.isNone(removedHost)) {
         Em.set(removedHost, 'isInstalled', false);
       }
+    } else if (this.get('addZooKeeperServer')) {
+      this.set('addZooKeeperServer', false);
+      masterComponents.push({
+        component: 'ZOOKEEPER_SERVER',
+        hostName: this.get('content.hostName'),
+        isInstalled: true
+      });
     }
     var dependencies = {
-      zkClientPort: zkPort
+      zkClientPort: zkPort,
+      infraSolrZnode: infraSolrZnode
     };
     hostComponentsTopology.masterComponentHosts = masterComponents;
     Em.keys(configs).forEach(function(fileName) {
       var properties = configs[fileName];
       Em.keys(properties).forEach(function(propertyName) {
-        var propertyDef = {
-          fileName: fileName,
-          name: propertyName,
-          value: properties[propertyName]
-        };
-        var configProperty = initializer.initialValue(propertyDef, hostComponentsTopology, dependencies);
+        var currentValue = properties[propertyName],
+          propertyDef = {
+            fileName: fileName,
+            name: propertyName,
+            value: currentValue
+          },
+          configProperty = initializer.initialValue(propertyDef, hostComponentsTopology, dependencies);
         initializer.updateSiteObj(configs[fileName], configProperty);
-      });
-    });
+        if (currentValue !== configs[fileName][propertyName]) {
+          var service = App.config.get('serviceByConfigTypeMap')[fileName];
+          propertiesToChange.pushObject({
+            propertyFileName: fileName,
+            propertyName: propertyName,
+            serviceDisplayName: service && service.get('displayName'),
+            initialValue: currentValue,
+            recommendedValue: propertyDef.value
+          });
+        }
+      }, this);
+    }, this);
   },
 
   /**
@@ -833,8 +1072,10 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     var nimbusHost = this.get('nimbusHost'),
       stormNimbusHosts = this.getStormNimbusHosts(),
       configs = {},
-      attributes = {};
+      attributes = {},
+      propertiesToChange = this.get('allPropertiesToChange');
 
+    this.saveLoadedConfigs(data);
     data.items.forEach(function (item) {
       configs[item.type] = item.properties;
       attributes[item.type] = item.properties_attributes || {};
@@ -842,7 +1083,19 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
 
     this.updateZkConfigs(configs);
 
-    configs['storm-site']['nimbus.seeds'] = JSON.stringify(stormNimbusHosts).replace(/"/g, "'");
+    var nimbusSeedsInit = configs['storm-site']['nimbus.seeds'],
+      nimbusSeedsRecommended = JSON.stringify(stormNimbusHosts).replace(/"/g, "'");
+    configs['storm-site']['nimbus.seeds'] = nimbusSeedsRecommended;
+    if (this.get('isReconfigureRequired') && nimbusSeedsInit !== nimbusSeedsRecommended) {
+      var service = App.config.get('serviceByConfigTypeMap')['storm-site'];
+      propertiesToChange.pushObject({
+        propertyFileName: 'storm-site',
+        propertyName: 'nimbus.seeds',
+        serviceDisplayName: service && service.get('displayName'),
+        initialValue: nimbusSeedsInit,
+        recommendedValue: nimbusSeedsRecommended
+      });
+    }
     var groups = [
       {
         properties: {
@@ -853,16 +1106,60 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         }
       }
     ];
-    this.saveConfigsBatch(groups, 'NIMBUS', nimbusHost);
+    this.setConfigsChanges(groups);
+  },
+
+  onLoadAtlasConfigs: function(data) {
+    var atlasServer = this.get('atlasServer'),
+      atlasServerHosts = this.getAtlasServerHosts(),
+      configs = {},
+      attributes = {},
+      propertiesToChange = this.get('allPropertiesToChange');
+
+    this.saveLoadedConfigs(data);
+    data.items.forEach(function (item) {
+      configs[item.type] = item.properties;
+      attributes[item.type] = item.properties_attributes || {};
+    }, this);
+
+    var atlasAddresses = configs['application-properties']['atlas.rest.address'];
+    var hostMask = atlasAddresses.split(',')[0].replace(/([https|http]*\:\/\/)(.*?)(:[0-9]+)/, '$1{hostname}$3');
+    var atlasAddressesRecommended = atlasServerHosts.map(function(hostName) {
+      return hostMask.replace('{hostname}', hostName);
+    }).join(',');
+    configs['application-properties']['atlas.rest.address'] = atlasAddressesRecommended;
+    if (this.get('isReconfigureRequired') && atlasAddresses !== atlasAddressesRecommended) {
+      var service = App.config.get('serviceByConfigTypeMap')['application-properties'];
+      propertiesToChange.pushObject({
+        propertyFileName: 'application-properties',
+        propertyName: 'atlas.rest.address',
+        serviceDisplayName: service && service.get('displayName'),
+        initialValue: atlasAddresses,
+        recommendedValue: atlasAddressesRecommended
+      });
+    }
+    var groups = [
+      {
+        properties: {
+          'application-properties': configs['application-properties']
+        },
+        properties_attributes: {
+          'application-properties': attributes['application-properties']
+        }
+      }
+    ];
+    this.setConfigsChanges(groups);
   },
 
   /**
    * Success callback for load configs request
    * @param {object} data
-   * @method loadHiveConfigs
+   * @param {object} opt
+   * @param {object} params
+   * @method loadWebHCatConfigs
    */
-  loadWebHCatConfigs: function (data) {
-    return App.ajax.send({
+  loadWebHCatConfigs: function (data, opt, params) {
+    var request = App.ajax.send({
       name: 'admin.get.all_configurations',
       sender: this,
       data: {
@@ -874,17 +1171,21 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
           '(type=core-site&tag=' + data.Clusters.desired_configs['core-site'].tag + ')'
         ].join('|')
       },
-      success: 'onLoadHiveConfigs'
+      success: params.callback
     });
+    this.trackRequest(request);
+    return request;
   },
 
   /**
    * Success callback for load configs request
    * @param {object} data
+   * @param {object} opt
+   * @param {object} params
    * @method loadHiveConfigs
    */
-  loadHiveConfigs: function (data) {
-    return App.ajax.send({
+  loadHiveConfigs: function (data, opt, params) {
+    var request = App.ajax.send({
       name: 'admin.get.all_configurations',
       sender: this,
       data: {
@@ -895,8 +1196,10 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
           '(type=core-site&tag=' + data.Clusters.desired_configs['core-site'].tag + ')'
         ].join('|')
       },
-      success: 'onLoadHiveConfigs'
+      success: params.callback
     });
+    this.trackRequest(request);
+    return request;
   },
 
   /**
@@ -907,8 +1210,6 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    * @method onLoadHiveConfigs
    */
   onLoadHiveConfigs: function (data, opt, params) {
-    var hiveMetastoreHost = this.get('hiveMetastoreHost');
-    var webhcatServerHost = this.get('webhcatServerHost');
     var port = "";
     var configs = {};
     var attributes = {};
@@ -920,11 +1221,15 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
       hiveMetastorePort: ""
     };
     var initializer = params.webHCat ? App.AddWebHCatComponentsInitializer : App.AddHiveComponentsInitializer;
+    this.saveLoadedConfigs(data);
+    this.set('configs.params', {
+      webHCat: params.webHCat
+    });
     data.items.forEach(function (item) {
       configs[item.type] = item.properties;
       attributes[item.type] = item.properties_attributes || {};
     }, this);
-
+    var propertiesToChange = this.get('allPropertiesToChange');
 
     port = configs['hive-site']['hive.metastore.uris'].match(/:[0-9]{2,4}/);
     port = port ? port[0].slice(1) : "9083";
@@ -942,15 +1247,27 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     ['hive-site', 'webhcat-site', 'hive-env', 'core-site'].forEach(function(fileName) {
       if (configs[fileName]) {
         Em.keys(configs[fileName]).forEach(function(propertyName) {
-          var propertyDef = {
-            fileName: fileName,
-            name: propertyName,
-            value: configs[fileName][propertyName]
-          };
-          configs[fileName][propertyName] = Em.get(initializer.initialValue(propertyDef, localDB, dependencies), 'value');
-        });
+          var currentValue = configs[fileName][propertyName],
+            propertyDef = {
+              fileName: fileName,
+              name: propertyName,
+              value: currentValue
+            },
+            configProperty = initializer.initialValue(propertyDef, localDB, dependencies);
+          initializer.updateSiteObj(configs[fileName], configProperty);
+          if (this.get('isReconfigureRequired') && currentValue !== configs[fileName][propertyName]) {
+            var service = App.config.get('serviceByConfigTypeMap')[fileName];
+            propertiesToChange.pushObject({
+              propertyFileName: fileName,
+              propertyName: propertyName,
+              serviceDisplayName: service && service.get('displayName'),
+              initialValue: currentValue,
+              recommendedValue: propertyDef.value
+            });
+          }
+        }, this);
       }
-    });
+    }, this);
 
     initializer.cleanup();
 
@@ -976,67 +1293,54 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         }
       }
     ];
-    var params = [groups];
-    var componentName = this.get('addHiveServer') ? 'HIVE_SERVER' : (hiveMetastoreHost ? 'HIVE_METASTORE' : 'WEBHCAT_SERVER');
-    var host = webhcatServerHost || hiveMetastoreHost;
-    params.pushObjects([componentName, host]);
-    this.saveConfigsBatch.apply(this, params);
-    this.set('addHiveServer', false);
+    this.setConfigsChanges(groups);
   },
 
   /**
    * save configs' sites in batch
    * @param groups
    * @param componentName
-   * @param host
    */
-  saveConfigsBatch: function (groups, componentName, host) {
-    groups.forEach(function (group) {
-      var desiredConfigs = [],
-        tag = 'version' + (new Date).getTime(),
-        properties = group.properties;
+  putConfigsToServer: function (groups, componentName) {
+    const dfd = $.Deferred();
+    const requests = [];
+    if (groups.length) {
+      groups.forEach(function (group) {
+        const desiredConfigs = [];
+        const properties = group.properties;
 
-      for (var site in properties) {
-        if (!properties.hasOwnProperty(site) || Em.isNone(properties[site])) continue;
-        desiredConfigs.push({
-          "type": site,
-          "tag": tag,
-          "properties": properties[site],
-          "properties_attributes": group.properties_attributes[site],
-          "service_config_version_note": Em.I18n.t('hosts.host.configs.save.note').format(App.format.role(componentName, false))
-        });
-      }
-      if (desiredConfigs.length > 0) {
-        App.ajax.send({
-          name: 'common.service.configurations',
-          sender: this,
-          data: {
-            desired_config: desiredConfigs,
-            componentName: componentName,
-            host: host
-          },
-          success: 'installHostComponent'
-        });
-      }
-      //clear hive metastore host not to send second request to install component
-      host = null;
-    }, this);
+        for (let site in properties) {
+          if (!properties.hasOwnProperty(site) || Em.isNone(properties[site])) continue;
+          desiredConfigs.push({
+            "type": site,
+            "properties": properties[site],
+            "properties_attributes": group.properties_attributes[site],
+            "service_config_version_note": Em.I18n.t('hosts.host.configs.save.note').format(App.format.role(componentName, false))
+          });
+        }
+        if (desiredConfigs.length > 0) {
+          requests.push(App.ajax.send({
+            name: 'common.service.configurations',
+            sender: this,
+            data: {
+              desired_config: desiredConfigs,
+              componentName: componentName
+            }
+          }));
+        }
+      }, this);
+      $.when(requests).done(dfd.resolve).fail(dfd.reject).then(() => {
+        // If user adding component which require config changes from Configs page then configs should be reloaded
+        if (App.router.get('location.location.hash').contains('configs')) {
+          App.router.get('mainServiceInfoConfigsController').loadStep();
+        }
+      });
+    } else {
+      dfd.resolve();
+    }
+    return dfd.promise();
   },
 
-  /**
-   * success callback for saveConfigsBatch method
-   * @param data
-   * @param opt
-   * @param params
-   */
-  installHostComponent: function (data, opt, params) {
-    if (App.router.get('location.location.hash').contains('configs')) {
-      App.router.get('mainServiceInfoConfigsController').loadStep();
-    }
-    if (params.host) {
-      this.installHostComponentCall(params.host, App.StackServiceComponent.find(params.componentName));
-    }
-  },
   /**
    * Delete Hive Metastore is performed
    * @type {bool}
@@ -1097,46 +1401,142 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   /**
    * Success callback for load configs request
    * @param {object} data
-   * @method loadHiveConfigs
+   * @param {object} opt
+   * @param {object} params
+   * @method loadRangerConfigs
    */
-  loadRangerConfigs: function (data) {
-    App.ajax.send({
+  loadRangerConfigs: function (data, opt, params) {
+    var request = App.ajax.send({
       name: 'admin.get.all_configurations',
       sender: this,
       data: {
-        urlParams: '(type=core-site&tag=' + data.Clusters.desired_configs['core-site'].tag + ')|(type=hdfs-site&tag=' + data.Clusters.desired_configs['hdfs-site'].tag + ')|(type=kms-env&tag=' + data.Clusters.desired_configs['kms-env'].tag + ')'
+        urlParams: '(type=core-site&tag=' + data.Clusters.desired_configs['core-site'].tag + ')|' +
+        '(type=hdfs-site&tag=' + data.Clusters.desired_configs['hdfs-site'].tag + ')|' +
+        '(type=kms-env&tag=' + data.Clusters.desired_configs['kms-env'].tag + ')|' +
+        '(type=kms-site&tag=' + data.Clusters.desired_configs['kms-site'].tag + ')'
       },
-      success: 'onLoadRangerConfigs'
+      success: params.callback
     });
+    this.trackRequest(request);
   },
 
   /**
    * update and save Hive hive.metastore.uris config to server
    * @param {object} data
-   * @method onLoadHiveConfigs
+   * @method onLoadRangerConfigs
    */
   onLoadRangerConfigs: function (data) {
-    var hostToInstall = this.get('rangerKMSServerHost');
-    var rkmsHosts = this.getRangerKMSServerHosts();
-    var rkmsPort = data.items.findProperty('type', 'kms-env').properties['kms_port'];
-    var coreSiteConfigs = data.items.findProperty('type', 'core-site');
-    var hdfsSiteConfigs = data.items.findProperty('type', 'hdfs-site');
-    var groups = [
-      {
-        properties: {
-          'core-site': coreSiteConfigs.properties,
-          'hdfs-site': hdfsSiteConfigs.properties
+    var hdfsProperties = [
+        {
+          type: 'core-site',
+          name: 'hadoop.security.key.provider.path'
         },
-        properties_attributes: {
-          'core-site': coreSiteConfigs.properties_attributes,
-          'hdfs-site': hdfsSiteConfigs.properties_attributes
+        {
+          type: 'hdfs-site',
+          name: 'dfs.encryption.key.provider.uri'
+        }
+      ],
+      kmsSiteProperties = [
+        {
+          name: 'hadoop.kms.cache.enable',
+          notHaValue: 'true',
+          haValue: 'false'
+        },
+        {
+          name: 'hadoop.kms.cache.timeout.ms',
+          notHaValue: '600000',
+          haValue: '0'
+        },
+        {
+          name: 'hadoop.kms.current.key.cache.timeout.ms',
+          notHaValue: '30000',
+          haValue: '0'
+        },
+        {
+          name: 'hadoop.kms.authentication.signer.secret.provider',
+          notHaValue: 'random',
+          haValue: 'zookeeper'
+        },
+        {
+          name: 'hadoop.kms.authentication.signer.secret.provider.zookeeper.auth.type',
+          notHaValue: 'kerberos',
+          haValue: 'none'
+        },
+        {
+          name: 'hadoop.kms.authentication.signer.secret.provider.zookeeper.connection.string',
+          notHaValue: '#HOSTNAME#:#PORT#,...',
+          haValue: this.getZookeeperConnectionString()
+        }
+      ],
+      rkmsHosts = this.getRangerKMSServerHosts(),
+      rkmsHostsStr = rkmsHosts.join(';'),
+      isHA = rkmsHosts.length > 1,
+      rkmsPort = data.items.findProperty('type', 'kms-env').properties['kms_port'],
+      newValue = 'kms://http@' + rkmsHostsStr + ':' + rkmsPort + '/kms',
+      coreSiteConfigs = data.items.findProperty('type', 'core-site'),
+      hdfsSiteConfigs = data.items.findProperty('type', 'hdfs-site'),
+      kmsSiteConfigs = data.items.findProperty('type', 'kms-site'),
+      groups = [
+        {
+          properties: {
+            'core-site': coreSiteConfigs.properties,
+            'hdfs-site': hdfsSiteConfigs.properties
+          },
+          properties_attributes: {
+            'core-site': coreSiteConfigs.properties_attributes,
+            'hdfs-site': hdfsSiteConfigs.properties_attributes
+          }
+        },
+        {
+          properties: {
+            'kms-site': kmsSiteConfigs.properties
+          },
+          properties_attributes: {
+            'kms-site': kmsSiteConfigs.properties_attributes
+          }
+        }
+      ],
+      propertiesToChange = this.get('allPropertiesToChange');
+
+    this.saveLoadedConfigs(data);
+
+    hdfsProperties.forEach(function (property) {
+      var typeConfigs = data.items.findProperty('type', property.type).properties,
+        currentValue = typeConfigs[property.name],
+        pattern = new RegExp('^kms:\\/\\/http@(.+):' + rkmsPort + '\\/kms$'),
+        patternMatch = currentValue && currentValue.match(pattern),
+        currentHostsList = patternMatch && patternMatch[1].split(';').sort().join(';');
+      if (currentHostsList !== rkmsHostsStr) {
+        typeConfigs[property.name] = newValue;
+        if (this.get('isReconfigureRequired')) {
+          var service = App.config.get('serviceByConfigTypeMap')[property.type];
+          propertiesToChange.pushObject({
+            propertyFileName: property.type,
+            propertyName: property.name,
+            serviceDisplayName: service && service.get('displayName'),
+            initialValue: currentValue,
+            recommendedValue: newValue,
+            saveRecommended: true
+          });
         }
       }
-    ];
+    }, this);
 
-    coreSiteConfigs.properties['hadoop.security.key.provider.path'] = 'kms://http@' + rkmsHosts.join(';') + ':' + rkmsPort + '/kms';
-    hdfsSiteConfigs.properties['dfs.encryption.key.provider.uri'] = 'kms://http@' + rkmsHosts.join(';') + ':' + rkmsPort + '/kms';
-    this.saveConfigsBatch(groups, 'RANGER_KMS_SERVER', hostToInstall);
+    kmsSiteProperties.forEach(function (property) {
+      var currentValue = kmsSiteConfigs.properties[property.name];
+      var newValue = isHA ? property.haValue : property.notHaValue;
+      kmsSiteConfigs.properties[property.name] = newValue;
+
+      propertiesToChange.pushObject({
+        propertyFileName: 'kms-site',
+        propertyName: property.name,
+        serviceDisplayName: App.Service.find().findProperty('serviceName', 'RANGER_KMS').get('displayName'),
+        initialValue: currentValue,
+        recommendedValue: newValue,
+        saveRecommended: true
+      });
+    });
+    this.setConfigsChanges(groups);
   },
 
   /**
@@ -1151,15 +1551,18 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
 
     if (!!rangerKMSServerHost) {
       rkmsHosts.push(rangerKMSServerHost);
-      this.set('rangerKMSServerHost', '');
     }
 
     if (this.get('fromDeleteHost') || this.get('deleteRangerKMSServer')) {
-      this.set('deleteRangerKMSServer', false);
-      this.set('fromDeleteHost', false);
       return rkmsHosts.without(this.get('content.hostName'));
     }
     return rkmsHosts.sort();
+  },
+
+  getZookeeperConnectionString: function () {
+    return this.getRangerKMSServerHosts().map(function (host) {
+      return host + ':2181';
+    }).join(',');
   },
 
   /**
@@ -1184,6 +1587,24 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
       return stormNimbusHosts.without(this.get('content.hostName'));
     }
     return stormNimbusHosts.sort();
+  },
+
+  getAtlasServerHosts: function () {
+    var
+      atlasServerHosts = App.HostComponent.find().filterProperty('componentName', 'ATLAS_SERVER').mapProperty('hostName'),
+      atlasServer = this.get('atlasServer');
+
+    if (!!atlasServer) {
+      atlasServerHosts.push(atlasServer);
+      this.set('atlasServer', '');
+    }
+
+    if (this.get('fromDeleteHost') || this.get('deleteAtlasServer')) {
+      this.set('deleteAtlasServer', false);
+      this.set('fromDeleteHost', false);
+      return atlasServerHosts.without(this.get('content.hostName'));
+    }
+    return atlasServerHosts.sort();
   },
 
   /**
@@ -1221,7 +1642,8 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         resource_filters: resource_filters,
         context: context
       },
-      success: 'refreshComponentConfigsSuccessCallback'
+      success: 'refreshComponentConfigsSuccessCallback',
+      showLoadingPopup: true
     });
   },
 
@@ -1234,47 +1656,22 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   },
 
   /**
-   * Update storm config
-   * @method updateStormConfigs
-   */
-  updateStormConfigs: function () {
-    if (App.Service.find('STORM').get('isLoaded') && App.get('isHadoop23Stack')) {
-      this.loadConfigs("loadStormConfigs");
-    }
-  },
-
-  /**
-   * Load tags
-   * @method checkZkConfigs
-   */
-  checkZkConfigs: function () {
-    var bg = App.router.get('backgroundOperationsController.services').findProperty('id', this.get('zkRequestId'));
-    if (bg && !bg.get('isRunning')) {
-      var self = this;
-      this.removeObserver('App.router.backgroundOperationsController.serviceTimestamp', this, this.checkZkConfigs);
-      setTimeout(function () {
-        self.updateStormConfigs();
-        var callback =   function () {
-          self.loadConfigs();
-        };
-        self.isServiceMetricsLoaded(callback);
-      }, App.get('componentsUpdateInterval'));
-    }
-  },
-
-  /**
    * Load configs
    * This function when used without a callback should be always used from successcallback function of the promise `App.router.get('mainController').isLoading.call(App.router.get('clusterController'), 'isServiceContentFullyLoaded').done(promise)`
    * This is required to make sure that service metrics API determining the HA state of components is loaded
    * @method loadConfigs
    */
-  loadConfigs: function (callback) {
-    App.ajax.send({
+  loadConfigs: function (configTagsCallback, configsCallback) {
+    var request = App.ajax.send({
       name: 'config.tags',
       sender: this,
-      success: callback ? callback : 'loadConfigsSuccessCallback',
+      data: {
+        callback: configsCallback
+      },
+      success: configTagsCallback,
       error: 'onLoadConfigsErrorCallback'
     });
+    this.trackRequest(request);
   },
 
   /**
@@ -1288,21 +1685,25 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   /**
    * Success callback for load configs request
    * @param {object} data
-   * @method adConfigsSuccessCallback
+   * @param {object} opt
+   * @param {object} params
+   * @method loadZookeeperConfigs
    */
-  loadConfigsSuccessCallback: function (data) {
-    var urlParams = this.constructConfigUrlParams(data);
+  loadZookeeperConfigs: function (data, opt, params) {
+    var urlParams = this.constructZookeeperConfigUrlParams(data);
     if (urlParams.length > 0) {
-      App.ajax.send({
+      var request = App.ajax.send({
         name: 'reassign.load_configs',
         sender: this,
         data: {
           urlParams: urlParams.join('|')
         },
-        success: 'saveZkConfigs'
+        success: params.callback
       });
+      this.trackRequest(request);
       return true;
     }
+    this.set('isConfigsLoadingInProgress', false);
     return false;
   },
 
@@ -1311,32 +1712,21 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    * @param data {Object}
    * @return {Array}
    */
-  constructConfigUrlParams: function (data) {
+  constructZookeeperConfigUrlParams: function (data) {
     var urlParams = [];
     var services = App.Service.find();
     if (App.get('isHaEnabled')) {
       urlParams.push('(type=core-site&tag=' + data.Clusters.desired_configs['core-site'].tag + ')');
     }
-    if (services.someProperty('serviceName', 'HBASE')) {
-      urlParams.push('(type=hbase-site&tag=' + data.Clusters.desired_configs['hbase-site'].tag + ')');
-    }
-    if (services.someProperty('serviceName', 'HIVE')) {
-      urlParams.push('(type=webhcat-site&tag=' + data.Clusters.desired_configs['webhcat-site'].tag + ')');
-      urlParams.push('(type=hive-site&tag=' + data.Clusters.desired_configs['hive-site'].tag + ')');
-    }
-    if (services.someProperty('serviceName', 'STORM')) {
-      urlParams.push('(type=storm-site&tag=' + data.Clusters.desired_configs['storm-site'].tag + ')');
-    }
-    if (services.someProperty('serviceName', 'YARN')) {
-      urlParams.push('(type=yarn-site&tag=' + data.Clusters.desired_configs['yarn-site'].tag + ')');
-      urlParams.push('(type=zoo.cfg&tag=' + data.Clusters.desired_configs['zoo.cfg'].tag + ')');
-    }
-    if (services.someProperty('serviceName', 'ACCUMULO')) {
-      urlParams.push('(type=accumulo-site&tag=' + data.Clusters.desired_configs['accumulo-site'].tag + ')');
-    }
-    if (services.someProperty('serviceName', 'KAFKA')) {
-      urlParams.push('(type=kafka-broker&tag=' + data.Clusters.desired_configs['kafka-broker'].tag + ')');
-    }
+    this.get('zooKeeperRelatedServices').forEach(function (service) {
+      if (services.someProperty('serviceName', service.serviceName)) {
+        service.typesToLoad.forEach(function (type) {
+          if (data.Clusters.desired_configs[type]) {
+            urlParams.push('(type=' + type + '&tag=' + data.Clusters.desired_configs[type].tag + ')');
+          }
+        });
+      }
+    });
     return urlParams;
   },
 
@@ -1348,74 +1738,29 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
   saveZkConfigs: function (data) {
     var configs = {};
     var attributes = {};
+    this.saveLoadedConfigs(data);
     data.items.forEach(function (item) {
       configs[item.type] = item.properties;
       attributes[item.type] = item.properties_attributes || {};
     }, this);
 
     this.updateZkConfigs(configs);
-    var groups = [
-      {
-        properties: {
-          'hive-site': configs['hive-site'],
-          'webhcat-site': configs['webhcat-site']
-        },
-        properties_attributes: {
-          'hive-site': attributes['hive-site'],
-          'webhcat-site': attributes['webhcat-site']
-        }
-      }
-    ];
+    var groups = [];
     var installedServiceNames = App.Service.find().mapProperty('serviceName');
-    if (installedServiceNames.contains('YARN')) {
-      groups.push(
-        {
-          properties: {
-            'yarn-site': configs['yarn-site']
-          },
-          properties_attributes: {
-            'yarn-site': attributes['yarn-site']
-          }
-        }
-      );
-    }
-    if (installedServiceNames.contains('HBASE')) {
-      groups.push(
-        {
-          properties: {
-            'hbase-site': configs['hbase-site']
-          },
-          properties_attributes: {
-            'hbase-site': attributes['hbase-site']
-          }
-        }
-      );
-    }
-    if (installedServiceNames.contains('ACCUMULO')) {
-      groups.push(
-        {
-          properties: {
-            'accumulo-site': configs['accumulo-site']
-          },
-          properties_attributes: {
-            'accumulo-site': attributes['accumulo-site']
-          }
-        }
-      );
-    }
-    if (installedServiceNames.contains('KAFKA')) {
-      groups.push(
-        {
-          properties: {
-            'kafka-broker': configs['kafka-broker']
-          },
-          properties_attributes: {
-            'kafka-broker': attributes['kafka-broker']
-          }
-        }
-      );
-    }
-    this.saveConfigsBatch(groups, 'ZOOKEEPER_SERVER');
+    this.get('zooKeeperRelatedServices').forEach(function (service) {
+      if (installedServiceNames.contains(service.serviceName)) {
+        var group = {
+          properties: {},
+          properties_attributes: {}
+        };
+        service.typesToSave.forEach(function (type) {
+          group.properties[type] = configs[type];
+          group.properties_attributes[type] = attributes[type];
+        });
+        groups.push(group);
+      }
+    });
+    this.setConfigsChanges(groups);
   },
 
   /**
@@ -1468,7 +1813,8 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
                 }
               },
               success: 'installComponentSuccessCallback',
-              error: 'ajaxErrorCallback'
+              error: 'ajaxErrorCallback',
+              showLoadingPopup: true
             });
           })
         });
@@ -1499,7 +1845,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     var self = this;
     return App.showConfirmationPopup(function () {
       self.runDecommission.call(self, self.get('content.hostName'), component.get('service.serviceName'));
-    });
+    }, Em.I18n.t('question.sure.decommission').format(component.get('service.serviceName')));
   },
   /**
    * identify correct component to run decommission on them by service name,
@@ -1529,7 +1875,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     var self = this;
     return App.showConfirmationPopup(function () {
       self.runRecommission.call(self, self.get('content.hostName'), component.get('service.serviceName'));
-    });
+    }, Em.I18n.t('question.sure.recommission').format(component.get('service.serviceName')));
   },
   /**
    * identify correct component to run recommission on them by service name,
@@ -1574,7 +1920,8 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         slaveType: slaveType
       },
       success: 'decommissionSuccessCallback',
-      error: 'decommissionErrorCallback'
+      error: 'decommissionErrorCallback',
+      showLoadingPopup: true
     });
   },
 
@@ -1672,7 +2019,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
       {
         "order_id": 1,
         "type": "POST",
-        "uri": App.get('apiPrefix') + "/clusters/" + App.get('clusterName') + "/requests",
+        "uri": "/clusters/" + App.get('clusterName') + "/requests",
         "RequestBodyInfo": {
           "RequestInfo": {
             "context": Em.I18n.t('hosts.host.regionserver.decommission.batch1'),
@@ -1700,7 +2047,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
       batches.push({
         "order_id": id,
         "type": "PUT",
-        "uri": App.get('apiPrefix') + "/clusters/" + App.get('clusterName') + "/hosts/" + hAray[i] + "/host_components/" + slaveType,
+        "uri": "/clusters/" + App.get('clusterName') + "/hosts/" + hAray[i] + "/host_components/" + slaveType,
         "RequestBodyInfo": {
           "RequestInfo": {
             context: Em.I18n.t('hosts.host.regionserver.decommission.batch2'),
@@ -1724,7 +2071,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     batches.push({
       "order_id": id,
       "type": "POST",
-      "uri": App.get('apiPrefix') + "/clusters/" + App.get('clusterName') + "/requests",
+      "uri": "/clusters/" + App.get('clusterName') + "/requests",
       "RequestBodyInfo": {
         "RequestInfo": {
           "context": Em.I18n.t('hosts.host.regionserver.decommission.batch3'),
@@ -1757,7 +2104,8 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         batches: batches
       },
       success: 'decommissionSuccessCallback',
-      error: 'decommissionErrorCallback'
+      error: 'decommissionErrorCallback',
+      showLoadingPopup: true
     });
   },
 
@@ -1810,7 +2158,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
       {
         "order_id": 1,
         "type": "POST",
-        "uri": App.apiPrefix + "/clusters/" + App.get('clusterName') + "/requests",
+        "uri": "/clusters/" + App.get('clusterName') + "/requests",
         "RequestBodyInfo": {
           "RequestInfo": {
             "context": context_1,
@@ -1835,7 +2183,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
       batches.push({
         "order_id": id,
         "type": "PUT",
-        "uri": App.get('apiPrefix') + "/clusters/" + App.get('clusterName') + "/hosts/" + hAray[i] + "/host_components/" + slaveType,
+        "uri": "/clusters/" + App.get('clusterName') + "/hosts/" + hAray[i] + "/host_components/" + slaveType,
         "RequestBodyInfo": {
           "RequestInfo": {
             context: startContext,
@@ -1864,7 +2212,8 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         batches: batches
       },
       success: 'decommissionSuccessCallback',
-      error: 'decommissionErrorCallback'
+      error: 'decommissionErrorCallback',
+      showLoadingPopup: true
     });
   },
 
@@ -1892,6 +2241,12 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         break;
       case "setRackId":
         this.setRackIdForHost();
+        break;
+      case "checkHost":
+        this.runHostCheckConfirmation();
+        break;
+      case "regenerateKeytabFileOperations":
+        this.regenerateKeytabFileOperations();
         break;
     }
   },
@@ -2007,7 +2362,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     if (components && components.get('length')) {
       return App.showConfirmationPopup(function () {
         self.sendComponentCommand(components, Em.I18n.t('hosts.host.maintainance.startAllComponents.context'), App.HostComponentStatus.started);
-      });
+      }, Em.I18n.t('question.sure.startAll'));
     }
   },
 
@@ -2025,12 +2380,12 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         this.checkNnLastCheckpointTime(function () {
           App.showConfirmationPopup(function () {
             self.sendComponentCommand(components, Em.I18n.t('hosts.host.maintainance.stopAllComponents.context'), App.HostComponentStatus.stopped);
-          });
+          }, Em.I18n.t('question.sure.stopAll'));
         });
       } else {
         return App.showConfirmationPopup(function () {
           self.sendComponentCommand(components, Em.I18n.t('hosts.host.maintainance.stopAllComponents.context'), App.HostComponentStatus.stopped);
-        });
+        }, Em.I18n.t('question.sure.stopAll'));
       }
     }
   },
@@ -2049,12 +2404,12 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         this.checkNnLastCheckpointTime(function () {
           App.showConfirmationPopup(function () {
             batchUtils.restartHostComponents(components, Em.I18n.t('rollingrestart.context.allOnSelectedHost').format(self.get('content.hostName')), "HOST");
-          });
+          }, Em.I18n.t('question.sure.restartAll'));
         });
       } else {
         return App.showConfirmationPopup(function () {
           batchUtils.restartHostComponents(components, Em.I18n.t('rollingrestart.context.allOnSelectedHost').format(self.get('content.hostName')), "HOST");
-        });
+        }, Em.I18n.t('question.sure.restartAll'));
       }
     }
   },
@@ -2065,35 +2420,47 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    *  - flag, that indicate whether ZooKeeper Server is installed
    * @return {Object}
    */
-  getHostComponentsInfo: function () {
-    var componentsOnHost = this.get('content.hostComponents');
-    var allComponents = App.HostComponent.find();
-    var stoppedStates = [App.HostComponentStatus.stopped,
+  getHostComponentsInfo: function (hostComponents) {
+    const componentsOnHost = hostComponents || this.get('content.hostComponents');
+    const stoppedStates = [App.HostComponentStatus.stopped,
       App.HostComponentStatus.install_failed,
       App.HostComponentStatus.upgrade_failed,
       App.HostComponentStatus.init,
       App.HostComponentStatus.unknown];
-    var container = {
-      zkServerInstalled: false,
+    const container = {
+      isReconfigureRequired: false,
       lastComponents: [],
       masterComponents: [],
+      nonAddableMasterComponents: [],
+      lastMasterComponents: [],
       runningComponents: [],
       nonDeletableComponents: [],
       unknownComponents: [],
       toDecommissionComponents: []
     };
-    var self = this;
+    const addDeleteComponentsMap = this.get('addDeleteComponentsMap');
+
     if (componentsOnHost && componentsOnHost.get('length') > 0) {
       componentsOnHost.forEach(function (cInstance) {
-        if (cInstance.get('componentName') === 'ZOOKEEPER_SERVER') {
-          container.zkServerInstalled = true;
+        if (addDeleteComponentsMap[cInstance.get('componentName')]) {
+          container.isReconfigureRequired = true;
         }
-        if (allComponents.filterProperty('componentName', cInstance.get('componentName')).get('length') === 1) {
+        let isLastComponent = false;
+        if (this.getTotalComponent(cInstance) === 1) {
           container.lastComponents.push(cInstance.get('displayName'));
+          isLastComponent = true;
         }
-        var workStatus = cInstance.get('workStatus');
-        if (cInstance.get('isMaster') && !cInstance.get('isDeletable')) {
-          container.masterComponents.push(cInstance.get('displayName'));
+        const workStatus = cInstance.get('workStatus');
+
+        if (cInstance.get('isMaster')) {
+          const displayName = cInstance.get('displayName');
+          container.masterComponents.push(displayName);
+          if (!App.StackServiceComponent.find(cInstance.get('componentName')).get('isMasterAddableInstallerWizard'))  {
+            container.nonAddableMasterComponents.push(displayName);
+          }
+          if (isLastComponent) {
+            container.lastMasterComponents.push(displayName);
+          }
         }
         if (stoppedStates.indexOf(workStatus) < 0) {
           container.runningComponents.push(cInstance.get('displayName'));
@@ -2107,36 +2474,186 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         if (App.get('components.decommissionAllowed').contains(cInstance.get('componentName')) && !cInstance.get('view.isComponentRecommissionAvailable')) {
           container.toDecommissionComponents.push(cInstance.get('displayName'));
         }
-      });
+      }, this);
     }
     return container;
   },
+
+  /**
+   * Run host check confirmation
+   * @method runHostCheckConfirmation
+   */
+  runHostCheckConfirmation: function () {
+    var self = this;
+    var popupInfo = Em.I18n.t('hosts.checkHost.popup').format(this.get('content.hostName'));
+
+    return App.showConfirmationPopup(function () {
+      self.runHostCheck();
+    }, popupInfo);
+  },
+
+  getDataForHostCheck: function () {
+    var hostName = this.get('content.hostName');
+    var jdk_location = App.router.get('clusterController.ambariProperties.jdk_location');
+    var RequestInfo = {
+      "action": "check_host",
+      "context": "Check host",
+      "parameters": {
+        "hosts" : hostName,
+        "check_execute_list": "last_agent_env_check,installed_packages,existing_repos,transparentHugePage",
+        "jdk_location" : jdk_location,
+        "threshold": "20"
+      }
+    };
+
+    return {
+      RequestInfo: RequestInfo,
+      resource_filters: {"hosts": hostName}
+    };
+  },
+
+  /**
+   * Callback for runHostCheckConfirmation
+   * @method runHostCheck
+   */
+  runHostCheck: function () {
+    var dataForCheckHostRequest = this.getDataForHostCheck();
+
+    this.setProperties({
+      stopChecking: false,
+      checkHostFinished: false,
+      isRerun: false
+    });
+    this.setBootHostsProp();
+    this.showHostWarningsPopup();
+    this.requestToPerformHostCheck(dataForCheckHostRequest);
+  },
+
+  /**
+   * Shape controller's bootHosts property needed to host check
+   * @method setBootHostsProp
+   */
+  setBootHostsProp: function () {
+    var host = this.get('content');
+    var bootHosts = [];
+
+    host.name = host.get('hostName');
+    bootHosts.push(host);
+
+    this.set('bootHosts', bootHosts);
+  },
+
+  /**
+   * Open popup that contain hosts' warnings
+   * @return {App.ModalPopup}
+   * @method showHostWarningsPopup
+   */
+  showHostWarningsPopup: function () {
+    var self = this;
+
+    return App.ModalPopup.show({
+
+      header: Em.I18n.t('installer.step3.warnings.popup.header'),
+
+      secondary: Em.I18n.t('installer.step3.hostWarningsPopup.rerunChecks'),
+
+      primary: Em.I18n.t('common.close'),
+
+      autoHeight: false,
+
+      onPrimary: function () {
+        self.set('checksUpdateStatus', null);
+        this.hide();
+      },
+
+      onClose: function () {
+        self.set('checksUpdateStatus', null);
+        this.hide();
+      },
+
+      onSecondary: function () {
+        self.set('checkHostFinished', false);
+        self.rerunChecks();
+      },
+
+      didInsertElement: function () {
+        this._super();
+        this.fitHeight();
+      },
+
+      footerClass: App.WizardStep3HostWarningPopupFooter.reopen({
+        footerControllerBinding: 'App.router.mainHostDetailsController',
+        checkHostFinished: function () {
+          return this.get('footerController.checkHostFinished');
+        }.property('footerController.checkHostFinished')
+      }),
+
+      bodyClass: App.WizardStep3HostWarningPopupBody.reopen({
+        bodyControllerBinding: 'App.router.mainHostDetailsController',
+        checkHostFinished: function () {
+          return this.get('bodyController.checkHostFinished');
+        }.property('bodyController.checkHostFinished')
+      })
+    });
+  },
+
 
   /**
    * Deletion of hosts not supported for this version
    * @method validateAndDeleteHost
    */
   validateAndDeleteHost: function () {
-    var container = this.getHostComponentsInfo();
+    const container = this.getHostComponentsInfo();
 
-    if (container.masterComponents.length > 0) {
-      this.raiseDeleteComponentsError(container, 'masterList');
-      return;
-    } else if (container.nonDeletableComponents.length > 0) {
+    if (container.nonDeletableComponents.length > 0) {
       this.raiseDeleteComponentsError(container, 'nonDeletableList');
+      return;
+    } else if (container.nonAddableMasterComponents.length > 0) {
+      this.raiseDeleteComponentsError(container, 'masterList');
       return;
     } else if (container.runningComponents.length > 0) {
       this.raiseDeleteComponentsError(container, 'runningList');
       return;
+    } else if(container.lastMasterComponents.length > 0) {
+      this.raiseDeleteComponentsError(container, 'lastMasterList');
+      return;
     }
-    if (container.zkServerInstalled) {
-      var self = this;
-      return App.showConfirmationPopup(function () {
-        self.confirmDeleteHost(container);
-      }, Em.I18n.t('hosts.host.addComponent.deleteHostWithZooKeeper'));
+
+    this.set('fromDeleteHost', true);
+
+    if (container.isReconfigureRequired) {
+      this.reconfigureAndDeleteHost(container);
     } else {
       this.confirmDeleteHost(container);
     }
+  },
+
+  /**
+   *
+   * @param {object} container
+   */
+  reconfigureAndDeleteHost: function(container) {
+    const addDeleteComponentsMap = this.get('addDeleteComponentsMap');
+    const hostName = this.get('content.hostName');
+    const reconfiguredComponents = [];
+    const componentStub = Em.Object.create();
+
+    this.get('content.hostComponents').forEach((component) => {
+      const componentsMapItem = addDeleteComponentsMap[component.get('componentName')];
+      if (componentsMapItem) {
+        reconfiguredComponents.push(component.get('displayName'));
+        if (componentsMapItem.hostPropertyName) {
+          this.set(componentsMapItem.hostPropertyName, hostName);
+        }
+        if (componentsMapItem.addPropertyName) {
+          this.set(componentsMapItem.addPropertyName, true);
+        }
+        this.loadComponentRelatedConfigs(componentsMapItem.configTagsCallbackName, componentsMapItem.configsCallbackName);
+      }
+    });
+    this.showReconfigurationPopupPreDelete(componentStub, () => {
+      this.confirmDeleteHost(container);
+    }, Em.I18n.t('hosts.host.delete.componentsRequireReconfigure').format(reconfiguredComponents.join(', ')));
   },
 
   /**
@@ -2149,17 +2666,19 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     App.ModalPopup.show({
       header: Em.I18n.t('hosts.cant.do.popup.title'),
       type: type,
-      showBodyEnd: Em.computed.existsIn('type', ['runningList', 'masterList']),
+      showBodyEnd: Em.computed.existsIn('type', ['runningList', 'masterList', 'lastMasterList']),
       container: container,
       components: function(){
         var container = this.get('container');
         switch (this.get('type')) {
           case 'masterList':
-            return container.masterComponents;
+            return container.nonAddableMasterComponents;
           case 'nonDeletableList':
             return container.nonDeletableComponents;
           case 'runningList':
             return container.runningComponents;
+          case 'lastMasterList':
+            return container.lastMasterComponents;
         }
       }.property('type'),
       componentsStr: function () {
@@ -2217,80 +2736,74 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         templateName: require('templates/main/host/details/doDeleteHostPopup')
       }),
       onPrimary: function () {
-        var popup = this;
-        var completeCallback = function () {
-          var remainingHosts = App.db.getSelectedHosts('mainHostController').removeObject(self.get('content.hostName'));
-          App.db.setSelectedHosts('mainHostController', remainingHosts);
-          popup.hide();
-        };
-        self.doDeleteHost(completeCallback);
+        this.hide();
+        self.doDeleteHost();
       }
     });
   },
 
   /**
    * send DELETE calls to components of host and after delete host itself
-   * @param completeCallback
    * @method doDeleteHost
    */
-  doDeleteHost: function (completeCallback) {
-    this.set('fromDeleteHost', true);
-    var allComponents = this.get('content.hostComponents');
-    var deleteError = null;
-    var dfd = $.Deferred();
-    var self = this;
+  doDeleteHost: function () {
+    const allComponents = this.get('content.hostComponents');
+    const addDeleteComponentsMap = this.get('addDeleteComponentsMap');
+    const deleteRequests = [];
+    let deleteError = null;
+    const dfd = $.Deferred();
 
     if (allComponents.get('length') > 0) {
-      allComponents.forEach(function (component, index) {
-        var length = allComponents.get('length');
-        if (!deleteError) {
-          this._doDeleteHostComponent(component, function () {
-            deleteError = self.get('_deletedHostComponentResult');
-            if (index == length - 1) {
-              dfd.resolve();
-            }
-          });
-        }
+      allComponents.forEach(function (component) {
+        deleteRequests.push(this._doDeleteHostComponent(component.get('componentName')));
       }, this);
+      $.when(deleteRequests).done(() => {
+        if (this.get('isReconfigureRequired')) {
+          const reconfiguredComponents = allComponents
+            .filter((component) => addDeleteComponentsMap[component.get('componentName')])
+            .mapProperty('displayName').join(', ');
+          this.applyConfigsCustomization();
+          this.putConfigsToServer(this.get('groupedPropertiesToChange'), reconfiguredComponents);
+          this.clearConfigsChanges();
+        }
+        this.deleteHostCall();
+      }).fail(() => {
+        deleteError = this.get('_deletedHostComponentError');
+        deleteError.xhr.responseText = "{\"message\": \"" + deleteError.xhr.statusText + "\"}";
+        App.ajax.defaultErrorHandler(deleteError.xhr, deleteError.url, deleteError.type, deleteError.xhr.status);
+      }).always(dfd.resolve);
     } else {
       dfd.resolve();
     }
-    dfd.done(function () {
-      if (!deleteError) {
-        App.ajax.send({
-          name: 'common.delete.host',
-          sender: self,
-          data: {
-            hostName: self.get('content.hostName')
-          },
-          callback: completeCallback,
-          success: 'deleteHostSuccessCallback',
-          error: 'deleteHostErrorCallback'
-        });
-      }
-      else {
-        completeCallback();
-        deleteError.xhr.responseText = "{\"message\": \"" + deleteError.xhr.statusText + "\"}";
-        App.ajax.defaultErrorHandler(deleteError.xhr, deleteError.url, deleteError.type, deleteError.xhr.status);
-      }
+    return dfd.promise();
+  },
+
+  deleteHostCall: function() {
+    return App.ajax.send({
+      name: 'common.delete.host',
+      sender: this,
+      data: {
+        hostName: this.get('content.hostName')
+      },
+      success: 'deleteHostCallSuccessCallback',
+      error: 'deleteHostCallErrorCallback',
+      showLoadingPopup: true
     });
   },
-  deleteHostSuccessCallback: function (data, rq, requestBody) {
-    var self = this;
+
+  deleteHostCallSuccessCallback: function (data, rq, requestBody) {
     App.router.get('updateController').updateHost(function () {
       App.router.transitionTo('hosts.index');
     });
-    if (!!(requestBody && requestBody.hostName))
+    if (!!(requestBody && requestBody.hostName)) {
+      var remainingHosts = App.db.getSelectedHosts().removeObject(requestBody.hostName);
+      App.db.setSelectedHosts(remainingHosts);
       App.hostsMapper.deleteRecord(App.Host.find().findProperty('hostName', requestBody.hostName));
+    }
     App.router.get('clusterController').getAllHostNames();
   },
-  deleteHostErrorCallback: function (xhr, textStatus, errorThrown, opt) {
+  deleteHostCallErrorCallback: function (xhr, textStatus, errorThrown, opt) {
     xhr.responseText = "{\"message\": \"" + xhr.statusText + "\"}";
-    var self = this;
-    var callback =   function () {
-      self.loadConfigs();
-    };
-    self.isServiceMetricsLoaded(callback);
     App.ajax.defaultErrorHandler(xhr, opt.url, 'DELETE', xhr.status);
   },
 
@@ -2322,16 +2835,16 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    * @method moveComponent
    */
   moveComponent: function (event) {
+    var component = event.context;
     if ($(event.target).closest('li').hasClass('disabled')) {
       return;
     }
     return App.showConfirmationPopup(function () {
-      var component = event.context;
       var reassignMasterController = App.router.get('reassignMasterController');
       reassignMasterController.saveComponentToReassign(component);
       reassignMasterController.setCurrentStep('1');
       App.router.transitionTo('reassign');
-    });
+    }, Em.I18n.t('question.sure.move').format(component.get('displayName')));
   },
 
   /**
@@ -2345,7 +2858,7 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     if (components.get('length') > 0) {
       return App.showConfirmationPopup(function () {
         batchUtils.restartHostComponents(components, Em.I18n.t('rollingrestart.context.allClientsOnSelectedHost').format(self.get('content.hostName')), "HOST");
-      });
+      }, Em.I18n.t('question.sure.refresh').format(self.get('content.hostName')) );
     }
   },
 
@@ -2356,14 +2869,25 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     message = Em.I18n.t('passiveState.turn' + state.toCapital() + 'For').format(event.context.get('displayName'));
     return App.showConfirmationPopup(function () {
       self.updateComponentPassiveState(event.context, state, message);
-    });
+    }, Em.I18n.t('question.sure.maintenance').format(event.context.get('displayName')) );
   },
 
   downloadClientConfigs: function (event) {
     this.downloadClientConfigsCall({
       hostName: event.context.get('hostName'),
       componentName: event.context.get('componentName'),
-      displayName: event.context.get('displayName')
+      resourceType: this.resourceTypeEnum.HOST_COMPONENT
+    });
+  },
+
+  /**
+   *  This controller action is called from the template when user clicks to download configs for "All Clients On Host"
+   */
+  downloadAllClientConfigs: function () {
+    var self = this;
+    this.downloadClientConfigsCall({
+      hostName: self.get('content.hostName'),
+      resourceType: this.resourceTypeEnum.HOST
     });
   },
 
@@ -2408,9 +2932,11 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
             }
           };
           if (clientsToAdd.length) {
-            var message = stringUtils.getFormattedStringFromArray(clientsToAdd.mapProperty('displayName'));
-            var isManualKerberos = App.get('router.mainAdminKerberosController.isManualKerberos');
-            self.showAddComponentPopup(message, isManualKerberos, function () {
+            var message = stringUtils.getFormattedStringFromArray(clientsToAdd.mapProperty('displayName')),
+              componentObject = Em.Object.create({
+                displayName: message
+              });
+            self.showAddComponentPopup(componentObject, self.get('content.hostName'), function () {
               sendInstallCommand();
               clientsToAdd.forEach(function (component) {
                 self.installHostComponentCall(self.get('content.hostName'), component);
@@ -2442,9 +2968,6 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
     opt = opt || {};
     opt.scope = opt.scope || '*';
     var installedComponents;
-    var dependencies = App.StackServiceComponent.find(componentName).get('dependencies');
-    dependencies = opt.scope === '*' ? dependencies : dependencies.filterProperty('scope', opt.scope);
-    if (dependencies.length == 0) return [];
     switch (opt.scope) {
       case 'host':
         Em.assert("You should pass at least `hostName` or `installedComponents` to options.", opt.hostName || opt.installedComponents);
@@ -2455,9 +2978,8 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
         installedComponents = opt.installedComponents || App.HostComponent.find().mapProperty('componentName').uniq();
         break;
     }
-    return dependencies.filter(function (dependency) {
-      return !installedComponents.contains(dependency.componentName);
-    }).mapProperty('componentName');
+    var component = App.StackServiceComponent.find(componentName);
+    return component.missingDependencies(installedComponents, opt);
   },
 
   /**
@@ -2510,5 +3032,204 @@ App.MainHostDetailsController = Em.Controller.extend(App.SupportClientConfigsDow
    */
   isServiceMetricsLoaded: function(callback) {
     App.router.get('mainController').isLoading.call(App.router.get('clusterController'), 'isServiceContentFullyLoaded').done(callback);
-  }
+  },
+
+  setConfigsChangesForDisplay: function () {
+    if (App.get('router.clusterController.isConfigsPropertiesLoaded')) {
+      this.get('allPropertiesToChange').forEach(function (property) {
+        var stackProperty = App.configsCollection.getConfigByName(property.propertyName, property.propertyFileName);
+        if (stackProperty && (!stackProperty.isEditable || !stackProperty.isReconfigurable)) {
+          this.get('requiredPropertiesToChange').pushObject(property);
+        } else {
+          Em.set(property, 'saveRecommended', true);
+          this.get('recommendedPropertiesToChange').pushObject(property);
+        }
+      }, this);
+      this.set('isConfigsLoadingInProgress', false);
+      this.removeObserver('App.router.clusterController.isConfigsPropertiesLoaded', this, 'setConfigsChangesForDisplay');
+    }
+  },
+
+  setConfigsChanges: function (groups) {
+    this.get('groupedPropertiesToChange').pushObjects(groups);
+    if (this.get('allPropertiesToChange.length')) {
+      if (App.get('router.clusterController.isConfigsPropertiesLoaded')) {
+        this.setConfigsChangesForDisplay();
+      } else {
+        this.addObserver('App.router.clusterController.isConfigsPropertiesLoaded', this, 'setConfigsChangesForDisplay');
+      }
+    } else {
+      this.set('isConfigsLoadingInProgress', false);
+    }
+  },
+  
+  recoverHost: function() {
+    var components = this.get('content.hostComponents');
+    var hostName = this.get('content.publicHostName');
+    var self = this;
+    var batches = [
+      {
+        "order_id": 1,
+        "type": "PUT",
+        "uri": "/clusters/" + App.get('clusterName') + "/hosts/" + hostName + "/host_components",
+        "RequestBodyInfo": {
+          "RequestInfo": {
+            context: Em.I18n.t('hosts.host.recover.initAllComponents.context'),
+            operation_level: {
+              level: "HOST",
+              cluster_name: App.get('clusterName'),
+              host_name: hostName
+            },
+            query: "HostRoles/component_name.in(" + components.mapProperty('componentName').join(',') + ")"
+          },
+          "Body": {
+            HostRoles: {
+              state: "INIT"
+            }
+          }
+        }
+    }];
+    batches.push(
+      {
+        "order_id": 2,
+        "type": "PUT",
+        "uri": "/clusters/" + App.get('clusterName') + "/hosts/" + hostName + "/host_components",
+        "RequestBodyInfo": {
+          "RequestInfo": {
+            context: Em.I18n.t('hosts.host.recover.installAllComponents.context'),
+            operation_level: {
+              level: "HOST",
+              cluster_name: App.get('clusterName'),
+              host_name: hostName
+            },
+            query: "HostRoles/component_name.in(" + components.mapProperty('componentName').join(',') + ")"
+          },
+          "Body": {
+            HostRoles: {
+              state: "INSTALLED"
+            }
+          }
+        }
+    });
+
+    if(App.get('isKerberosEnabled')) {
+      batches.push({
+        "order_id": 3,
+        "type": "PUT",
+        "uri": "/clusters/" + App.get('clusterName'),
+        "RequestBodyInfo": {
+          "RequestInfo": {
+            context: Em.I18n.t('hosts.host.recover.regenerateKeytabs.context'),
+            query: "regenerate_keytabs=all&regenerate_hosts=" + hostName + "&ignore_config_updates=true",
+          },
+          "Body": {
+            Clusters: {
+             security_type: "KERBEROS"
+            }
+          }
+        }
+      });
+    }
+    App.get('router.mainAdminKerberosController').getSecurityType(function () {
+      App.get('router.mainAdminKerberosController').getKDCSessionState(function () {
+        self._doRecoverHost(batches);
+      });
+    });
+  },
+
+  _doRecoverHost: function (batches) {
+    App.ajax.send ({
+      name: 'common.batch.request_schedules',
+      sender: this,
+      data: {
+        intervalTimeSeconds: 1,
+        tolerateSize: 0,
+        batches: batches
+      },
+      success:'recoverHostSuccessCallback',
+      showLoadingPopup: true
+    });
+  },
+
+  recoverHostSuccessCallback: function (data) {
+    if (data && (data.Requests || data.resources[0].RequestSchedule)) {
+      this.showBackgroundOperationsPopup();
+      return true;
+    } else {
+      return false;
+    }
+  },
+
+  recoverHostDisabled: function() {
+
+    var isDisabled = false;
+    var allowedStates = [App.HostComponentStatus.stopped, App.HostComponentStatus.install_failed, App.HostComponentStatus.init];
+    this.get('content.hostComponents').forEach(function (component) {
+      isDisabled = isDisabled ? true : !allowedStates.contains(component.get('workStatus'));
+    });
+    return isDisabled;
+  }.property('content.hostComponents.@each.workStatus'),
+
+  confirmRecoverHost: function() {
+    var self = this;
+    var componentsNotStopped = [];
+    var allowedStates = [App.HostComponentStatus.stopped, App.HostComponentStatus.install_failed, App.HostComponentStatus.init];
+    this.get('content.hostComponents').forEach(function (component) {
+      if(!allowedStates.contains(component.get('workStatus'))) {
+        componentsNotStopped.push(component.get('componentName'));
+      }
+    });
+    if(componentsNotStopped.length) {
+      App.ModalPopup.show({
+        header: Em.I18n.t('hosts.recover.error.popup.title'),
+        recoverErrorPopupBody: Em.I18n.t('hosts.recover.error.popup.body').format(componentsNotStopped.toString()),
+        componentsStr: componentsNotStopped.toString(),
+        bodyClass: Em.View.extend({
+          templateName: require('templates/main/host/details/recoverHostErrorPopup')
+        }),
+        secondary: false
+      });
+    } else {
+      App.ModalPopup.show({
+        header: Em.I18n.t('hosts.recover.popup.title'),
+        bodyClass: Em.View.extend({
+          templateName: require('templates/main/host/details/recoverHostPopup')
+        }),
+        primary: Em.I18n.t('yes'),
+        secondary: Em.I18n.t('no'),
+        onPrimary: function () {
+          self.recoverHost();
+          this.hide();
+        }
+      });
+    }
+  },
+
+
+  regenerateKeytabFileOperations: function () {
+    var self = this;
+    var hostName = this.content.get('hostName');
+    var clusterName = App.get('clusterName');
+    return App.showConfirmationPopup(function() {
+      return App.ajax.send({
+        name: "admin.kerberos_security.regenerate_keytabs.host",
+        sender: self,
+        data: {
+          clusterName: clusterName,
+          hostName: hostName
+        },
+        success: 'regenerateKeytabFileOperationsRequestSuccess',
+        error: 'regenerateKeytabFileOperationsRequestError'
+      });
+    }, Em.I18n.t('question.sure.regenerateKeytab.host').format(hostName));
+  },
+
+  regenerateKeytabFileOperationsRequestSuccess: function(){
+    App.router.get('backgroundOperationsController').showPopup();
+  },
+
+  regenerateKeytabFileOperationsRequestError: function () {
+    App.showAlertPopup(Em.I18n.t('common.error'), Em.I18n.t('alerts.notifications.regenerateKeytab.host.error').format(this.content.get('hostName')));
+  },
+
 });

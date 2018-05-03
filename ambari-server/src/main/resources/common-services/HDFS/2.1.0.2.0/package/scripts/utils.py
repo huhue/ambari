@@ -19,24 +19,31 @@ limitations under the License.
 import os
 import re
 import urllib2
+from ambari_commons import subprocess32
 import ambari_simplejson as json # simplejson is much faster comparing to Python 2.6 json module and has the same functions set.
 
 from resource_management.core.resources.system import Directory, File, Execute
 from resource_management.libraries.functions.format import format
 from resource_management.libraries.functions import check_process_status
+from resource_management.libraries.functions.check_process_status import wait_process_stopped
 from resource_management.libraries.functions import StackFeature
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.core import shell
 from resource_management.core.shell import as_user, as_sudo
+from resource_management.core.source import Template
 from resource_management.core.exceptions import ComponentIsNotRunning
 from resource_management.core.logger import Logger
 from resource_management.libraries.functions.curl_krb_request import curl_krb_request
-from resource_management.core.exceptions import Fail
-from resource_management.libraries.functions.namenode_ha_utils import get_namenode_states
 from resource_management.libraries.script.script import Script
+from resource_management.libraries.functions.namenode_ha_utils import get_namenode_states
 from resource_management.libraries.functions.show_logs import show_logs
+from ambari_commons.inet_utils import ensure_ssl_using_protocol
+from zkfc_slave import ZkfcSlaveDefault
 
-from zkfc_slave import ZkfcSlave
+ensure_ssl_using_protocol(
+  Script.get_force_https_protocol_name(),
+  Script.get_ca_cert_file_path()
+)
 
 def safe_zkfc_op(action, env):
   """
@@ -48,21 +55,17 @@ def safe_zkfc_op(action, env):
   zkfc = None
   if action == "start":
     try:
-      zkfc = ZkfcSlave()
-      zkfc.status(env)
+      ZkfcSlaveDefault.status_static(env)
     except ComponentIsNotRunning:
-      if zkfc:
-        zkfc.start(env)
+      ZkfcSlaveDefault.start_static(env)
 
   if action == "stop":
     try:
-      zkfc = ZkfcSlave()
-      zkfc.status(env)
+      ZkfcSlaveDefault.status_static(env)
     except ComponentIsNotRunning:
       pass
     else:
-      if zkfc:
-        zkfc.stop(env)
+      ZkfcSlaveDefault.stop_static(env)
 
 def initiate_safe_zkfc_failover():
   """
@@ -272,14 +275,29 @@ def service(action=None, name=None, user=None, options="", create_pid_dir=False,
     try:
       Execute(daemon_cmd, not_if=process_id_exists_command, environment=hadoop_env_exports)
     except:
-      show_logs(params.hdfs_log_dir, user)
+      show_logs(log_dir, user)
       raise
   elif action == "stop":
     try:
       Execute(daemon_cmd, only_if=process_id_exists_command, environment=hadoop_env_exports)
     except:
-      show_logs(params.hdfs_log_dir, user)
+      show_logs(log_dir, user)
       raise
+
+    # Wait until stop actually happens
+    process_id_does_not_exist_command = format("! ( {process_id_exists_command} )")
+    code, out = shell.call(process_id_does_not_exist_command,
+            env=hadoop_env_exports,
+            tries = 6,
+            try_sleep = 10,
+    )
+
+    # If stop didn't happen, kill it forcefully
+    if code != 0:
+      code, out, err = shell.checked_call(("cat", pid_file), sudo=True, env=hadoop_env_exports, stderr=subprocess32.PIPE)
+      pid = out
+      Execute(("kill", "-9", pid), sudo=True)
+
     File(pid_file, action="delete")
 
 def get_jmx_data(nn_address, modeler_type, metric, encrypted=False, security_enabled=False):
@@ -384,3 +402,29 @@ def get_dfsadmin_base_command(hdfs_binary, use_specific_namenode = False):
   else:
     dfsadmin_base_command = format("{hdfs_binary} dfsadmin -fs {params.namenode_address}")
   return dfsadmin_base_command
+
+
+def set_up_zkfc_security(params):
+    """ Sets up security for accessing zookeper on secure clusters """
+
+    if params.stack_supports_zk_security is False:
+      Logger.info("Skipping setting up secure ZNode ACL for HFDS as it's supported only for HDP 2.6 and above.")
+      return
+
+    # check if the namenode is HA
+    if params.dfs_ha_enabled is False:
+        Logger.info("Skipping setting up secure ZNode ACL for HFDS as it's supported only for NameNode HA mode.")
+        return
+
+    # check if the cluster is secure (skip otherwise)
+    if params.security_enabled is False:
+        Logger.info("Skipping setting up secure ZNode ACL for HFDS as it's supported only for secure clusters.")
+        return
+
+    # process the JAAS template
+    File(os.path.join(params.hadoop_conf_secure_dir, 'hdfs_jaas.conf'),
+         owner=params.hdfs_user,
+         group=params.user_group,
+         mode=0644,
+         content=Template("hdfs_jaas.conf.j2")
+         )

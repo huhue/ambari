@@ -23,14 +23,16 @@ App.ServiceSimple = DS.Model.extend({
   name: DS.attr('string'),
   displayName: DS.attr('string'),
   latestVersion: DS.attr('string'),
+  isAvailable: DS.attr('boolean'),
+  isUpgradable: DS.attr('boolean'),
   isHidden: function () {
     var hiddenServices = ['MAPREDUCE2'];
     return hiddenServices.contains(this.get('name')) || this.get('doNotShowAndInstall');
   }.property('name'),
 
   doNotShowAndInstall: function () {
-    var skipServices = [];
-    if(!App.supports.installGanglia) {
+    var skipServices = ['KERBEROS'];
+    if(!App.get('supports.installGanglia')) {
       skipServices.push('GANGLIA');
     }
     return skipServices.contains(this.get('name'));

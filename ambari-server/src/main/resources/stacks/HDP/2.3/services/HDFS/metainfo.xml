@@ -27,7 +27,7 @@
           <name>NFS_GATEWAY</name>
           <displayName>NFSGateway</displayName>
           <cardinality>0+</cardinality>
-          <versionAdvertised>false</versionAdvertised>
+          <versionAdvertised>true</versionAdvertised>
           <category>SLAVE</category>
           <commandScript>
             <script>scripts/nfsgateway.py</script>
@@ -52,14 +52,18 @@
           <packages>
             <package>
               <name>rpcbind</name>
+              <condition>should_install_rpcbind</condition>
             </package>
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>redhat7,amazon2015,redhat6,suse11,suse12</osFamily>
+          <osFamily>redhat7,amazonlinux2,redhat6,suse11</osFamily>
           <packages>
             <package>
               <name>hadoop_${stack_version}</name>
+            </package>
+            <package>
+              <name>hadoop_${stack_version}-client</name>
             </package>
             <package>
               <name>snappy</name>
@@ -68,17 +72,28 @@
               <name>snappy-devel</name>
             </package>
             <package>
-              <name>lzo</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_lzo</condition>
+              <name>hadoop_${stack_version}-libhdfs</name>
             </package>
             <package>
-              <name>hadooplzo_${stack_version}</name>
-              <condition>should_install_lzo</condition>
+              <name>libtirpc-devel</name>
+            </package>
+          </packages>
+        </osSpecific>
+
+        <osSpecific>
+          <osFamily>suse12</osFamily>
+          <packages>
+            <package>
+              <name>hadoop_${stack_version}</name>
             </package>
             <package>
-              <name>hadooplzo_${stack_version}-native</name>
-              <condition>should_install_lzo</condition>
+              <name>hadoop_${stack_version}-client</name>
+            </package>
+            <package>
+              <name>snappy</name>
+            </package>
+            <package>
+              <name>snappy-devel</name>
             </package>
             <package>
               <name>hadoop_${stack_version}-libhdfs</name>
@@ -87,7 +102,7 @@
         </osSpecific>
 
         <osSpecific>
-          <osFamily>debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>hadoop-${stack_version}-client</name>
@@ -112,10 +127,6 @@
             </package>
             <package>
               <name>libsnappy-dev</name>
-            </package>
-            <package>
-              <name>hadooplzo-${stack_version}</name>
-              <condition>should_install_lzo</condition>
             </package>
             <package>
               <name>libhdfs0-${stack_version}</name>

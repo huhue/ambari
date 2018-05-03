@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,13 +17,13 @@
  */
 package org.apache.ambari.server.api.predicate.operators;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.apache.ambari.server.api.predicate.InvalidQueryException;
 import org.apache.ambari.server.controller.predicate.EqualsPredicate;
 import org.apache.ambari.server.controller.predicate.OrPredicate;
 import org.apache.ambari.server.controller.spi.Predicate;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * IN relational operator.
@@ -47,13 +47,13 @@ public class InOperator extends AbstractOperator implements RelationalOperator {
   public Predicate toPredicate(String prop, String val) throws InvalidQueryException {
 
     if (val == null) {
-      throw new InvalidQueryException("IN operator is missing a required right operand.");
+      throw new InvalidQueryException("IN operator is missing a required right operand for property " + prop);
     }
 
     String[] tokens = val.split(",");
-    List<EqualsPredicate> listPredicates = new ArrayList<EqualsPredicate>();
+    List<EqualsPredicate> listPredicates = new ArrayList<>();
     for (String token : tokens) {
-      listPredicates.add(new EqualsPredicate(prop, token.trim()));
+      listPredicates.add(new EqualsPredicate<>(prop, token.trim()));
     }
     return listPredicates.size() == 1 ? listPredicates.get(0) :
         buildOrPredicate(listPredicates);

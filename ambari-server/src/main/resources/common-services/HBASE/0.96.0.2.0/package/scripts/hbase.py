@@ -17,12 +17,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+from urlparse import urlparse
+
 import os
-from resource_management import *
-import sys
+
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
 from ambari_commons import OSConst
-
+from resource_management.core.resources import Directory
+from resource_management.core.resources import Execute
+from resource_management.core.resources import File
+from resource_management.core.resources import Package
+from resource_management.core.resources import ServiceConfig
+from resource_management.core.source import InlineTemplate
+from resource_management.core.source import Template
+from resource_management.libraries import Script
+from resource_management.libraries.functions import format
+from resource_management.libraries.functions import lzo_utils
+from resource_management.libraries.resources import TemplateConfig
+from resource_management.libraries.resources import XmlConfig
+from resource_management.libraries.functions.constants import StackFeature
+from resource_management.libraries.functions.stack_features import check_stack_feature
 
 @OsFamilyFuncImpl(os_family=OSConst.WINSRV_FAMILY)
 def hbase(name=None):
@@ -30,7 +44,7 @@ def hbase(name=None):
   XmlConfig("hbase-site.xml",
             conf_dir = params.hbase_conf_dir,
             configurations = params.config['configurations']['hbase-site'],
-            configuration_attributes=params.config['configuration_attributes']['hbase-site']
+            configuration_attributes=params.config['configurationAttributes']['hbase-site']
   )
 
   if params.service_map.has_key(name):
@@ -45,6 +59,9 @@ def hbase(name=None):
 @OsFamilyFuncImpl(os_family=OsFamilyImpl.DEFAULT)
 def hbase(name=None):
   import params
+
+  # ensure that matching LZO libraries are installed for HBase
+  lzo_utils.install_lzo_if_needed()
 
   Directory( params.etc_prefix_dir,
       mode=0755
@@ -90,41 +107,40 @@ def hbase(name=None):
   XmlConfig( "hbase-site.xml",
             conf_dir = params.hbase_conf_dir,
             configurations = params.config['configurations']['hbase-site'],
-            configuration_attributes=params.config['configuration_attributes']['hbase-site'],
+            configuration_attributes=params.config['configurationAttributes']['hbase-site'],
             owner = params.hbase_user,
             group = params.user_group
   )
 
-  XmlConfig( "core-site.xml",
-             conf_dir = params.hbase_conf_dir,
-             configurations = params.config['configurations']['core-site'],
-             configuration_attributes=params.config['configuration_attributes']['core-site'],
-             owner = params.hbase_user,
-             group = params.user_group
-  )
-
-  if 'hdfs-site' in params.config['configurations']:
-    XmlConfig( "hdfs-site.xml",
-            conf_dir = params.hbase_conf_dir,
-            configurations = params.config['configurations']['hdfs-site'],
-            configuration_attributes=params.config['configuration_attributes']['hdfs-site'],
-            owner = params.hbase_user,
-            group = params.user_group
+  if check_stack_feature(StackFeature.PHOENIX_CORE_HDFS_SITE_REQUIRED, params.version_for_stack_feature_checks):
+    XmlConfig( "core-site.xml",
+               conf_dir = params.hbase_conf_dir,
+               configurations = params.config['configurations']['core-site'],
+               configuration_attributes=params.config['configurationAttributes']['core-site'],
+               owner = params.hbase_user,
+               group = params.user_group
     )
-
-    XmlConfig("hdfs-site.xml",
-            conf_dir=params.hadoop_conf_dir,
-            configurations=params.config['configurations']['hdfs-site'],
-            configuration_attributes=params.config['configuration_attributes']['hdfs-site'],
-            owner=params.hdfs_user,
-            group=params.user_group
+    if 'hdfs-site' in params.config['configurations']:
+      XmlConfig( "hdfs-site.xml",
+              conf_dir = params.hbase_conf_dir,
+              configurations = params.config['configurations']['hdfs-site'],
+              configuration_attributes=params.config['configurationAttributes']['hdfs-site'],
+              owner = params.hbase_user,
+              group = params.user_group
+      )
+  else:
+    File(format("{params.hbase_conf_dir}/hdfs-site.xml"),
+         action="delete"
+    )
+    File(format("{params.hbase_conf_dir}/core-site.xml"),
+         action="delete"
     )
 
   if 'hbase-policy' in params.config['configurations']:
     XmlConfig( "hbase-policy.xml",
             conf_dir = params.hbase_conf_dir,
             configurations = params.config['configurations']['hbase-policy'],
-            configuration_attributes=params.config['configuration_attributes']['hbase-policy'],
+            configuration_attributes=params.config['configurationAttributes']['hbase-policy'],
             owner = params.hbase_user,
             group = params.user_group
     )
@@ -184,7 +200,7 @@ def hbase(name=None):
          mode=0644,
          group=params.user_group,
          owner=params.hbase_user,
-         content=params.log4j_props
+         content=InlineTemplate(params.log4j_props)
     )
   elif (os.path.exists(format("{params.hbase_conf_dir}/log4j.properties"))):
     File(format("{params.hbase_conf_dir}/log4j.properties"),
@@ -193,17 +209,25 @@ def hbase(name=None):
       owner=params.hbase_user
     )
   if name == "master":
-    params.HdfsResource(params.hbase_hdfs_root_dir,
-                         type="directory",
-                         action="create_on_execute",
-                         owner=params.hbase_user
-    )
+    if not params.hbase_hdfs_root_dir_protocol or params.hbase_hdfs_root_dir_protocol == urlparse(params.default_fs).scheme:
+      params.HdfsResource(params.hbase_hdfs_root_dir,
+                           type="directory",
+                           action="create_on_execute",
+                           owner=params.hbase_user
+      )
     params.HdfsResource(params.hbase_staging_dir,
                          type="directory",
                          action="create_on_execute",
                          owner=params.hbase_user,
                          mode=0711
     )
+    if params.create_hbase_home_directory:
+      params.HdfsResource(params.hbase_home_directory,
+                          type="directory",
+                          action="create_on_execute",
+                          owner=params.hbase_user,
+                          mode=0755
+      )
     params.HdfsResource(None, action="execute")
 
   if params.phoenix_enabled:

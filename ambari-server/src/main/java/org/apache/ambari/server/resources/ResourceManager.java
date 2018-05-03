@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,8 +20,8 @@ package org.apache.ambari.server.resources;
 import java.io.File;
 
 import org.apache.ambari.server.configuration.Configuration;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
@@ -31,8 +31,8 @@ import com.google.inject.Singleton;
  */
 @Singleton
 public class ResourceManager {
-  private static Log LOG = LogFactory.getLog(ResourceManager.class);
-	
+  private static final Logger LOG = LoggerFactory.getLogger(ResourceManager.class);
+
   @Inject Configuration configs;
   /**
   * Returns resource file.
@@ -40,14 +40,11 @@ public class ResourceManager {
   * @return resource file
   */
   public File getResource(String resourcePath) {
-    String resDir = configs.getConfigsMap().get(Configuration.RESOURCES_DIR_KEY);
+    String resDir = configs.getConfigsMap().get(Configuration.RESOURCES_DIR.getKey());
     String resourcePathIndep = resourcePath.replace("/", File.separator);
     File resourceFile = new File(resDir + File.separator + resourcePathIndep);
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Resource requested from ResourceManager"
-          + ", resourceDir=" + resDir
-          + ", resourcePath=" + resourcePathIndep
-          + ", fileExists=" + resourceFile.exists());
+      LOG.debug("Resource requested from ResourceManager, resourceDir={}, resourcePath={}, fileExists={}", resDir, resourcePathIndep, resourceFile.exists());
     }
     return resourceFile;
   }

@@ -242,7 +242,7 @@ describe('utils/helper', function() {
       afterEach(removeDiv);
       it('should add tooltip', function() {
         App.tooltip($('#tooltip-test'));
-        expect($('#tooltip-test').data('tooltip').enabled).to.be.true;
+        expect($('#tooltip-test').data('bs.tooltip').enabled).to.be.true;
       });
     });
     describe('#popover()', function() {
@@ -250,18 +250,23 @@ describe('utils/helper', function() {
       afterEach(removeDiv);
       it('should add popover', function() {
         App.popover($('#tooltip-test'));
-        expect($('#tooltip-test').data('popover').enabled).to.be.true;
+        expect($('#tooltip-test').data('bs.popover').enabled).to.be.true;
       });
     });
     describe('#App.format', function(){
       describe('#commandDetail()', function() {
         var command = "GANGLIA_MONITOR STOP";
+        var customCommandDetail = "Remove_Logical_Mycomponent Mycomponent";
+        var opsDisplayName = "Remove Logical Mycomponent";
         var ignored = "DECOMMISSION, NAMENODE";
         var removeString = "SERVICE/HDFS STOP";
         var nagiosState = "nagios_update_ignore ACTIONEXECUTE";
         var installRepo = "install_packages ACTIONEXECUTE";
         it('should convert command to readable info', function() {
           expect(App.format.commandDetail(command)).to.be.equal(' Ganglia Monitor Stop');
+        });
+        it('should use display name for operations if specified', function() {
+          expect(App.format.commandDetail(customCommandDetail, null, opsDisplayName)).to.be.equal(' Remove Logical Mycomponent');
         });
         it('should ignore decommission command', function(){
           expect(App.format.commandDetail(ignored)).to.be.equal('  NameNode');
@@ -274,6 +279,11 @@ describe('utils/helper', function() {
         });
         it('should return install repo message', function() {
           expect(App.format.commandDetail(installRepo)).to.be.equal(Em.I18n.t('common.installRepo.task'));
+        });
+        it('should return raw text when is_add_or_delete_slave_request=true', function() {
+          var inputs = '{"is_add_or_delete_slave_request":"true"}';
+          expect(App.format.commandDetail('DECOMMISSION, Update Include/Exclude Files', inputs))
+            .to.be.equal('  Update Include/Exclude Files');
         });
       });
       describe('#taskStatus()', function(){
@@ -298,6 +308,8 @@ describe('utils/helper', function() {
           'app-timeline-server': 'App Timeline Server',
           'APP TIMELINE SERVER': 'App Timeline Server',
           'app timeline server': 'App Timeline Server',
+          'run-hcat-sync': 'Run HCat Client Sync',
+          'rUN_hCAt_syNc': 'Run HCat Client Sync',
           'FALCON': 'Falcon',
           'falcon': 'Falcon'
         };

@@ -29,7 +29,8 @@ module.exports = function(config) {
       'karma-phantomjs-launcher',
       'karma-coverage',
       'karma-ember-precompiler-brunch',
-      'karma-commonjs-require'
+      'karma-commonjs-require',
+      'karma-babel-preprocessor'
     ],
 
     // frameworks to use
@@ -47,7 +48,7 @@ module.exports = function(config) {
 
       'node_modules/karma-commonjs-require/node_modules/commonjs-require-definition/require.js',
       'vendor/scripts/console-helper.js',
-      'vendor/scripts/jquery-1.7.2.min.js',
+      'vendor/scripts/jquery-1.9.1.js',
       'vendor/scripts/handlebars-1.0.0.beta.6.js',
       'vendor/scripts/ember-latest.js',
       'vendor/scripts/ember-data-latest.js',
@@ -69,6 +70,8 @@ module.exports = function(config) {
       'vendor/scripts/jquery.ui.custom-effects.js',
       'vendor/scripts/jquery.timeago.js',
       'vendor/scripts/jquery.ajax-retry.js',
+      'vendor/scripts/difflib.js',
+      'vendor/scripts/diffview.js',
       'vendor/scripts/underscore.js',
       'vendor/scripts/backbone.js',
       'vendor/scripts/visualsearch.js',
@@ -78,6 +81,8 @@ module.exports = function(config) {
       'vendor/scripts/jquery.flexibleArea.js',
       'vendor/scripts/FileSaver.js',
       'vendor/scripts/Blob.js',
+      'vendor/scripts/moment.min.js',
+      'vendor/scripts/moment-timezone-with-data-2010-2020.js',
       'vendor/**/*.js',
       'app/templates/**/*.hbs',
       'app!(assets)/**/!(karma_setup|tests).js',
@@ -93,7 +98,7 @@ module.exports = function(config) {
     ],
 
     emberPrecompilerBrunchPreprocessor: {
-      jqueryPath: 'vendor/scripts/jquery-1.7.2.min.js',
+      jqueryPath: 'vendor/scripts/jquery-1.9.1.js',
       emberPath: 'vendor/scripts/ember-latest.js',
       handlebarsPath: 'vendor/scripts/handlebars-1.0.0.beta.6.js'
     },
@@ -108,10 +113,22 @@ module.exports = function(config) {
     },
 
     preprocessors: {
-//      '!(vendor|node_modules|test)/**/!(karma_setup|tests).js': 'coverage',
+      '!(vendor|node_modules|test)/**/!(karma_setup|tests).js': 'coverage',
       'app/templates/**/*.hbs': ['ember-precompiler-brunch', 'common-require'],
-      'app!(assets)/**/!(karma_setup|tests).js': ['common-require'],
+      'app!(assets)/**/!(karma_setup|tests).js': ['common-require', 'babel'],
       'test/**/*.js': ['common-require']
+    },
+
+    babelPreprocessor: {
+      options: {
+        presets: ['es2015']
+      },
+      filename: function (file) {
+        return file.originalPath.replace(/\.js$/, '.js');
+      },
+      sourceFileName: function (file) {
+        return file.originalPath;
+      }
     },
 
     // list of files to exclude
@@ -123,7 +140,7 @@ module.exports = function(config) {
     // test results reporter to use
     // possible values: 'dots', 'progress', 'junit', 'growl', 'coverage'
 //    reporters: ['progress', 'coverage'],
-    reporters: ['progress'],
+    reporters: ['progress', 'coverage'],
 
 
     // web server port
@@ -160,6 +177,6 @@ module.exports = function(config) {
 
     // Continuous Integration mode
     // if true, it capture browsers, run tests and exit
-    singleRun: false
+    singleRun: true
   });
 };

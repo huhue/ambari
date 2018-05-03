@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,18 +18,18 @@
 
 package org.apache.ambari.server.stack;
 
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.ambari.server.state.ComponentInfo;
 import org.apache.ambari.server.state.CustomCommandDefinition;
 import org.apache.ambari.server.state.DependencyInfo;
 import org.apache.ambari.server.state.LogDefinition;
 import org.apache.commons.lang.builder.ToStringBuilder;
 import org.apache.commons.lang.builder.ToStringStyle;
-
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Component module which provides all functionality related to parsing and fully
@@ -46,7 +46,7 @@ public class ComponentModule extends BaseModule<ComponentModule, ComponentInfo> 
    */
   protected boolean valid = true;
 
-  private Set<String> errorSet = new HashSet<String>();
+  private Set<String> errorSet = new HashSet<>();
 
   /**
    * Constructor.
@@ -58,7 +58,8 @@ public class ComponentModule extends BaseModule<ComponentModule, ComponentInfo> 
   }
 
   @Override
-  public void resolve(ComponentModule parent, Map<String, StackModule> allStacks, Map<String, ServiceModule> commonServices) {
+  public void resolve(ComponentModule parent, Map<String, StackModule> allStacks,
+	    Map<String, ServiceModule> commonServices, Map<String, ExtensionModule> extensions) {
     if (parent != null) {
       ComponentInfo parentInfo = parent.getModuleInfo();
       if (!parent.isValid()) {
@@ -87,10 +88,21 @@ public class ComponentModule extends BaseModule<ComponentModule, ComponentInfo> 
       if (componentInfo.getCardinality() == null) {
         componentInfo.setCardinality(parentInfo.getCardinality());
       }
-      componentInfo.setVersionAdvertised(parentInfo.isVersionAdvertised());
+
+      // Inherit versionAdvertised from the parent if the current Component Info has it as null or "inherit".
+      if (null == componentInfo.getVersionAdvertisedField()) {
+        componentInfo.setVersionAdvertised(parentInfo.isVersionAdvertised());
+      } else {
+        // Set to explicit boolean
+        componentInfo.setVersionAdvertised(componentInfo.getVersionAdvertisedField().booleanValue());
+      }
 
       if (componentInfo.getDecommissionAllowed() == null) {
         componentInfo.setDecommissionAllowed(parentInfo.getDecommissionAllowed());
+      }
+
+      if (componentInfo.getUnlimitedKeyJCERequired() == null) {
+        componentInfo.setUnlimitedKeyJCERequired(parentInfo.getUnlimitedKeyJCERequired());
       }
 
       if (componentInfo.getAutoDeploy() == null) {
@@ -107,6 +119,10 @@ public class ComponentModule extends BaseModule<ComponentModule, ComponentInfo> 
         componentInfo.setReassignAllowed(parentInfo.getReassignAllowed());
       }
 
+      if (componentInfo.getTimelineAppid() == null) {
+        componentInfo.setTimelineAppid(parentInfo.getTimelineAppid());
+      }
+
       mergeComponentDependencies(parentInfo.getDependencies(),
               componentInfo.getDependencies());
 
@@ -114,6 +130,9 @@ public class ComponentModule extends BaseModule<ComponentModule, ComponentInfo> 
               componentInfo.getCustomCommands());
 
       mergeLogs(parentInfo.getLogs(), componentInfo.getLogs());
+    } else {
+      //set cardinality with default value "0+" if it was not provided and parent is absent.
+      componentInfo.setCardinality("0+");
     }
   }
 
@@ -143,7 +162,7 @@ public class ComponentModule extends BaseModule<ComponentModule, ComponentInfo> 
   private void mergeComponentDependencies(List<DependencyInfo> parentDependencies,
                                           List<DependencyInfo> childDependencies) {
 
-    Collection<String> existingNames = new HashSet<String>();
+    Collection<String> existingNames = new HashSet<>();
 
     for (DependencyInfo childDependency : childDependencies) {
       existingNames.add(childDependency.getName());
@@ -169,7 +188,7 @@ public class ComponentModule extends BaseModule<ComponentModule, ComponentInfo> 
   private void mergeCustomCommands(List<CustomCommandDefinition> parentCommands,
                                    List<CustomCommandDefinition> childCommands) {
 
-    Collection<String> existingNames = new HashSet<String>();
+    Collection<String> existingNames = new HashSet<>();
 
     for (CustomCommandDefinition childCmd : childCommands) {
       existingNames.add(childCmd.getName());
@@ -192,7 +211,7 @@ public class ComponentModule extends BaseModule<ComponentModule, ComponentInfo> 
    */
   //todo: currently there is no way to remove an inherited log
   private void mergeLogs(List<LogDefinition> parentLogs, List<LogDefinition> childLogs) {
-    Collection<String> existingLogIds = new HashSet<String>();
+    Collection<String> existingLogIds = new HashSet<>();
 
     for (LogDefinition childLog : childLogs) {
       existingLogIds.add(childLog.getLogId());

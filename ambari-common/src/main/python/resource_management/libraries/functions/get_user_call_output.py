@@ -21,10 +21,11 @@ Ambari Agent
 """
 
 import os
+import sys
 import tempfile
 from resource_management.core import shell
 from resource_management.core.logger import Logger
-from resource_management.core.exceptions import Fail
+from resource_management.core.exceptions import ExecutionFailed
 
 def get_user_call_output(command, user, quiet=False, is_checked_call=True, **call_kwargs):
   """
@@ -51,18 +52,26 @@ def get_user_call_output(command, user, quiet=False, is_checked_call=True, **cal
     
     files_output = []
     for f in out_files:
-      files_output.append(f.read().strip('\n'))
+      files_output.append(f.read().decode("utf-8").strip('\n'))
       
     if code:
       all_output = files_output[1] + '\n' + files_output[0]
       err_msg = Logger.filter_text(("Execution of '%s' returned %d. %s") % (command_string, code, all_output))
       
       if is_checked_call:
-        raise Fail(err_msg)
+        raise ExecutionFailed(err_msg, code, files_output[0], files_output[1])
       else:
-        Logger.warning(err_msg)      
+        Logger.warning(err_msg)
+
+    result = code, files_output[0], files_output[1]
     
-    return code, files_output[0], files_output[1]
+    caller_filename = sys._getframe(1).f_code.co_filename
+    is_internal_call = shell.NOT_LOGGED_FOLDER in caller_filename
+    if quiet == False or (quiet == None and not is_internal_call):
+      log_msg = "{0} returned {1}".format(get_user_call_output.__name__, result)
+      Logger.info(log_msg)
+
+    return result
   finally:
     for f in out_files:
       f.close()

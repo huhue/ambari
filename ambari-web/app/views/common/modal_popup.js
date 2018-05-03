@@ -21,6 +21,7 @@ var App = require('app');
 App.ModalPopup = Ember.View.extend({
 
   viewName: 'modalPopup',
+  modalDialogClasses: [],
   templateName: require('templates/common/modal_popup'),
   header: '&nbsp;',
   body: '&nbsp;',
@@ -35,8 +36,19 @@ App.ModalPopup = Ember.View.extend({
   disableSecondary: false,
   disableThird: false,
   primaryClass: 'btn-success',
-  secondaryClass: '',
-  thirdClass: '',
+  secondaryClass: 'btn-default',
+  thirdClass: 'btn-default',
+  modalDialogClassesStr: function () {
+    var modalDialogClasses = this.get('modalDialogClasses');
+    if (!Em.isArray(modalDialogClasses)) {
+      return '';
+    }
+    return modalDialogClasses.join(' ');
+  }.property('modalDialogClasses.[]'),
+  primaryId: '',
+  secondaryId: '',
+  thirdId: '',
+  'data-qa': 'modal',
   onPrimary: function () {
     this.hide();
   },
@@ -54,6 +66,9 @@ App.ModalPopup = Ember.View.extend({
   },
 
   hide: function () {
+    if (!$.mocho) {
+      this.$('#modal').modal('hide');
+    }
     this.destroy();
   },
 
@@ -69,9 +84,24 @@ App.ModalPopup = Ember.View.extend({
       .on('enter-key-pressed', this.enterKeyPressed.bind(this))
       .on('escape-key-pressed', this.escapeKeyPressed.bind(this));
     this.fitZIndex();
+    this.handleBackDrop();
     var firstInputElement = this.$('#modal').find(':input').not(':disabled, .no-autofocus').first();
+    if (!$.mocho) {
+      this.$('#modal').modal({
+        keyboard: false,
+        backdrop: false
+      });
+    }
     this.focusElement(firstInputElement);
     this.subscribeResize();
+  },
+
+  handleBackDrop: function () {
+    if (this.get('backdrop') === false) {
+      $('.modal-backdrop').css('visibility', 'hidden');
+    } else {
+      $('.modal-backdrop').css('visibility', 'visible');
+    }
   },
 
   subscribeResize: function() {
@@ -100,7 +130,7 @@ App.ModalPopup = Ember.View.extend({
 
   enterKeyPressed: function (event) {
     var primaryButton = this.$().find('.modal-footer > .btn-success').last();
-    if ((!$("*:focus").is("textarea")) && primaryButton.length > 0 && primaryButton.attr('disabled') !== 'disabled') {
+    if (!$("*:focus").is('textarea') && primaryButton.length > 0 && primaryButton.attr('disabled') !== 'disabled') {
       event.preventDefault();
       event.stopPropagation();
       primaryButton.click();
@@ -132,17 +162,20 @@ App.ModalPopup = Ember.View.extend({
 
   fitHeight: function () {
     if (this.get('state') === 'destroyed') return;
-    var popup = this.$().find('#modal');
-    var block = this.$().find('#modal > .modal-body');
-    var wh = $(window).height();
+    var popup = this.$().find('#modal'),
+      wrapper = $(popup).find('.modal-dialog'),
+      block = $(popup).find('.modal-body'),
+      wh = $(window).height(),
+      top = wh * 0.05,
+      newMaxHeight = wh - top * 2 - (wrapper.height() - block.height());
 
-    var top = wh * 0.05;
     popup.css({
       'top': top + 'px',
       'marginTop': 0
     });
 
-    block.css('max-height', $(window).height() - top * 2 - (popup.height() - block.height()));
+    newMaxHeight = Math.max(newMaxHeight, 500);
+    block.css('max-height', newMaxHeight);
   }
 });
 

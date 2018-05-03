@@ -19,12 +19,16 @@ limitations under the License.
 '''
 from mock.mock import MagicMock, call, patch
 from stacks.utils.RMFTestCase import *
+from resource_management.libraries.script.script import Script
 import json
 
+@patch.object(Script, 'format_package_name', new = MagicMock())
 @patch("platform.linux_distribution", new = MagicMock(return_value="Linux"))
 class TestOozieClient(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "OOZIE/4.0.0.2.0/package"
   STACK_VERSION = "2.0.6"
+
+  CONFIG_OVERRIDES = {"serviceName":"OOZIE", "role":"OOZIE_CLIENT"}
 
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_client.py",
@@ -45,7 +49,7 @@ class TestOozieClient(RMFTestCase):
                               mode = 0664,
                               conf_dir = '/etc/oozie/conf',
                               configurations = self.getConfig()['configurations']['oozie-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['oozie-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['oozie-site']
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/oozie-env.sh',
                               owner = 'oozie',
@@ -67,7 +71,7 @@ class TestOozieClient(RMFTestCase):
                               owner = 'oozie',
                               group = 'hadoop',
                               mode = 0644,
-                              content = 'log4jproperties\nline2'
+                              content = InlineTemplate('log4jproperties\nline2')
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/adminusers.txt',
         owner = 'oozie',
@@ -111,7 +115,7 @@ class TestOozieClient(RMFTestCase):
                               mode = 0664,
                               conf_dir = '/etc/oozie/conf',
                               configurations = self.getConfig()['configurations']['oozie-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['oozie-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['oozie-site']
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/oozie-env.sh',
                               owner = 'oozie',
@@ -133,7 +137,7 @@ class TestOozieClient(RMFTestCase):
                               owner = 'oozie',
                               group = 'hadoop',
                               mode = 0644,
-                              content = 'log4jproperties\nline2'
+                              content = InlineTemplate('log4jproperties\nline2')
                               )
     self.assertResourceCalled('File', '/etc/oozie/conf/adminusers.txt',
                               owner = 'oozie',
@@ -164,7 +168,7 @@ class TestOozieClient(RMFTestCase):
       default_json = json.load(f)
 
 
-    default_json['hostLevelParams']['stack_version']= '2.2'
+    default_json['clusterLevelParams']['stack_version']= '2.2'
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/oozie_client.py",
                        classname = "OozieClient",
                        command = "configure",
@@ -183,7 +187,7 @@ class TestOozieClient(RMFTestCase):
                               mode = 0664,
                               conf_dir = '/usr/hdp/current/oozie-client/conf',
                               configurations = self.getConfig()['configurations']['oozie-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['oozie-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['oozie-site']
     )
     self.assertResourceCalled('File', '/usr/hdp/current/oozie-client/conf/oozie-env.sh',
                               owner = 'oozie',
@@ -205,7 +209,7 @@ class TestOozieClient(RMFTestCase):
                               owner = 'oozie',
                               group = 'hadoop',
                               mode = 0644,
-                              content = 'log4jproperties\nline2'
+                              content = InlineTemplate('log4jproperties\nline2')
     )
     self.assertResourceCalled('File', '/usr/hdp/current/oozie-client/conf/adminusers.txt',
                               content = Template('adminusers.txt.j2'),
@@ -241,6 +245,7 @@ class TestOozieClient(RMFTestCase):
                        classname = "OozieClient",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES)
     self.assertResourceCalled('Execute',
@@ -262,21 +267,11 @@ class TestOozieClient(RMFTestCase):
                        classname = "OozieClient",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES,
-                       call_mocks = [(0, None, ''), (0, None)],
                        mocks_dict = mocks_dict)
 
-    self.assertResourceCalled('Link', ('/etc/oozie/conf'), to='/usr/hdp/current/oozie-client/conf')
     self.assertResourceCalled('Execute',
                               ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'oozie-client', version), sudo=True)
     self.assertNoMoreResources()
-
-    self.assertEquals(1, mocks_dict['call'].call_count)
-    self.assertEquals(1, mocks_dict['checked_call'].call_count)
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'oozie', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[0][0][0])
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'oozie', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])

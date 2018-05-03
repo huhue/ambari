@@ -17,6 +17,8 @@
  */
 
 var App = require('app');
+var dbInfo = require('data/db_properties_info') || {};
+var dbUtils = require('utils/configs/database');
 
 /**
  * Combo box widget view for config property.
@@ -43,6 +45,51 @@ App.ComboConfigWidgetView = App.ConfigWidgetView.extend({
     this._super();
     this.toggleWidgetState();
     this.initPopover();
+    this.disableSwitchToTextBox();
+    this.addObserver('config.stackConfigProperty.valueAttributes.entries.[]', this, this.updateValuesList);
+    this.addObserver('controller.forceUpdateBoundaries', this, this.updateValuesList);
+    this.addObserver('config.value', this, this.isValueCompatibleWithWidget);
+    this.addCustomMessage();
+  },
+
+  addCustomMessage: function () {
+    // show warning alert about downloading db connector for hive database
+    if (this.get('config.name') === 'hive_database') {
+      this.set('config.additionalView', Em.View.extend({
+        template: Em.Handlebars.compile('<div class="alert alert-warning enhanced-configs">{{{view.message}}}</div>'),
+        message: function () {
+          var selectedDb = dbUtils.getDBType(this.get('config.value'));
+          var dbData = dbInfo.dpPropertiesMap[selectedDb];
+          return Em.I18n.t('services.service.config.database.msg.jdbcSetup.detailed').format(
+            dbData.db_name,
+            dbData.db_type,
+            dbData.driver,
+            dbData.driver_download_url,
+            dbData.driver_download_url,
+            dbData.driver_name
+          );
+        }.property('config.value'),
+        config: this.get('config')
+      }));
+    }
+  },
+
+  disableSwitchToTextBox: function () {
+    var valueAttributes = this.get('config.valueAttributes');
+    if (valueAttributes && valueAttributes.hasOwnProperty('entriesEditable') && !valueAttributes.entriesEditable) {
+      this.set('supportSwitchToTextBox', false);
+    }
+  },
+
+  /**
+   * Update options list by recommendations
+   * @method updateValuesList
+   */
+  updateValuesList: function() {
+    if (!this.get('content')) {
+      this.set('content', Em.Object.create({}));
+    }
+    this.set('content.valuesList', this.convertToWidgetUnits(this.get('config.stackConfigProperty.valueAttributes')));
   },
 
   /**
@@ -83,7 +130,7 @@ App.ComboConfigWidgetView = App.ConfigWidgetView.extend({
     if (this.isValueCompatibleWithWidget()) {
       return this.get('content.valuesList').findProperty('configValue', value).get('widgetValue');
     }
-    return null;
+    return value;
   },
 
   /**
@@ -143,14 +190,45 @@ App.ComboConfigWidgetView = App.ConfigWidgetView.extend({
     }
   },
 
-  // setValue: function() {
-  //   this.setConfigValue({ context: this.get('config.value') });
-  // },
+  /**
+   * This method is called when the value of the widget is changed by recommendation received from stack advisor api
+   * @override
+   * @method setValue
+   */
+   setValue: function() {
+     this.setConfigValue({ context: this.get('config.value') });
+   },
+
+  /**
+   * switch display of config to widget
+   * @override
+   * @method textBoxToWidget
+   */
+  textBoxToWidget: function() {
+    this.setValue(this.get('config.value'));
+    this.set("config.showAsTextBox", false);
+  },
+
+  /**
+   * Returns <code>true</code> if raw value can be used by widget or widget view is activated.
+   * @override
+   * @returns {Boolean}
+   */
+  isWidgetViewAllowed: true,
+
+  /**
+   * Initialize widget with incompatible value as textbox
+   * @override
+   */
+  initIncompatibleWidgetAsTextBox : function() {
+    this.isValueCompatibleWithWidget();
+  },
+
 
   isValueCompatibleWithWidget: function() {
     var res = this._super() && this.get('content.valuesList').someProperty('configValue', this.get('config.value'));
     if (!res) {
-      this.updateWarningsForCompatibilityWithWidget(Em.I18n.t('config.infoMessage.wrong.value.for.widget'));
+      this.updateWarningsForCompatibilityWithWidget(Em.I18n.t('config.infoMessage.wrong.value.for.combobox.widget').format(this.get('config.value')));
       return false;
     }
     this.updateWarningsForCompatibilityWithWidget('');

@@ -16,10 +16,16 @@
  * limitations under the License.
  */
 
+if (Ember.$.uuid === undefined) {
+  Ember.$.uuid = 0;
+}
+
 // Application bootstrapper
+require('utils/bootstrap_reopen');
 require('utils/ember_reopen');
 require('utils/ember_computed');
 var stringUtils = require('utils/string_utils');
+var stompClientClass = require('utils/stomp_client');
 
 module.exports = Em.Application.create({
   name: 'Ambari Web',
@@ -33,11 +39,12 @@ module.exports = Em.Application.create({
     typeMaps: {},
     recordCache: []
   }),
+  StompClient: stompClientClass.create(),
   isAdmin: false,
   isOperator: false,
   isClusterUser: false,
   isPermissionDataLoaded: false,
-  auth: null,
+  auth: undefined,
   isOnlyViewUser: function() {
     return App.auth && (App.auth.length == 0 || (App.isAuthorized('VIEW.USE') && App.auth.length == 1));
   }.property('auth'),
@@ -51,7 +58,7 @@ module.exports = Em.Application.create({
   /**
    * state of stack upgrade process
    * states:
-   *  - INIT
+   *  - NOT_REQUIRED
    *  - PENDING
    *  - IN_PROGRESS
    *  - HOLDING
@@ -61,13 +68,26 @@ module.exports = Em.Application.create({
    *  - HOLDING_TIMEDOUT
    * @type {String}
    */
-  upgradeState: 'INIT',
+  upgradeState: 'NOT_REQUIRED',
+
+  /**
+   * Check if upgrade is in INIT state
+   * 'INIT' is set on upgrade start and when it's finished
+   * @type {boolean}
+   */
+  upgradeInit: Em.computed.equal('upgradeState', 'NOT_REQUIRED'),
 
   /**
    * flag is true when upgrade process is running
    * @returns {boolean}
    */
   upgradeInProgress: Em.computed.equal('upgradeState', 'IN_PROGRESS'),
+
+  /**
+   * Checks if update process is completed
+   * @type {boolean}
+   */
+  upgradeCompleted: Em.computed.equal('upgradeState', 'COMPLETED'),
 
   /**
    * flag is true when upgrade process is waiting for user action
@@ -85,7 +105,7 @@ module.exports = Em.Application.create({
    */
   upgradeAborted: function () {
     return this.get('upgradeState') === "ABORTED" && !App.router.get('mainAdminStackAndUpgradeController.isSuspended');
-  }.property('upgradeState', 'App.router.mainAdminStackAndUpgradeController.isSuspended'),
+  }.property('upgradeState', 'router.mainAdminStackAndUpgradeController.isSuspended'),
 
   /**
    * flag is true when upgrade process is suspended
@@ -93,7 +113,7 @@ module.exports = Em.Application.create({
    */
   upgradeSuspended: function () {
     return this.get('upgradeState') === "ABORTED" && App.router.get('mainAdminStackAndUpgradeController.isSuspended');
-  }.property('upgradeState', 'App.router.mainAdminStackAndUpgradeController.isSuspended'),
+  }.property('upgradeState', 'router.mainAdminStackAndUpgradeController.isSuspended'),
 
   /**
    * RU is running
@@ -113,34 +133,33 @@ module.exports = Em.Application.create({
   }.property('upgradeIsRunning', 'upgradeAborted', 'router.wizardWatcherController.isNonWizardUser', 'upgradeSuspended'),
 
   /**
-   * Options:
-   *  - ignoreWizard: ignore when some wizard is running by another user (default `false`)
-   *
    * @param {string} authRoles
-   * @param {object} options
    * @returns {boolean}
    */
-  isAuthorized: function(authRoles, options) {
-    options = $.extend({ignoreWizard: false}, options);
+  havePermissions: function (authRoles) {
     var result = false;
     authRoles = $.map(authRoles.split(","), $.trim);
 
-    if (!this.get('upgradeSuspended') &&
-        !App.get('supports.opsDuringRollingUpgrade') &&
-        !['INIT', 'COMPLETED'].contains(this.get('upgradeState')) ||
-        !App.auth){
+    // When Upgrade running(not suspended) only operations related to upgrade should be allowed
+    if ((!this.get('upgradeSuspended') && !authRoles.contains('CLUSTER.UPGRADE_DOWNGRADE_STACK')) &&
+      !App.get('supports.opsDuringRollingUpgrade') &&
+      !['NOT_REQUIRED', 'COMPLETED'].contains(this.get('upgradeState')) ||
+      !App.auth){
       return false;
     }
 
-    if (!options.ignoreWizard && App.router.get('wizardWatcherController.isNonWizardUser')) {
-      return false;
-    }
-
-    authRoles.forEach(function(auth) {
+    authRoles.forEach(function (auth) {
       result = result || App.auth.contains(auth);
     });
 
     return result;
+  },
+  /**
+   * @param {string} authRoles
+   * @returns {boolean}
+   */
+  isAuthorized: function (authRoles) {
+    return this.havePermissions(authRoles) && !App.router.get('wizardWatcherController.isNonWizardUser');
   },
 
   isStackServicesLoaded: false,
@@ -172,6 +191,7 @@ module.exports = Em.Application.create({
     return false;
   }.property('router.clusterController.isLoaded'),
 
+  clusterId: null,
   clusterName: null,
   clockDistance: null, // server clock - client clock
   currentStackVersion: '',
@@ -210,10 +230,6 @@ module.exports = Em.Application.create({
     return (this.get('currentStackVersion') || this.get('defaultStackVersion')).replace(regExp, '');
   }.property('currentStackVersion', 'defaultStackVersion', 'currentStackName'),
 
-  isHadoop23Stack: function () {
-    return (stringUtils.compareVersions(this.get('currentStackVersionNumber'), "2.3") > -1);
-  }.property('currentStackVersionNumber'),
-
   isHadoopWindowsStack: Em.computed.equal('currentStackName', 'HDPWIN'),
 
   /**
@@ -225,6 +241,10 @@ module.exports = Em.Application.create({
   isHaEnabled: function () {
     return App.Service.find('HDFS').get('isLoaded') && !App.HostComponent.find().someProperty('componentName', 'SECONDARY_NAMENODE');
   }.property('router.clusterController.dataLoadList.services', 'router.clusterController.isServiceContentFullyLoaded'),
+
+  hasNameNodeFederation: function () {
+    return App.HDFSService.find('HDFS').get('masterComponentGroups.length') > 1;
+  }.property('router.clusterController.isHostComponentMetricsLoaded', 'router.clusterController.isHDFSNameSpacesLoaded'),
 
   /**
    * If ResourceManager High Availability is enabled
@@ -302,6 +322,10 @@ module.exports = Em.Application.create({
 
     supportsServiceCheck: function() {
       return App.StackService.find().filterProperty('serviceCheckSupported').mapProperty('serviceName');
+    }.property('App.router.clusterController.isLoaded'),
+
+    supportsDeleteViaUI: function() {
+      return App.StackService.find().filterProperty('supportDeleteViaUi').mapProperty('serviceName');
     }.property('App.router.clusterController.isLoaded')
   }),
 
@@ -310,6 +334,10 @@ module.exports = Em.Application.create({
    * @type {Em.Object}
    */
   components: Em.Object.create({
+    isMasterAddableOnlyOnHA: function () {
+      return App.StackServiceComponent.find().filterProperty('isMasterAddableOnlyOnHA').mapProperty('componentName')
+    }.property('App.router.clusterController.isLoaded'),
+
     allComponents: function () {
       return App.StackServiceComponent.find().mapProperty('componentName')
     }.property('App.router.clusterController.isLoaded'),

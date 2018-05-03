@@ -19,7 +19,8 @@ Ambari Agent
 
 """
 from ambari_commons.str_utils import ensure_double_backslashes
-from resource_management import *
+from resource_management.libraries.script.script import Script
+from resource_management.libraries.functions import is_empty
 import status_params
 
 # server configurations
@@ -37,7 +38,7 @@ except:
 hadoop_user = config["configurations"]["cluster-env"]["hadoop.user.name"]
 zk_user = hadoop_user
 
-# notused zk_log_dir = config['configurations']['zookeeper-env']['zk_log_dir']
+zk_log_dir = config['configurations']['zookeeper-env']['zk_log_dir']
 zk_data_dir = ensure_double_backslashes(config['configurations']['zoo.cfg']['dataDir'])
 tickTime = config['configurations']['zoo.cfg']['tickTime']
 initLimit = config['configurations']['zoo.cfg']['initLimit']
@@ -52,9 +53,9 @@ else:
   zoo_cfg_properties_map = {}
 zoo_cfg_properties_map_length = len(zoo_cfg_properties_map)
 
-zookeeper_hosts = config['clusterHostInfo']['zookeeper_hosts']
+zookeeper_hosts = config['clusterHostInfo']['zookeeper_server_hosts']
 zookeeper_hosts.sort()
-hostname = config['hostname']
+hostname = config['agentLevelParams']['hostname']
 
 _authentication = config['configurations']['core-site']['hadoop.security.authentication']
 security_enabled = ( not is_empty(_authentication) and _authentication == 'kerberos')

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,10 +17,14 @@
  */
 package org.apache.ambari.server.orm.entities;
 
+import java.util.Collection;
+
 import javax.persistence.Basic;
 import javax.persistence.CascadeType;
 import javax.persistence.Column;
 import javax.persistence.Entity;
+import javax.persistence.EnumType;
+import javax.persistence.Enumerated;
 import javax.persistence.FetchType;
 import javax.persistence.GeneratedValue;
 import javax.persistence.GenerationType;
@@ -32,7 +36,8 @@ import javax.persistence.OneToMany;
 import javax.persistence.OneToOne;
 import javax.persistence.Table;
 import javax.persistence.TableGenerator;
-import java.util.Collection;
+
+import org.apache.ambari.server.controller.internal.ProvisionAction;
 
 @Entity
 @Table(name = "topology_request")
@@ -40,7 +45,8 @@ import java.util.Collection;
                 pkColumnName = "sequence_name", valueColumnName = "sequence_value",
                 pkColumnValue = "topology_request_id_seq", initialValue = 0)
 @NamedQueries({
-  @NamedQuery(name = "TopologyRequestEntity.findByClusterId", query = "SELECT req FROM TopologyRequestEntity req WHERE req.clusterId = :clusterId")
+  @NamedQuery(name = "TopologyRequestEntity.findByClusterId", query = "SELECT req FROM TopologyRequestEntity req WHERE req.clusterId = :clusterId"),
+  @NamedQuery(name = "TopologyRequestEntity.findProvisionRequests", query = "SELECT req FROM TopologyRequestEntity req WHERE req.action = 'PROVISION'"),
 })
 public class TopologyRequestEntity {
   @Id
@@ -75,6 +81,10 @@ public class TopologyRequestEntity {
 
   @OneToOne(mappedBy = "topologyRequestEntity", cascade = CascadeType.ALL)
   private TopologyLogicalRequestEntity topologyLogicalRequestEntity;
+
+  @Column(name = "provision_action", length = 255, nullable = true)
+  @Enumerated(EnumType.STRING)
+  private ProvisionAction provisionAction;
 
   public Long getId() {
     return id;
@@ -146,6 +156,14 @@ public class TopologyRequestEntity {
 
   public void setTopologyLogicalRequestEntity(TopologyLogicalRequestEntity topologyLogicalRequestEntity) {
     this.topologyLogicalRequestEntity = topologyLogicalRequestEntity;
+  }
+
+  public ProvisionAction getProvisionAction() {
+    return provisionAction;
+  }
+
+  public void setProvisionAction(ProvisionAction provisionAction) {
+    this.provisionAction = provisionAction;
   }
 
   @Override

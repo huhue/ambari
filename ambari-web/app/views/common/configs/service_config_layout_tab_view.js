@@ -18,7 +18,7 @@
 
 var App = require('app');
 
-App.ServiceConfigLayoutTabView = Em.View.extend(App.ConfigOverridable, {
+App.ServiceConfigLayoutTabView = Em.View.extend(App.ConfigOverridable, App.LoadingOverlaySupport, {
 
   /**
    * Determines if view is editable
@@ -41,7 +41,14 @@ App.ServiceConfigLayoutTabView = Em.View.extend(App.ConfigOverridable, {
    */
   service: Em.computed.alias('controller.selectedService'),
 
-  templateName: require('templates/common/configs/service_config_layout_tab'),
+  templateName: function() {
+    var customTemplate = this.get('customTemplate');
+    return customTemplate ? customTemplate : require('templates/common/configs/service_config_layout_tab');
+  }.property('customTemplate'),
+
+  customTemplate: null,
+
+  fieldToObserve: 'controller.recommendationsInProgress',
 
   classNames: ['enhanced-config-tab-content'],
   /**
@@ -66,6 +73,14 @@ App.ServiceConfigLayoutTabView = Em.View.extend(App.ConfigOverridable, {
     'label': App.LabelView,
     'test-db-connection': App.TestDbConnectionWidgetView
   },
+
+  configNameWidgetMixinMap: {
+    num_llap_nodes: App.NumLlapNodesWidgetMixin
+  },
+
+  checkOverlay: function () {
+    this.handleFieldChanges();
+  }.observes('controller.activeTab.id', 'controller.activeTab.isRendered'),
 
   /**
    * Prepare configs for render
@@ -96,21 +111,21 @@ App.ServiceConfigLayoutTabView = Em.View.extend(App.ConfigOverridable, {
    * @param containerObject
    */
   setConfigsToContainer: function(containerObject) {
-    var self = this;
-    var service = this.get('controller.stepConfigs').findProperty('serviceName', this.get('controller.selectedService.serviceName'));
-    if (!service) return;
     containerObject.set('configs', []);
 
     containerObject.get('configProperties').forEach(function (configId) {
 
       var config = App.configsCollection.getConfig(configId);
-      var configProperty = service.get('configs').findProperty('id', Em.get(config, 'id'));
+      var stepConfig = this.get('controller.stepConfigs').findProperty('serviceName', Em.get(config, 'serviceName'));
+      if (!stepConfig) return;
+
+      var configProperty = stepConfig.get('configs').findProperty('id', Em.get(config, 'id'));
       if (!configProperty) return;
 
       containerObject.get('configs').pushObject(configProperty);
-      var configWidgetType = Em.get(config, 'widgetType');
-      var widget = self.get('widgetTypeMap')[configWidgetType];
-      Em.assert('Unknown config widget view for config ' + configProperty.get('id') + ' with type ' + configWidgetType, widget);
+
+      var widget = this.getWidgetView(config);
+      Em.assert('Unknown config widget view for config ' + configProperty.get('id') + ' with type ' +  Em.get(config, 'widgetType'), widget);
 
       var additionalProperties = {
         widget: widget,
@@ -157,7 +172,20 @@ App.ServiceConfigLayoutTabView = Em.View.extend(App.ConfigOverridable, {
           stackConfigProperty: config
         });
       }
-    });
+    }, this);
+  },
+
+  /**
+   *
+   * @param {object} config
+   * @returns {Em.View}
+   */
+  getWidgetView: function (config) {
+    var configWidgetType = Em.get(config, 'widgetType');
+    var name = Em.get(config, 'name');
+    var mixin = this.get('configNameWidgetMixinMap')[name];
+    var viewClass = this.get('widgetTypeMap')[configWidgetType];
+    return Em.isNone(mixin) ? viewClass : viewClass.extend(mixin);
   },
 
   /**
@@ -165,7 +193,9 @@ App.ServiceConfigLayoutTabView = Em.View.extend(App.ConfigOverridable, {
    * @param event
    */
   setActiveSubTab: function(event) {
-    if (!event.context) return;
+    if (!event.context || !event.context.get('isVisible')) {
+      return false;
+    }
     try {
       event.context.get('subSection.subSectionTabs').setEach('isActive', false);
       event.context.set('isActive', true);
@@ -184,6 +214,7 @@ App.ServiceConfigLayoutTabView = Em.View.extend(App.ConfigOverridable, {
     }
     this.set('content.isConfigsPrepared', true);
     this.set('dataIsReady', true);
+    this._super(...arguments);
   }
 
 });

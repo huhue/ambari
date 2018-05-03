@@ -18,9 +18,7 @@
  * limitations under the License.
  */
 -->
-
 <configuration supports_final="true">
-
   <property>
     <name>ranger.tagsync.logdir</name>
     <value>/var/log/ranger/tagsync</value>
@@ -30,8 +28,8 @@
       <overridable>false</overridable>
       <editable-only-at-install>true</editable-only-at-install>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.dest.ranger.endpoint</name>
     <value>{{ranger_external_url}}</value>
@@ -39,13 +37,13 @@
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.source.atlas</name>
     <display-name>Enable Atlas Tag Source</display-name>
     <value>false</value>
-    <description></description>
+    <description/>
     <value-attributes>
       <type>boolean</type>
     </value-attributes>
@@ -55,63 +53,63 @@
         <name>atlas.server.bind.address</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.source.atlasrest</name>
     <display-name>Enable AtlasRest Tag Source</display-name>
     <value>false</value>
-    <description></description>
+    <description/>
     <value-attributes>
       <type>boolean</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.source.file</name>
     <display-name>Enable File Tag Source</display-name>
     <value>false</value>
-    <description></description>
+    <description/>
     <value-attributes>
       <type>boolean</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.source.file.check.interval.millis</name>
     <display-name>File Source: File update polling interval</display-name>
-    <value></value>
-    <description></description>
+    <value/>
+    <description/>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.source.atlasrest.download.interval.millis</name>
     <display-name>AtlasREST Source: Atlas source download interval</display-name>
-    <value></value>
+    <value>60000</value>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.dest.ranger.ssl.config.filename</name>
     <value>/etc/ranger/tagsync/conf/mytruststore.jks</value>
     <description>Truststore used for tagsync, required if tagsync -&gt; ranger admin communication is SSL enabled</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.source.file.filename</name>
     <display-name>File Source: Filename</display-name>
-    <value></value>
+    <value/>
     <description>File Source Filename</description>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.keystore.filename</name>
     <value>/etc/ranger/tagsync/conf/rangertagsync.jceks</value>
@@ -119,58 +117,70 @@
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
-  <property>
-    <name>ranger.tagsync.atlas.to.ranger.service.mapping</name>
-    <value></value>
-    <description>Service Mapping</description>
-    <value-attributes>
-      <empty-value-valid>true</empty-value-valid>
-    </value-attributes>
-  </property>
-
   <property>
     <name>ranger.tagsync.source.atlasrest.endpoint</name>
     <display-name>AtlasREST Source: Atlas endpoint</display-name>
-    <value></value>
-    <description></description>
+    <value/>
+    <description/>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
+    <depends-on>
+      <property>
+        <type>application-properties</type>
+        <name>atlas.server.http.port</name>
+      </property>
+      <property>
+        <type>application-properties</type>
+        <name>atlas.server.https.port</name>
+      </property>
+      <property>
+        <type>application-properties</type>
+        <name>atlas.enableTLS</name>
+      </property>
+    </depends-on>
   </property>
-
-  <property>
-    <name>ranger.tagsync.atlas.custom.resource.mappers</name>
-    <value></value>
-    <description></description>
-    <value-attributes>
-      <empty-value-valid>true</empty-value-valid>
-    </value-attributes>
-  </property>
-
   <property>
     <name>ranger.tagsync.kerberos.principal</name>
-    <value></value>
-    <description></description>
+    <value/>
+    <description/>
+    <property-type>KERBEROS_PRINCIPAL</property-type>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.kerberos.keytab</name>
-    <value></value>
-    <description></description>
+    <value/>
+    <description/>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>ranger.tagsync.dest.ranger.username</name>
     <value>rangertagsync</value>
-    <description></description>
+    <description/>
+    <on-ambari-upgrade add="true"/>
   </property>
-
+  <property>
+    <name>ranger.tagsync.source.atlasrest.keystore.filename</name>
+    <value>/etc/ranger/tagsync/conf/atlasuser.jceks</value>
+    <description>Tagsync atlasrest keystore file</description>
+    <value-attributes>
+      <empty-value-valid>true</empty-value-valid>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
+  </property>
+  <property>
+    <name>ranger.tagsync.source.atlasrest.username</name>
+    <value>admin</value>
+    <description/>
+    <on-ambari-upgrade add="true"/>
+  </property>
 </configuration>

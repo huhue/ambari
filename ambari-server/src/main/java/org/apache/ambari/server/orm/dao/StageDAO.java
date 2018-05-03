@@ -18,13 +18,12 @@
 
 package org.apache.ambari.server.orm.dao;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import javax.persistence.EntityManager;
 import javax.persistence.TypedQuery;
@@ -60,7 +59,7 @@ public class StageDAO {
   /**
    * Mapping of valid status transitions that that are driven by manual input.
    */
-  private static Map<HostRoleStatus, EnumSet<HostRoleStatus>> manualTransitionMap = new HashMap<HostRoleStatus, EnumSet<HostRoleStatus>>();
+  private static Map<HostRoleStatus, EnumSet<HostRoleStatus>> manualTransitionMap = new HashMap<>();
 
   static {
     manualTransitionMap.put(HostRoleStatus.HOLDING,
@@ -128,39 +127,52 @@ public class StageDAO {
     return daoUtils.selectList(query, requestId);
   }
 
-  /**
-   * Get the list of stage entities for the given request id and stage ids.
-   *
-   * @param requestId  the request ids
-   * @param stageIds   the set of stage ids
-   *
-   * @return the set of entities for the given ids
-   */
   @RequiresSession
-  public List<StageEntity> findByStageIds(Long requestId, Set<Long> stageIds) {
-    List<StageEntity> stageEntities = new LinkedList<StageEntity>();
-
-    for (StageEntity stage : findByRequestId(requestId)) {
-      if (stageIds.contains(stage.getStageId())) {
-        stageEntities.add(stage);
-      }
-    }
-    return stageEntities;
-  }
-
-  @RequiresSession
-  public List<StageEntity> findByCommandStatuses(
-      Collection<HostRoleStatus> statuses) {
+  public List<StageEntity> findByRequestIdAndCommandStatuses(Long requestId, Collection<HostRoleStatus> statuses) {
     TypedQuery<StageEntity> query = entityManagerProvider.get().createNamedQuery(
-        "StageEntity.findByCommandStatuses", StageEntity.class);
+        "StageEntity.findByRequestIdAndCommandStatuses", StageEntity.class);
 
+    query.setParameter("requestId", requestId);
     query.setParameter("statuses", statuses);
     return daoUtils.selectList(query);
   }
 
+  /**
+   * Finds the first stage matching any of the specified statuses for every
+   * request. For example, to find the first {@link HostRoleStatus#IN_PROGRESS}
+   * stage for every request, pass in
+   * {@link HostRoleStatus#IN_PROGRESS_STATUSES}.
+   *
+   * @param statuses
+   *          {@link HostRoleStatus}
+   * @return the list of the first matching stage for the given statuses for
+   *         every request.
+   */
+  @RequiresSession
+  public List<StageEntity> findFirstStageByStatus(Collection<HostRoleStatus> statuses) {
+    TypedQuery<Object[]> query = entityManagerProvider.get().createNamedQuery(
+        "StageEntity.findFirstStageByStatus", Object[].class);
+
+    query.setParameter("statuses", statuses);
+
+    List<Object[]> results = daoUtils.selectList(query);
+    List<StageEntity> stages = new ArrayList<>();
+
+    for (Object[] result : results) {
+      StageEntityPK stagePK = new StageEntityPK();
+      stagePK.setRequestId((Long) result[0]);
+      stagePK.setStageId((Long) result[1]);
+
+      StageEntity stage = findByPK(stagePK);
+      stages.add(stage);
+    }
+
+    return stages;
+  }
+
   @RequiresSession
   public Map<Long, String> findRequestContext(List<Long> requestIds) {
-    Map<Long, String> resultMap = new HashMap<Long, String>();
+    Map<Long, String> resultMap = new HashMap<>();
     if (requestIds != null && !requestIds.isEmpty()) {
       TypedQuery<StageEntity> query = entityManagerProvider.get()
         .createQuery("SELECT stage FROM StageEntity stage WHERE " +
@@ -234,7 +246,7 @@ public class StageDAO {
     }
 
     // sorting
-    JpaSortBuilder<StageEntity> sortBuilder = new JpaSortBuilder<StageEntity>();
+    JpaSortBuilder<StageEntity> sortBuilder = new JpaSortBuilder<>();
     List<Order> sortOrders = sortBuilder.buildSortOrders(request.getSortRequest(), visitor);
     query.orderBy(sortOrders);
 
@@ -255,8 +267,8 @@ public class StageDAO {
    *          the stage entity to update
    * @param desiredStatus
    *          the desired stage status
-   * @param controller
-   *          the ambari management controller
+   * @param actionManager
+   *          the action manager
    *
    * @throws java.lang.IllegalArgumentException
    *           if the transition to the desired status is not a legal transition
@@ -276,9 +288,11 @@ public class StageDAO {
     if (desiredStatus == HostRoleStatus.ABORTED) {
       actionManager.cancelRequest(stage.getRequestId(), "User aborted.");
     } else {
+      List <HostRoleCommandEntity> hrcWithChangedStatus = new ArrayList<>();
       for (HostRoleCommandEntity hostRoleCommand : tasks) {
         HostRoleStatus hostRoleStatus = hostRoleCommand.getStatus();
         if (hostRoleStatus.equals(currentStatus)) {
+          hrcWithChangedStatus.add(hostRoleCommand);
           hostRoleCommand.setStatus(desiredStatus);
 
           if (desiredStatus == HostRoleStatus.PENDING) {
@@ -289,6 +303,21 @@ public class StageDAO {
       }
     }
   }
+
+  /**
+   *
+   * @param stageEntityPK  {@link StageEntityPK}
+   * @param status {@link HostRoleStatus}
+   * @param displayStatus {@link HostRoleStatus}
+   */
+  @Transactional
+  public void updateStatus(StageEntityPK stageEntityPK, HostRoleStatus status, HostRoleStatus displayStatus) {
+    StageEntity stageEntity = findByPK(stageEntityPK);
+    stageEntity.setStatus(status);
+    stageEntity.setDisplayStatus(displayStatus);
+    merge(stageEntity);
+  }
+
 
   /**
    * Determine whether or not it is valid to transition from this stage status

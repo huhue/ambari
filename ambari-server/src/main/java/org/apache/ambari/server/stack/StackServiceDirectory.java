@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,11 +18,17 @@
 
 package org.apache.ambari.server.stack;
 
+import java.io.File;
+import java.util.Arrays;
+import java.util.Collection;
+
+import javax.annotation.Nullable;
+
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.state.stack.RepositoryXml;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.File;
 
 
 /**
@@ -35,6 +41,19 @@ public class StackServiceDirectory extends ServiceDirectory {
    */
   private static final Logger LOG = LoggerFactory.getLogger(StackServiceDirectory.class);
 
+
+  /**
+   * repository file
+   */
+  @Nullable
+  private RepositoryXml repoFile;
+
+  /**
+   * repository directory
+   */
+  @Nullable
+  private String repoDir;
+
   /**
    * Constructor.
    *
@@ -45,12 +64,32 @@ public class StackServiceDirectory extends ServiceDirectory {
     super(servicePath);
   }
 
-  @Override
+  /**
+   * Obtain the repository xml file if exists or null
+   *
+   * @return the repository xml file if exists or null
+   */
+  @Nullable
+  public RepositoryXml getRepoFile() {
+    return repoFile;
+  }
+
+  /**
+   * Obtain the repository directory if exists or null
+   *
+   * @return the repository directory if exists or null
+   */
+  @Nullable
+  public String getRepoDir() {
+    return repoDir;
+  }
+
   /**
    * Obtain the advisor name.
    *
    * @return advisor name
    */
+  @Override
   public String getAdvisorName(String serviceName) {
     if (getAdvisorFile() == null || serviceName == null)
       return null;
@@ -62,42 +101,67 @@ public class StackServiceDirectory extends ServiceDirectory {
     String stackName = stackDir.getName();
     String versionString = stackVersionDir.getName().replaceAll("\\.", "");
 
-    return stackName + versionString + serviceName + "ServiceAdvisor";
+    // Remove illegal python characters from the advisor name
+    String advisorClassName = stackName + versionString + serviceName + "ServiceAdvisor";
+    advisorClassName = advisorClassName.replaceAll("[^a-zA-Z0-9]+", "");
+
+    return advisorClassName;
+  }
+
+  /**
+   * Parse the repository file.
+   *
+   * @param subDirs service directory sub directories
+   */
+  private void parseRepoFile(Collection<String> subDirs) {
+    RepositoryFolderAndXml repoDirAndXml = RepoUtil.parseRepoFile(directory, subDirs, unmarshaller);
+    repoDir = repoDirAndXml.repoDir.orNull();
+    repoFile = repoDirAndXml.repoXml.orNull();
+
+    if (repoFile == null || !repoFile.isValid()) {
+      LOG.info("No repository information defined for "
+          + ", serviceName=" + getName()
+          + ", repoFolder=" + getPath() + File.separator + RepoUtil.REPOSITORY_FOLDER_NAME);
+    }
   }
 
   @Override
-  /**
-   * Parse stack service directory.
-   * packageDir Format: stacks/<stackName>/<stackVersion>/services/<serviceName>/package
-   * Example:
-   *  directory: "/var/lib/ambari-server/resources/stacks/HDP/2.0.6/services/HDFS"
-   *  packageDir: "stacks/HDP/2.0.6/services/HDFS/package"
-   * @throws AmbariException if unable to parse the service directory
-   */
   protected void parsePath() throws AmbariException {
+    super.parsePath();
+    Collection<String> subDirs = Arrays.asList(directory.list());
+    parseRepoFile(subDirs);
+  }
+
+  /**
+   * @return the resources directory
+   */
+  @Override
+  protected File getResourcesDirectory() {
+    File serviceDir = new File(getAbsolutePath());
+    return serviceDir.getParentFile().getParentFile().getParentFile().getParentFile().getParentFile();
+  }
+
+  /**
+   * @return the service name (will be used for logging purposes by superclass)
+   */
+  @Override
+  public String getService() {
+    File serviceDir = new File(getAbsolutePath());
+
+    return serviceDir.getName();
+  }
+
+  /**
+   * @return the stack name-version (will be used for logging purposes by superclass)
+   */
+  @Override
+  public String getStack() {
     File serviceDir = new File(getAbsolutePath());
     File stackVersionDir = serviceDir.getParentFile().getParentFile();
     File stackDir = stackVersionDir.getParentFile();
 
     String stackId = String.format("%s-%s", stackDir.getName(), stackVersionDir.getName());
-
-    File absPackageDir = new File(getAbsolutePath() + File.separator + PACKAGE_FOLDER_NAME);
-    if (absPackageDir.isDirectory()) {
-      String[] files = absPackageDir.list();
-      int fileCount = files.length;
-      if (fileCount > 0) {
-        packageDir = absPackageDir.getPath().substring(stackDir.getParentFile().getParentFile().getPath().length() + 1);
-        LOG.debug(String.format("Service package folder for service %s for stack %s has been resolved to %s",
-                serviceDir.getName(), stackId, packageDir));
-      }
-      else {
-        LOG.debug(String.format("Service package folder %s for service %s for stack %s is empty.",
-                absPackageDir, serviceDir.getName(), stackId));
-      }
-    } else {
-      LOG.debug(String.format("Service package folder %s for service %s for stack %s does not exist.",
-              absPackageDir, serviceDir.getName(), stackId));
-    }
-    parseMetaInfoFile();
+    return stackId;
   }
+
 }

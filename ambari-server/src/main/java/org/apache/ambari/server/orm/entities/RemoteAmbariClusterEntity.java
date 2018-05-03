@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,11 +18,7 @@
 
 package org.apache.ambari.server.orm.entities;
 
-import org.apache.ambari.server.view.DefaultMasker;
-import org.apache.ambari.view.MaskException;
-import org.apache.ambari.view.Masker;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.Collection;
 
 import javax.persistence.CascadeType;
 import javax.persistence.Column;
@@ -35,7 +31,12 @@ import javax.persistence.NamedQuery;
 import javax.persistence.OneToMany;
 import javax.persistence.Table;
 import javax.persistence.TableGenerator;
-import java.util.Collection;
+
+import org.apache.ambari.server.view.DefaultMasker;
+import org.apache.ambari.view.MaskException;
+import org.apache.ambari.view.Masker;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Remote Ambari Managed Cluster
@@ -53,21 +54,25 @@ import java.util.Collection;
   @NamedQuery(name = "remoteAmbariClusterByName", query =
     "SELECT remoteAmbariCluster " +
       "FROM RemoteAmbariClusterEntity remoteAmbariCluster " +
-      "WHERE remoteAmbariCluster.name=:clusterName")})
+      "WHERE remoteAmbariCluster.name=:clusterName"),
+  @NamedQuery(name = "remoteAmbariClusterById", query =
+    "SELECT remoteAmbariCluster " +
+      "FROM RemoteAmbariClusterEntity remoteAmbariCluster " +
+      "WHERE remoteAmbariCluster.id=:clusterId")})
 @Entity
 public class RemoteAmbariClusterEntity {
 
   /**
    * The logger.
    */
-  protected final static Logger LOG = LoggerFactory.getLogger(RemoteAmbariClusterEntity.class);
+  private static final Logger LOG = LoggerFactory.getLogger(RemoteAmbariClusterEntity.class);
 
   @Id
   @Column(name = "cluster_id", nullable = false)
   @GeneratedValue(strategy = GenerationType.TABLE, generator = "remote_cluster_id_generator")
   private Long id;
 
-  @Column(name = "name", nullable = false, insertable = true, updatable = false)
+  @Column(name = "name", nullable = false, insertable = true, updatable = true)
   private String name;
 
   @Column(name = "url", nullable = false, insertable = true, updatable = true)

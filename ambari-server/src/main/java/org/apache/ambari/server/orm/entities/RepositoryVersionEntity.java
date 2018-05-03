@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,11 +17,10 @@
  */
 package org.apache.ambari.server.orm.entities;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-import javax.persistence.Basic;
 import javax.persistence.CascadeType;
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -38,11 +37,15 @@ import javax.persistence.NamedQueries;
 import javax.persistence.NamedQuery;
 import javax.persistence.OneToMany;
 import javax.persistence.OneToOne;
+import javax.persistence.PrePersist;
+import javax.persistence.PreUpdate;
 import javax.persistence.Table;
 import javax.persistence.TableGenerator;
 import javax.persistence.Transient;
 import javax.persistence.UniqueConstraint;
 
+import org.apache.ambari.annotations.Experimental;
+import org.apache.ambari.annotations.ExperimentalFeature;
 import org.apache.ambari.server.StaticallyInject;
 import org.apache.ambari.server.state.RepositoryType;
 import org.apache.ambari.server.state.StackId;
@@ -50,9 +53,8 @@ import org.apache.ambari.server.state.repository.Release;
 import org.apache.ambari.server.state.repository.VersionDefinitionXml;
 import org.apache.ambari.server.state.stack.upgrade.RepositoryVersionHelper;
 import org.apache.commons.lang.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Objects;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 
@@ -65,20 +67,32 @@ import com.google.inject.Provider;
     table = "ambari_sequences",
     pkColumnName = "sequence_name",
     valueColumnName = "sequence_value",
-    pkColumnValue = "repo_version_id_seq",
-    initialValue = 0
+    pkColumnValue = "repo_version_id_seq"
     )
 @NamedQueries({
-    @NamedQuery(name = "repositoryVersionByDisplayName", query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.displayName=:displayname"),
-    @NamedQuery(name = "repositoryVersionByStack", query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.stack.stackName=:stackName AND repoversion.stack.stackVersion=:stackVersion"),
-    @NamedQuery(name = "repositoryVersionByStackNameAndVersion", query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.stack.stackName=:stackName AND repoversion.version=:version"),
-    @NamedQuery(name = "repositoryVersionsFromDefinition", query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.versionXsd IS NOT NULL")
-})
+    @NamedQuery(
+        name = "repositoryVersionByDisplayName",
+        query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.displayName=:displayname"),
+    @NamedQuery(
+        name = "repositoryVersionByStack",
+        query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.stack.stackName=:stackName AND repoversion.stack.stackVersion=:stackVersion"),
+    @NamedQuery(
+        name = "repositoryVersionByStackAndType",
+        query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.stack.stackName=:stackName AND repoversion.stack.stackVersion=:stackVersion AND repoversion.type=:type"),
+    @NamedQuery(
+        name = "repositoryVersionByStackNameAndVersion",
+        query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.stack.stackName=:stackName AND repoversion.version=:version"),
+    @NamedQuery(
+        name = "repositoryVersionsFromDefinition",
+        query = "SELECT repoversion FROM RepositoryVersionEntity repoversion WHERE repoversion.versionXsd IS NOT NULL"),
+    @NamedQuery(
+        name = "findRepositoryByVersion",
+        query = "SELECT repositoryVersion FROM RepositoryVersionEntity repositoryVersion WHERE repositoryVersion.version = :version ORDER BY repositoryVersion.id DESC"),
+    @NamedQuery(
+        name = "findByServiceDesiredVersion",
+        query = "SELECT repositoryVersion FROM RepositoryVersionEntity repositoryVersion WHERE repositoryVersion IN (SELECT DISTINCT sd1.desiredRepositoryVersion FROM ServiceDesiredStateEntity sd1 WHERE sd1.desiredRepositoryVersion IN ?1)") })
 @StaticallyInject
 public class RepositoryVersionEntity {
-
-  private static Logger LOG = LoggerFactory.getLogger(RepositoryVersionEntity.class);
-
   @Inject
   private static Provider<RepositoryVersionHelper> repositoryVersionHelperProvider;
 
@@ -91,7 +105,7 @@ public class RepositoryVersionEntity {
    * Unidirectional one-to-one association to {@link StackEntity}
    */
   @OneToOne
-  @JoinColumn(name = "stack_id", unique = false, nullable = false, insertable = true, updatable = true)
+  @JoinColumn(name = "stack_id", nullable = false)
   private StackEntity stack;
 
   @Column(name = "version")
@@ -100,34 +114,47 @@ public class RepositoryVersionEntity {
   @Column(name = "display_name")
   private String displayName;
 
-  @Lob
-  @Column(name = "repositories")
-  private String operatingSystems;
-
-
-  @OneToMany(cascade = CascadeType.REMOVE, mappedBy = "repositoryVersion")
-  private Set<ClusterVersionEntity> clusterVersionEntities;
+  /**
+   * one-to-many association to {@link RepoOsEntity}
+   */
+  @OneToMany(fetch = FetchType.EAGER, cascade = CascadeType.ALL, mappedBy = "repositoryVersionEntity", orphanRemoval = true)
+  private List<RepoOsEntity> repoOsEntities = new ArrayList<>();
 
   @OneToMany(cascade = CascadeType.REMOVE, mappedBy = "repositoryVersion")
   private Set<HostVersionEntity> hostVersionEntities;
 
-  @Column(name = "repo_type", nullable = false, insertable = true, updatable = true)
+  @Column(name = "repo_type", nullable = false)
   @Enumerated(value = EnumType.STRING)
   private RepositoryType type = RepositoryType.STANDARD;
 
-  @Basic(fetch=FetchType.LAZY)
   @Lob
-  @Column(name="version_xml", insertable = true, updatable = true)
+  @Column(name="version_xml")
   private String versionXml;
 
   @Transient
   private VersionDefinitionXml versionDefinition = null;
 
-  @Column(name="version_url", nullable=true, insertable=true, updatable=true)
+  @Column(name="version_url")
   private String versionUrl;
 
-  @Column(name="version_xsd", insertable = true, updatable = true)
+  @Column(name="version_xsd")
   private String versionXsd;
+
+  @Column(name = "hidden", nullable = false)
+  private short isHidden = 0;
+
+  /**
+   * Repositories can't be trusted until they have been deployed and we've
+   * detected their actual version. Most of the time, things match up, but
+   * editing a VDF could causes the version to be misrepresented. Once we have
+   * received the correct version of the repository (normally after it's been
+   * installed), then we can set this flag to {@code true}.
+   */
+  @Column(name = "resolved", nullable = false)
+  private short resolved = 0;
+
+  @Column(name = "legacy", nullable = false)
+  private short isLegacy = 0;
 
   @ManyToOne
   @JoinColumn(name = "parent_id")
@@ -136,6 +163,7 @@ public class RepositoryVersionEntity {
   @OneToMany(mappedBy = "parent")
   private List<RepositoryVersionEntity> children;
 
+
   // ----- RepositoryVersionEntity -------------------------------------------------------
 
   public RepositoryVersionEntity() {
@@ -143,19 +171,23 @@ public class RepositoryVersionEntity {
   }
 
   public RepositoryVersionEntity(StackEntity stack, String version,
-      String displayName, String operatingSystems) {
+                                 String displayName, List<RepoOsEntity> repoOsEntities) {
     this.stack = stack;
     this.version = version;
     this.displayName = displayName;
-    this.operatingSystems = operatingSystems;
+    this.repoOsEntities = repoOsEntities;
+    for (RepoOsEntity repoOsEntity : repoOsEntities) {
+      repoOsEntity.setRepositoryVersionEntity(this);
+    }
   }
 
-  /**
-   * Update one-to-many relation without rebuilding the whole entity
-   * @param entity many-to-one entity
-   */
-  public void updateClusterVersionEntityRelation(ClusterVersionEntity entity){
-    clusterVersionEntities.add(entity);
+  @PreUpdate
+  @PrePersist
+  public void removePrefixFromVersion() {
+    String stackName = stack.getStackName();
+    if (version.startsWith(stackName)) {
+      version = version.substring(stackName.length() + 1);
+    }
   }
 
   /**
@@ -197,8 +229,20 @@ public class RepositoryVersionEntity {
     return version;
   }
 
+  /**
+   * Sets the version on this repository version entity. If the version is
+   * confirmed as correct, then the called should also set
+   * {@link #setResolved(boolean)}.
+   *
+   * @param version
+   */
   public void setVersion(String version) {
     this.version = version;
+
+    // need to be called to avoid work with wrong value until entity would be persisted
+    if (null != version && null != stack && null != stack.getStackName()){
+      removePrefixFromVersion();
+    }
   }
 
   public String getDisplayName() {
@@ -221,31 +265,6 @@ public class RepositoryVersionEntity {
     }
   }
 
-
-  public String getOperatingSystemsJson() {
-    return operatingSystems;
-  }
-
-  public void setOperatingSystems(String repositories) {
-    operatingSystems = repositories;
-  }
-
-  /**
-   * Getter which hides json nature of operating systems and returns them as entities.
-   *
-   * @return empty list if stored json is invalid
-   */
-  public List<OperatingSystemEntity> getOperatingSystems() {
-    if (StringUtils.isNotBlank(operatingSystems)) {
-      try {
-        return repositoryVersionHelperProvider.get().parseOperatingSystems(operatingSystems);
-      } catch (Exception ex) {
-        // Should never happen as we validate json before storing it to DB
-        LOG.error("Could not parse operating systems json stored in database:" + operatingSystems, ex);
-      }
-    }
-    return Collections.emptyList();
-  }
 
   public String getStackName() {
     return getStackId().getStackName();
@@ -275,37 +294,6 @@ public class RepositoryVersionEntity {
    */
   public void setType(RepositoryType type) {
     this.type = type;
-  }
-
-  @Override
-  public boolean equals(Object o) {
-    if (this == o) {
-      return true;
-    }
-    if (o == null || getClass() != o.getClass()) {
-      return false;
-    }
-
-    RepositoryVersionEntity that = (RepositoryVersionEntity) o;
-
-    if (id != null ? !id.equals(that.id) : that.id != null) {
-      return false;
-    }
-    if (stack != null ? !stack.equals(that.stack) : that.stack != null) {
-      return false;
-    }
-    if (version != null ? !version.equals(that.version) : that.version != null) {
-      return false;
-    }
-    if (displayName != null ? !displayName.equals(that.displayName) : that.displayName != null) {
-      return false;
-    }
-
-    if (operatingSystems != null ? !operatingSystems.equals(that.operatingSystems) : that.operatingSystems != null) {
-      return false;
-    }
-
-    return true;
   }
 
   /**
@@ -340,7 +328,7 @@ public class RepositoryVersionEntity {
    * @return the XSD name extracted from the XML.
    */
   public String getVersionXsd() {
-    return versionXml;
+    return versionXsd;
   }
 
   /**
@@ -368,45 +356,72 @@ public class RepositoryVersionEntity {
     return versionDefinition;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public int hashCode() {
-    int result = id != null ? id.hashCode() : 0;
-    result = 31 * result + (stack != null ? stack.hashCode() : 0);
-    result = 31 * result + (version != null ? version.hashCode() : 0);
-    result = 31 * result + (displayName != null ? displayName.hashCode() : 0);
-    result = 31 * result + (operatingSystems != null ? operatingSystems.hashCode() : 0);
-    return result;
+    return java.util.Objects.hash(stack, version, displayName, repoOsEntities);
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public boolean equals(Object object) {
+    if (null == object) {
+      return false;
+    }
+
+    if (this == object) {
+      return true;
+    }
+
+    if (object.getClass() != getClass()) {
+      return false;
+    }
+
+    RepositoryVersionEntity that = (RepositoryVersionEntity) object;
+    return Objects.equal(stack, that.stack) && Objects.equal(version, that.version)
+        && Objects.equal(displayName, that.displayName)
+        && Objects.equal(repoOsEntities, that.repoOsEntities);
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this).add("id", id).add("stack", stack).add("version",
+        version).add("type", type).add("hidden", isHidden == 1).toString();
   }
 
   /**
    * Determine if the version belongs to the stack.
-   * Right now, this is only applicable for the HDP stack.
    * @param stackId Stack, such as HDP-2.3
    * @param version Version number, such as 2.3.0.0, or 2.3.0.0-1234
    * @return Return true if the version starts with the digits of the stack.
    */
   public static boolean isVersionInStack(StackId stackId, String version) {
     if (null != version && !StringUtils.isBlank(version)) {
-      // HDP Stack
-      if (stackId.getStackName().equalsIgnoreCase(StackId.HDP_STACK) ||
-          stackId.getStackName().equalsIgnoreCase(StackId.HDPWIN_STACK)) {
-
-        String leading = stackId.getStackVersion();  // E.g, 2.3
-        // In some cases during unit tests, the leading can contain 3 digits, so only the major number (first two parts) are needed.
-        String[] leadingParts = leading.split("\\.");
-        if (null != leadingParts && leadingParts.length > 2) {
-          leading = leadingParts[0] + "." + leadingParts[1];
-        }
-        return version.startsWith(leading);
+      String stackName = stackId.getStackName();
+      if (version.startsWith(stackName + "-")) {
+        version = version.substring(stackName.length() + 1);
       }
-      // For other stacks, don't make the check.
-      return true;
+
+      String leading = stackId.getStackVersion();  // E.g, 2.3
+      // In some cases during unit tests, the leading can contain 3 digits, so only the major number (first two parts) are needed.
+      String[] leadingParts = leading.split("\\.");
+      if (null != leadingParts && leadingParts.length > 2) {
+        leading = leadingParts[0] + "." + leadingParts[1];
+      }
+      return version.startsWith(leading);
     }
     return false;
   }
 
   /**
-   * @param parent
+   * @param entity parent entity
    */
   public void setParent(RepositoryVersionEntity entity) {
     parent = entity;
@@ -427,4 +442,78 @@ public class RepositoryVersionEntity {
     return null == parent ? null : parent.getId();
   }
 
+  /**
+   * Gets whether this repository is hidden.
+   *
+   * @return
+   */
+  public boolean isHidden() {
+    return isHidden != 0;
+  }
+
+  /**
+   * Sets whether this repository is hidden. A repository can be hidden for
+   * several reasons, including if it has been removed (but needs to be kept
+   * around for foreign key relationships) or if it just is not longer desired
+   * to see it.
+   *
+   * @param isHidden
+   */
+  public void setHidden(boolean isHidden) {
+    this.isHidden = (short) (isHidden ? 1 : 0);
+  }
+
+  /**
+   * Gets whether this repository has been installed and has reported back its
+   * actual version.
+   *
+   * @return {@code true} if the version for this repository can be trusted,
+   *         {@code false} otherwise.
+   */
+  public boolean isResolved() {
+    return resolved == 1;
+  }
+
+  /**
+   * Gets whether this repository is legacy
+   *
+   * @return
+   */
+  @Deprecated
+  @Experimental(feature= ExperimentalFeature.PATCH_UPGRADES)
+  public boolean isLegacy(){
+    return isLegacy == 1;
+  }
+
+  /**
+   * Sets whether this repository is legacy. Scoped for moving from old-style repository naming to new
+   *
+   * @param isLegacy
+   */
+  @Deprecated
+  @Experimental(feature= ExperimentalFeature.PATCH_UPGRADES)
+  public void setLegacy(boolean isLegacy){
+    this.isLegacy = isLegacy ? (short) 1 : (short) 0;
+  }
+
+  /**
+   * Sets whether this repository has been installed and has reported back its
+   * actual version.
+   *
+   * @param resolved
+   */
+  public void setResolved(boolean resolved) {
+    this.resolved = resolved ? (short) 1 : (short) 0;
+  }
+
+  public List<RepoOsEntity> getRepoOsEntities() {
+    return repoOsEntities;
+  }
+
+  public void addRepoOsEntities(List<RepoOsEntity> repoOsEntities) {
+    this.repoOsEntities = repoOsEntities;
+    for (RepoOsEntity repoOsEntity : repoOsEntities) {
+      repoOsEntity.setRepositoryVersionEntity(this);
+    }
+  }
 }

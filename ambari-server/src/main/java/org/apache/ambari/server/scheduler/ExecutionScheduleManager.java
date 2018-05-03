@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,19 +18,31 @@
 
 package org.apache.ambari.server.scheduler;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonSyntaxException;
-import com.google.inject.Inject;
-import com.google.inject.Singleton;
-import com.sun.jersey.api.client.Client;
-import com.sun.jersey.api.client.ClientResponse;
-import com.sun.jersey.api.client.UniformInterfaceException;
-import com.sun.jersey.api.client.WebResource;
-import com.sun.jersey.api.client.config.ClientConfig;
-import com.sun.jersey.api.client.config.DefaultClientConfig;
-import com.sun.jersey.api.client.filter.ClientFilter;
-import com.sun.jersey.api.client.filter.CsrfProtectionFilter;
-import com.sun.jersey.client.urlconnection.HTTPSProperties;
+import static org.quartz.CronScheduleBuilder.cronSchedule;
+import static org.quartz.JobBuilder.newJob;
+import static org.quartz.SimpleScheduleBuilder.simpleSchedule;
+import static org.quartz.TriggerBuilder.newTrigger;
+
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+import java.text.ParseException;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.regex.Pattern;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.actionmanager.ActionDBAccessor;
 import org.apache.ambari.server.actionmanager.HostRoleStatus;
@@ -47,6 +59,7 @@ import org.apache.ambari.server.state.scheduler.BatchSettings;
 import org.apache.ambari.server.state.scheduler.RequestExecution;
 import org.apache.ambari.server.state.scheduler.Schedule;
 import org.apache.ambari.server.utils.DateUtils;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.text.StrBuilder;
 import org.quartz.CronExpression;
 import org.quartz.JobDetail;
@@ -57,23 +70,19 @@ import org.quartz.Trigger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.net.ssl.*;
-import java.security.KeyManagementException;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
-import java.text.ParseException;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.ListIterator;
-import java.util.Map;
-import static org.quartz.CronScheduleBuilder.cronSchedule;
-import static org.quartz.JobBuilder.newJob;
-import static org.quartz.SimpleScheduleBuilder.simpleSchedule;
-import static org.quartz.TriggerBuilder.newTrigger;
+import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
+import com.google.inject.Inject;
+import com.google.inject.Singleton;
+import com.sun.jersey.api.client.Client;
+import com.sun.jersey.api.client.ClientResponse;
+import com.sun.jersey.api.client.UniformInterfaceException;
+import com.sun.jersey.api.client.WebResource;
+import com.sun.jersey.api.client.config.ClientConfig;
+import com.sun.jersey.api.client.config.DefaultClientConfig;
+import com.sun.jersey.api.client.filter.ClientFilter;
+import com.sun.jersey.api.client.filter.CsrfProtectionFilter;
+import com.sun.jersey.client.urlconnection.HTTPSProperties;
 
 /**
  * This class handles scheduling request execution for managed clusters
@@ -96,6 +105,8 @@ public class ExecutionScheduleManager {
     "RequestExecution";
   protected static final String DEFAULT_API_PATH = "api/v1";
 
+  public static final String USER_ID_HEADER = "X-Authenticated-User-ID";
+
   protected Client ambariClient;
   protected WebResource ambariWebResource;
 
@@ -105,6 +116,8 @@ public class ExecutionScheduleManager {
   protected static final String REQUESTS_ABORTED_TASKS_KEY = "aborted_task_count";
   protected static final String REQUESTS_TIMEDOUT_TASKS_KEY = "timed_out_task_count";
   protected static final String REQUESTS_TOTAL_TASKS_KEY = "task_count";
+
+  protected static final Pattern CONTAINS_API_VERSION_PATTERN = Pattern.compile("^/?" + DEFAULT_API_PATH+ ".*");
 
   @Inject
   public ExecutionScheduleManager(Configuration configuration,
@@ -122,9 +135,7 @@ public class ExecutionScheduleManager {
 
     try {
       buildApiClient();
-    } catch (NoSuchAlgorithmException e) {
-      throw new RuntimeException(e);
-    } catch (KeyManagementException e) {
+    } catch (NoSuchAlgorithmException | KeyManagementException e) {
       throw new RuntimeException(e);
     }
   }
@@ -236,7 +247,7 @@ public class ExecutionScheduleManager {
    * @param trigger
    */
   public void scheduleJob(Trigger trigger) {
-    LOG.debug("Scheduling job: " + trigger.getJobKey());
+    LOG.debug("Scheduling job: {}", trigger.getJobKey());
     if (isSchedulerAvailable()) {
       try {
         executionScheduler.scheduleJob(trigger);
@@ -327,7 +338,7 @@ public class ExecutionScheduleManager {
 
       try {
         executionScheduler.scheduleJob(trigger);
-        LOG.debug("Scheduled trigger next fire time: " + trigger.getNextFireTime());
+        LOG.debug("Scheduled trigger next fire time: {}", trigger.getNextFireTime());
       } catch (SchedulerException e) {
         LOG.error("Unable to schedule request execution.", e);
         throw new AmbariException(e.getMessage());
@@ -345,7 +356,7 @@ public class ExecutionScheduleManager {
 
       try {
         executionScheduler.scheduleJob(trigger);
-        LOG.debug("Scheduled trigger next fire time: " + trigger.getNextFireTime());
+        LOG.debug("Scheduled trigger next fire time: {}", trigger.getNextFireTime());
       } catch (SchedulerException e) {
         LOG.error("Unable to schedule request execution.", e);
         throw new AmbariException(e.getMessage());
@@ -405,8 +416,8 @@ public class ExecutionScheduleManager {
   }
 
   protected String getJobName(Long executionId, Long orderId) {
-    return BATCH_REQUEST_JOB_PREFIX + "-" + executionId.toString() + "-" +
-      orderId.toString();
+    return BATCH_REQUEST_JOB_PREFIX + "-" + executionId + "-" +
+      orderId;
   }
 
   /**
@@ -485,7 +496,7 @@ public class ExecutionScheduleManager {
           String jobName = getJobName(requestExecution.getId(),
             batchRequest.getOrderId());
 
-          LOG.debug("Deleting Job, jobName = " + jobName);
+          LOG.debug("Deleting Job, jobName = {}", jobName);
 
           try {
             executionScheduler.deleteJob(JobKey.jobKey(jobName,
@@ -521,7 +532,7 @@ public class ExecutionScheduleManager {
 
       body = requestExecution.getRequestBody(batchId);
 
-      BatchRequestResponse batchRequestResponse = performApiRequest(uri, body, type);
+      BatchRequestResponse batchRequestResponse = performApiRequest(uri, body, type, requestExecution.getAuthenticatedUserId());
 
       updateBatchRequest(executionId, batchId, clusterName, batchRequestResponse, false);
 
@@ -563,13 +574,13 @@ public class ExecutionScheduleManager {
 
     String responseString = clientResponse.getEntity(String.class);
     LOG.debug("Processing API response: status={}, body={}", retCode, responseString);
-    Map httpResponseMap;
+    Map<String, Object> httpResponseMap;
     try {
-      httpResponseMap = gson.fromJson(responseString, Map.class);
+      httpResponseMap = gson.<Map<String, Object>>fromJson(responseString, Map.class);
       LOG.debug("Processing responce as JSON");
     } catch (JsonSyntaxException e) {
       LOG.debug("Response is not valid JSON object. Recording as is");
-      httpResponseMap = new HashMap();
+      httpResponseMap = new HashMap<>();
       httpResponseMap.put("message", responseString);
     }
 
@@ -655,7 +666,7 @@ public class ExecutionScheduleManager {
   }
 
   protected BatchRequestResponse performApiGetRequest(String relativeUri, boolean queryAllFields) {
-    WebResource webResource = ambariWebResource.path(relativeUri);
+    WebResource webResource = extendApiResource(ambariWebResource, relativeUri);
     if (queryAllFields) {
       webResource = webResource.queryParam("fields", "*");
     }
@@ -668,10 +679,11 @@ public class ExecutionScheduleManager {
     return convertToBatchRequestResponse(response);
   }
 
-  protected BatchRequestResponse performApiRequest(String relativeUri, String body, String method) {
+  protected BatchRequestResponse performApiRequest(String relativeUri, String body, String method, Integer userId) {
     ClientResponse response;
     try {
-      response = ambariWebResource.path(relativeUri).method(method, ClientResponse.class, body);
+      response = extendApiResource(ambariWebResource, relativeUri)
+          .header(USER_ID_HEADER, userId).method(method, ClientResponse.class, body);
     } catch (UniformInterfaceException e) {
       response = e.getResponse();
     }
@@ -786,6 +798,20 @@ public class ExecutionScheduleManager {
     if (markCompleted) {
       requestExecution.updateStatus(RequestExecution.Status.COMPLETED);
     }
+  }
+
+  /**
+   * Returns the absolute web resource with {@link #DEFAULT_API_PATH}
+   * @param webResource Ambari WebResource as provided by the client {@link #ambariWebResource}
+   * @param relativeUri relative request URI
+   * @return  Extended WebResource
+   */
+  protected WebResource extendApiResource(WebResource webResource, String relativeUri) {
+    WebResource result = webResource;
+    if (StringUtils.isNotEmpty(relativeUri) && !CONTAINS_API_VERSION_PATTERN.matcher(relativeUri).matches()) {
+      result = webResource.path(DEFAULT_API_PATH);
+    }
+    return result.path(relativeUri);
   }
 }
 

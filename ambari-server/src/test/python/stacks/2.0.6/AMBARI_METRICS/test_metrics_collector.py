@@ -41,13 +41,15 @@ class TestMetricsCollector(RMFTestCase):
     self.assert_hbase_configure('master', distributed=True)
     self.assert_hbase_configure('regionserver', distributed=True)
     self.assert_ams('collector', distributed=True)
-    self.assertResourceCalled('Execute', 'ambari-sudo.sh /usr/jdk64/jdk1.7.0_45/bin/keytool -importkeystore -srckeystore /etc/security/clientKeys/all.jks -destkeystore /some_tmp_dir/truststore.p12 -deststoretype PKCS12 -srcstorepass bigdata -deststorepass bigdata',
+    self.assertResourceCalled('Execute', 'ambari-sudo.sh /usr/jdk64/jdk1.7.0_45/bin/keytool -importkeystore -srckeystore /etc/security/clientKeys/all.jks -destkeystore /some_tmp_dir/truststore.p12 -srcalias c6402.ambari.apache.org -deststoretype PKCS12 -srcstorepass bigdata -deststorepass bigdata',
                               )
     self.assertResourceCalled('Execute', 'ambari-sudo.sh openssl pkcs12 -in /some_tmp_dir/truststore.p12 -out /etc/ambari-metrics-collector/conf/ca.pem -cacerts -nokeys -passin pass:bigdata',
                               )
-    self.assertResourceCalled('Execute', ('chown', u'ams', '/etc/ambari-metrics-collector/conf/ca.pem'),
+    self.assertResourceCalled('Execute', ('chown', u'ams:hadoop', '/etc/ambari-metrics-collector/conf/ca.pem'),
                               sudo=True
                               )
+    self.assertResourceCalled('Execute', ('chmod', '644', '/etc/ambari-metrics-collector/conf/ca.pem'),
+                              sudo=True)
     self.assertResourceCalled('Execute', 'ambari-sudo.sh rm -rf /some_tmp_dir',
                               )
     self.assertResourceCalled('Execute', '/usr/lib/ams-hbase/bin/hbase-daemon.sh --config /etc/ams-hbase/conf stop regionserver',
@@ -96,13 +98,18 @@ class TestMetricsCollector(RMFTestCase):
     self.assert_hbase_configure('master')
     self.assert_hbase_configure('regionserver')
     self.assert_ams('collector')
+    self.assertResourceCalled('Execute', '/usr/lib/ams-hbase/bin/hbase-daemon.sh --config /etc/ams-hbase/conf stop regionserver',
+                              on_timeout = 'ls /var/run/ambari-metrics-collector//hbase-ams-regionserver.pid >/dev/null 2>&1 && ps `cat /var/run/ambari-metrics-collector//hbase-ams-regionserver.pid` >/dev/null 2>&1 && ambari-sudo.sh -H -E kill -9 `ambari-sudo.sh cat /var/run/ambari-metrics-collector//hbase-ams-regionserver.pid`',
+                              timeout = 30,
+                              user = 'ams'
+                              )
+    self.assertResourceCalled('File', '/var/run/ambari-metrics-collector//hbase-ams-regionserver.pid',
+                              action = ['delete']
+                              )
     self.assertResourceCalled('Execute', '/usr/sbin/ambari-metrics-collector --config /etc/ambari-metrics-collector/conf stop',
                               user = 'ams'
     )
     self.assertResourceCalled('Execute', 'ambari-sudo.sh rm -rf /var/lib/ambari-metrics-collector/hbase-tmp/*.tmp',
-    )
-    self.assertResourceCalled('Directory', '/var/lib/ambari-metrics-collector/hbase-tmp/zookeeper',
-                              action = ['delete']
     )
 
     self.assertResourceCalled('File', '/etc/ambari-metrics-collector/conf/core-site.xml',
@@ -140,7 +147,7 @@ class TestMetricsCollector(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/etc/ambari-metrics-collector/conf',
                               configurations = self.getConfig()['configurations']['ams-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['ams-hbase-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['ams-hbase-site']
     )
 
     self.assertResourceCalled('XmlConfig', 'ssl-server.xml',
@@ -148,7 +155,7 @@ class TestMetricsCollector(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/etc/ambari-metrics-collector/conf',
                               configurations = self.getConfig()['configurations']['ams-ssl-server'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['ams-ssl-server']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['ams-ssl-server']
     )
     merged_ams_hbase_site = {}
     merged_ams_hbase_site.update(self.getConfig()['configurations']['ams-hbase-site'])
@@ -160,12 +167,12 @@ class TestMetricsCollector(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/etc/ambari-metrics-collector/conf',
                               configurations = merged_ams_hbase_site,
-                              configuration_attributes = self.getConfig()['configuration_attributes']['ams-hbase-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['ams-hbase-site']
     )
     self.assertResourceCalled('File', '/etc/ambari-metrics-collector/conf/log4j.properties',
                               owner = 'ams',
                               group = 'hadoop',
-                              content = "\n",
+                              content = InlineTemplate(self.getConfig()['configurations']['ams-hbase-log4j']['content']),
                               mode=0644,
     )
     self.assertResourceCalled('File', '/etc/ambari-metrics-collector/conf/ams-env.sh',
@@ -208,7 +215,7 @@ class TestMetricsCollector(RMFTestCase):
                                 mode=0644,
                                 conf_dir = '/etc/ambari-metrics-collector/conf',
                                 configurations = self.getConfig()['configurations']['hdfs-site'],
-                                configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+                                configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
       )
       self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
                                 owner = 'ams',
@@ -216,7 +223,7 @@ class TestMetricsCollector(RMFTestCase):
                                 mode=0644,
                                 conf_dir = '/etc/ams-hbase/conf',
                                 configurations = self.getConfig()['configurations']['hdfs-site'],
-                                configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+                                configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
       )
       self.assertResourceCalled('XmlConfig', 'core-site.xml',
                                 owner = 'ams',
@@ -224,7 +231,7 @@ class TestMetricsCollector(RMFTestCase):
                                 mode=0644,
                                 conf_dir = '/etc/ambari-metrics-collector/conf',
                                 configurations = self.getConfig()['configurations']['core-site'],
-                                configuration_attributes = self.getConfig()['configuration_attributes']['core-site']
+                                configuration_attributes = self.getConfig()['configurationAttributes']['core-site']
       )
       self.assertResourceCalled('XmlConfig', 'core-site.xml',
                                 owner = 'ams',
@@ -232,7 +239,7 @@ class TestMetricsCollector(RMFTestCase):
                                 mode=0644,
                                 conf_dir = '/etc/ams-hbase/conf',
                                 configurations = self.getConfig()['configurations']['core-site'],
-                                configuration_attributes = self.getConfig()['configuration_attributes']['core-site']
+                                configuration_attributes = self.getConfig()['configurationAttributes']['core-site']
       )
 
   def assert_hbase_configure(self, name=None, distributed=False):
@@ -274,14 +281,14 @@ class TestMetricsCollector(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/etc/ams-hbase/conf',
                               configurations = self.getConfig()['configurations']['ams-hbase-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['ams-hbase-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['ams-hbase-site']
                               )
     self.assertResourceCalled('XmlConfig', 'hbase-policy.xml',
                               owner = 'ams',
                               group = 'hadoop',
                               conf_dir = '/etc/ams-hbase/conf',
                               configurations = self.getConfig()['configurations']['ams-hbase-policy'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['ams-hbase-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['ams-hbase-site']
     )
     self.assertResourceCalled('File', '/etc/ams-hbase/conf/hbase-env.sh',
                               owner = 'ams',
@@ -374,9 +381,10 @@ class TestMetricsCollector(RMFTestCase):
                                   owner = 'ams',
                                   action = ['delete']
         )
+    
     self.assertResourceCalled('File', '/etc/ams-hbase/conf/log4j.properties',
                               owner = 'ams',
                               group = 'hadoop',
                               mode = 0644,
-                              content = "\n"
+                              content = InlineTemplate(self.getConfig()['configurations']['ams-hbase-log4j']['content'])
     )

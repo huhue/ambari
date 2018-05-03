@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,37 +18,40 @@
 
 package org.apache.ambari.server.bootstrap;
 
-import junit.framework.Assert;
-import junit.framework.TestCase;
-import org.apache.ambari.server.api.services.AmbariMetaInfo;
-import org.apache.ambari.server.bootstrap.BootStrapStatus.BSStat;
-import org.apache.ambari.server.configuration.Configuration;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 
+import org.apache.ambari.server.api.services.AmbariMetaInfo;
+import org.apache.ambari.server.bootstrap.BootStrapStatus.BSStat;
+import org.apache.ambari.server.configuration.Configuration;
+import org.apache.commons.io.FileUtils;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import junit.framework.Assert;
+import junit.framework.TestCase;
+
 /**
  * Test BootStrap Implementation.
  */
 public class BootStrapTest extends TestCase {
-  private static Log LOG = LogFactory.getLog(BootStrapTest.class);
+  private static final Logger LOG = LoggerFactory.getLogger(BootStrapTest.class);
   public TemporaryFolder temp = new TemporaryFolder();
 
+  @Override
   @Before
   public void setUp() throws IOException {
     temp.create();
   }
 
+  @Override
   @After
   public void tearDown() throws IOException {
     temp.delete();
@@ -69,12 +72,12 @@ public class BootStrapTest extends TestCase {
       sharedResourcesDir = ClassLoader.getSystemClassLoader().getResource("").getPath();
     }
 
-    properties.setProperty(Configuration.BOOTSTRAP_DIR, bootdir);
-    properties.setProperty(Configuration.BOOTSTRAP_SCRIPT, prepareEchoCommand(bootdir));
-    properties.setProperty(Configuration.SRVR_KSTR_DIR_KEY, "target" + File.separator + "classes");
-    properties.setProperty(Configuration.METADATA_DIR_PATH, metadetadir);
-    properties.setProperty(Configuration.SERVER_VERSION_FILE, serverVersionFilePath);
-    properties.setProperty(Configuration.SHARED_RESOURCES_DIR_KEY, sharedResourcesDir);
+    properties.setProperty(Configuration.BOOTSTRAP_DIRECTORY.getKey(), bootdir);
+    properties.setProperty(Configuration.BOOTSTRAP_SCRIPT.getKey(), prepareEchoCommand(bootdir));
+    properties.setProperty(Configuration.SRVR_KSTR_DIR.getKey(), "target" + File.separator + "classes");
+    properties.setProperty(Configuration.METADATA_DIR_PATH.getKey(), metadetadir);
+    properties.setProperty(Configuration.SERVER_VERSION_FILE.getKey(), serverVersionFilePath);
+    properties.setProperty(Configuration.SHARED_RESOURCES_DIR.getKey(), sharedResourcesDir);
 
     Configuration conf = new Configuration(properties);
     AmbariMetaInfo ambariMetaInfo = new AmbariMetaInfo(conf);
@@ -82,7 +85,7 @@ public class BootStrapTest extends TestCase {
     impl.init();
     SshHostInfo info = new SshHostInfo();
     info.setSshKey("xyz");
-    ArrayList<String> hosts = new ArrayList<String>();
+    ArrayList<String> hosts = new ArrayList<>();
     hosts.add("host1");
     hosts.add("host2");
     info.setUserRunAs("root");
@@ -146,19 +149,19 @@ public class BootStrapTest extends TestCase {
       serverKSTRDir = new File(new File(ClassLoader.getSystemClassLoader().getResource("").getPath()).getParent(), "classes").getPath();
     }
 
-    properties.setProperty(Configuration.BOOTSTRAP_DIR, bootdir);
-    properties.setProperty(Configuration.BOOTSTRAP_SCRIPT, prepareEchoCommand(bootdir));
-    properties.setProperty(Configuration.SRVR_KSTR_DIR_KEY, serverKSTRDir);
-    properties.setProperty(Configuration.METADATA_DIR_PATH, metadetadir);
-    properties.setProperty(Configuration.SERVER_VERSION_FILE, serverVersionFilePath);
-    properties.setProperty(Configuration.SHARED_RESOURCES_DIR_KEY, sharedResourcesDir);
+    properties.setProperty(Configuration.BOOTSTRAP_DIRECTORY.getKey(), bootdir);
+    properties.setProperty(Configuration.BOOTSTRAP_SCRIPT.getKey(), prepareEchoCommand(bootdir));
+    properties.setProperty(Configuration.SRVR_KSTR_DIR.getKey(), serverKSTRDir);
+    properties.setProperty(Configuration.METADATA_DIR_PATH.getKey(), metadetadir);
+    properties.setProperty(Configuration.SERVER_VERSION_FILE.getKey(), serverVersionFilePath);
+    properties.setProperty(Configuration.SHARED_RESOURCES_DIR.getKey(), sharedResourcesDir);
     Configuration conf = new Configuration(properties);
     AmbariMetaInfo ambariMetaInfo = new AmbariMetaInfo(conf);
     BootStrapImpl impl = new BootStrapImpl(conf, ambariMetaInfo);
     impl.init();
     SshHostInfo info = new SshHostInfo();
     info.setSshKey("xyz");
-    ArrayList<String> hosts = new ArrayList<String>();
+    ArrayList<String> hosts = new ArrayList<>();
     hosts.add("host1");
     hosts.add("host2");
     info.setHosts(hosts);
@@ -209,7 +212,7 @@ public class BootStrapTest extends TestCase {
     FileUtils.writeStringToFile(new File(tmpFolder, "host2.done"), "1");
     FileUtils.writeStringToFile(new File(tmpFolder, "host2.log"), "err_log_2");
 
-    List<String> listHosts = new ArrayList<String>();
+    List<String> listHosts = new ArrayList<>();
     listHosts.add("host1");
     listHosts.add("host2");
     BSHostStatusCollector collector = new BSHostStatusCollector(tmpFolder,

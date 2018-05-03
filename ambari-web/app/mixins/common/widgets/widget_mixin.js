@@ -42,7 +42,7 @@ App.WidgetMixin = Ember.Mixin.create({
    * @type {RegExp}
    * @const
    */
-  VALUE_NAME_REGEX: /(\w+\s+\w+)?[\w\.\,\:\=\[\]]+/g,
+  VALUE_NAME_REGEX: /[^(\s+\-\*\/\\+\s+)+](\w+\s+\w+)?[\w\.\,\-\:\=\[\]]*/g,
 
   /**
    * @type {string}
@@ -84,7 +84,6 @@ App.WidgetMixin = Ember.Mixin.create({
   contentColor: Em.computed.ifThenElse('value', 'green', 'grey'),
 
   beforeRender: function () {
-    this.get('metrics').clear();
     this.loadMetrics();
   },
 
@@ -97,6 +96,8 @@ App.WidgetMixin = Ember.Mixin.create({
       request,
       requestCounter = 0,
       self = this;
+
+    this.set('metrics', []);
 
     for (var i in requestData) {
       request = requestData[i];
@@ -166,7 +167,7 @@ App.WidgetMixin = Ember.Mixin.create({
   getRequestData: function (metrics) {
     var requestsData = {};
     if (metrics) {
-      metrics.forEach(function (metric, index) {
+      metrics.forEach(function (metric) {
         var key;
         if (metric.host_component_criteria) {
           key = metric.service_name + '_' + metric.component_name + '_' + metric.host_component_criteria;
@@ -189,6 +190,7 @@ App.WidgetMixin = Ember.Mixin.create({
             id: requestMetric["metric_path"] + "_" + this.get('metricType'),
             context: this}];
           delete requestMetric["metric_path"];
+          requestMetric.tag = this.get('content.tag');
           requestsData[key] = requestMetric;
         }
       }, this);
@@ -254,16 +256,21 @@ App.WidgetMixin = Ember.Mixin.create({
    */
   getHostComponentMetrics: function (request) {
     var metricPaths = this.prepareMetricPaths(request.metric_paths);
+    var data = {
+      componentName: request.component_name,
+      metricPaths: this.prepareMetricPaths(request.metric_paths),
+      hostComponentCriteria: this.computeHostComponentCriteria(request)
+    };
+
+    if (request.tag) {
+      data.selectedHostsParam = '&HostRoles/host_name.in(' + App.HDFSService.find().objectAt(0).get('masterComponentGroups').findProperty('name', request.tag).hosts.join(',') + ')';
+    }
 
     if (metricPaths.length) {
       var xhr = App.ajax.send({
           name: 'widgets.hostComponent.metrics.get',
           sender: this,
-          data: {
-            componentName: request.component_name,
-            metricPaths: this.prepareMetricPaths(request.metric_paths),
-            hostComponentCriteria: this.computeHostComponentCriteria(request)
-          }
+          data: data
         }),
         graph = this.get('graphView') && this.get('childViews') && this.get('childViews').findProperty('runningRequests');
       if (graph) {
@@ -334,11 +341,11 @@ App.WidgetMixin = Ember.Mixin.create({
         graph.set('hasData', false);
         this.set('isExportButtonHidden', true);
         graph._showMessage('info', this.t('graphs.noData.title'), this.t('graphs.noDataAtTime.message'));
-        this.set('metrics', this.get('metrics').reject(function (item) {
-          return this.get('content.metrics').someProperty('name', item.name);
-        }, this));
       }
     }
+    this.set('metrics', this.get('metrics').reject(function (item) {
+      return this.get('content.metrics').someProperty('name', item.name);
+    }, this));
   },
 
   /**
@@ -390,12 +397,12 @@ App.WidgetMixin = Ember.Mixin.create({
     var metrics = this.get('content.metrics');
     data.host_components.forEach(function (item) {
       metrics.forEach(function (_metric) {
+        const metric = $.extend({}, _metric, true);
+        metric.hostName = item.HostRoles.host_name;
         if (!Em.isNone(Em.get(item, _metric.metric_path.replace(/\//g, '.')))) {
-          var metric = $.extend({}, _metric, true);
           metric.data = Em.get(item, _metric.metric_path.replace(/\//g, '.'));
-          metric.hostName = item.HostRoles.host_name;
-          this.get('metrics').pushObject(metric);
         }
+        this.get('metrics').pushObject(metric);
       }, this);
     }, this);
   },
@@ -416,12 +423,12 @@ App.WidgetMixin = Ember.Mixin.create({
     var metrics = this.get('content.metrics');
     data.items.forEach(function (item) {
       metrics.forEach(function (_metric, index) {
+        const metric = $.extend({}, _metric, true);
+        metric.hostName = item.Hosts.host_name;
         if (!Em.isNone(Em.get(item, _metric.metric_path.replace(/\//g, '.')))) {
-          var metric = $.extend({}, _metric, true);
           metric.data = Em.get(item, _metric.metric_path.replace(/\//g, '.'));
-          metric.hostName = item.Hosts.host_name;
-          this.get('metrics').pushObject(metric);
         }
+        this.get('metrics').pushObject(metric);
       }, this);
     }, this);
   },
@@ -458,17 +465,19 @@ App.WidgetMixin = Ember.Mixin.create({
 
     if (this.get('isLoaded')) {
       Em.run.next(function(){
-        App.tooltip(self.$(".corner-icon > .icon-copy"), {title: Em.I18n.t('common.clone')});
-        App.tooltip(self.$(".corner-icon > .icon-edit"), {title: Em.I18n.t('common.edit')});
-        App.tooltip(self.$(".corner-icon > .icon-save"), {title: Em.I18n.t('common.export')});
+        if (self.get('state') === 'inDOM') {
+          App.tooltip(self.$(".corner-icon > .glyphicon-copy"), {title: Em.I18n.t('common.clone')});
+          App.tooltip(self.$(".corner-icon > .glyphicon-edit"), {title: Em.I18n.t('common.edit')});
+          App.tooltip(self.$(".corner-icon > .glyphicon-save"), {title: Em.I18n.t('common.export')});
+        }
       });
     }
   }.observes('isLoaded'),
 
   willDestroyElement: function() {
-    this.$(".corner-icon > .icon-copy").tooltip('destroy');
-    this.$(".corner-icon > .icon-edit").tooltip('destroy');
-    this.$(".corner-icon > .icon-save").tooltip('destroy');
+    this.$(".corner-icon > .glyphicon-copy").tooltip('destroy');
+    this.$(".corner-icon > .glyphicon-edit").tooltip('destroy');
+    this.$(".corner-icon > .glyphicon-save").tooltip('destroy');
   },
 
   /**
@@ -692,6 +701,7 @@ App.WidgetMixin = Ember.Mixin.create({
 App.WidgetPreviewMixin = Ember.Mixin.create({
   beforeRender: Em.K,
   isLoaded: true,
+  isPreview: true,
   metrics: [],
   content: Em.Object.create({
     id: 1,
@@ -781,7 +791,8 @@ App.WidgetLoadAggregator = Em.Object.create({
     requests.forEach(function (request) {
       //poll metrics for graph widgets separately
       var graphSuffix = request.context.get('content.widgetType') === "GRAPH" ? "_graph" : '';
-      var id = request.startCallName + "_" + request.data.component_name + graphSuffix;
+      var tagSuffix = request.context.get('content.tag') ? '_' + request.context.get('content.tag') : '';
+      var id = request.startCallName + "_" + request.data.component_name + graphSuffix + tagSuffix;
 
       if (Em.isNone(bulks[id])) {
         bulks[id] = {

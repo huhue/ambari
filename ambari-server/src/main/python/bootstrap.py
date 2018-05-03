@@ -19,7 +19,7 @@ limitations under the License.
 '''
 
 import sys
-sys.path.append("/usr/lib/python2.6/site-packages/") # this file can be run with python2.7 that why we need this
+sys.path.append("/usr/lib/ambari-server/lib/") # this file can be run with python2.7 that why we need this
 
 # On Linux, the bootstrap process is supposed to run on hosts that may have installed Python 2.4 and above (CentOS 5).
 # Hence, the whole bootstrap code needs to comply with Python 2.4 instead of Python 2.6. Most notably, @-decorators and
@@ -29,7 +29,7 @@ import time
 import logging
 import pprint
 import os
-import subprocess
+from ambari_commons import subprocess32
 import threading
 import traceback
 import re
@@ -53,6 +53,10 @@ DEFAULT_AGENT_TEMP_FOLDER = "/var/lib/ambari-agent/tmp"
 DEFAULT_AGENT_DATA_FOLDER = "/var/lib/ambari-agent/data"
 DEFAULT_AGENT_LIB_FOLDER = "/var/lib/ambari-agent"
 PYTHON_ENV="env PYTHONPATH=$PYTHONPATH:" + DEFAULT_AGENT_TEMP_FOLDER
+SERVER_AMBARI_SUDO = os.getenv('ROOT','/').rstrip('/') + "/var/lib/ambari-server/ambari-sudo.sh"
+CREATE_PYTHON_WRAP_SCRIPT = os.getenv('ROOT','/').rstrip('/') + "/var/lib/ambari-server/create-python-wrap.sh"
+REMOTE_CREATE_PYTHON_WRAP_SCRIPT = os.path.join(DEFAULT_AGENT_TEMP_FOLDER, 'create-python-wrap.sh')
+AMBARI_SUDO = os.path.join(DEFAULT_AGENT_TEMP_FOLDER, 'ambari-sudo.sh')
 
 class HostLog:
   """ Provides per-host logging. """
@@ -100,8 +104,8 @@ class SCP:
       self.host_log.write("Running scp command " + ' '.join(scpcommand))
     self.host_log.write("==========================")
     self.host_log.write("\nCommand start time " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-    scpstat = subprocess.Popen(scpcommand, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
+    scpstat = subprocess32.Popen(scpcommand, stdout=subprocess32.PIPE,
+                               stderr=subprocess32.PIPE)
     log = scpstat.communicate()
     errorMsg = log[1]
     log = log[0] + "\n" + log[1]
@@ -138,8 +142,8 @@ class SSH:
       self.host_log.write("Running ssh command " + ' '.join(sshcommand))
     self.host_log.write("==========================")
     self.host_log.write("\nCommand start time " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-    sshstat = subprocess.Popen(sshcommand, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
+    sshstat = subprocess32.Popen(sshcommand, stdout=subprocess32.PIPE,
+                               stderr=subprocess32.PIPE)
     log = sshstat.communicate()
     errorMsg = log[1]
     if self.errorMessage and sshstat.returncode != 0:
@@ -399,7 +403,7 @@ class BootstrapWindows(Bootstrap):
 
 @OsFamilyImpl(os_family=OsFamilyImpl.DEFAULT)
 class BootstrapDefault(Bootstrap):
-  ambari_commons="/usr/lib/python2.6/site-packages/ambari_commons"
+  ambari_commons="/usr/lib/ambari-server/lib/ambari_commons"
   TEMP_FOLDER = DEFAULT_AGENT_TEMP_FOLDER
   OS_CHECK_SCRIPT_FILENAME = "os_check_type.py"
   PASSWORD_FILENAME = "host_pass"
@@ -450,6 +454,32 @@ class BootstrapDefault(Bootstrap):
   def hasPassword(self):
     password_file = self.shared_state.password_file
     return password_file is not None and password_file != 'null'
+  
+  def copyAmbariSudo(self):
+    # Copying the os check script file
+    fileToCopy = SERVER_AMBARI_SUDO
+    target = self.TEMP_FOLDER
+    params = self.shared_state
+    self.host_log.write("==========================\n")
+    self.host_log.write("Copying ambari sudo script...")
+    scp = SCP(params.user, params.sshPort, params.sshkey_file, self.host, fileToCopy,
+              target, params.bootdir, self.host_log)
+    result = scp.run()
+    self.host_log.write("\n")
+    return result
+
+  def copyCreatePythonWrapScript(self):
+    # Copying the script which will create python wrap
+    fileToCopy = CREATE_PYTHON_WRAP_SCRIPT
+    target = self.TEMP_FOLDER
+    params = self.shared_state
+    self.host_log.write("==========================\n")
+    self.host_log.write("Copying create-python-wrap script...")
+    scp = SCP(params.user, params.sshPort, params.sshkey_file, self.host, fileToCopy,
+              target, params.bootdir, self.host_log)
+    result = scp.run()
+    self.host_log.write("\n")
+    return result
 
   def copyOsCheckScript(self):
     # Copying the os check script file
@@ -479,12 +509,12 @@ class BootstrapDefault(Bootstrap):
     return result
 
   def getMoveRepoFileWithPasswordCommand(self, targetDir):
-    return "sudo -S mv " + str(self.getRemoteName(self.AMBARI_REPO_FILENAME)) \
+    return "{sudo} -S mv ".format(sudo=AMBARI_SUDO) + str(self.getRemoteName(self.AMBARI_REPO_FILENAME)) \
            + " " + os.path.join(str(targetDir), self.AMBARI_REPO_FILENAME) + \
            " < " + str(self.getPasswordFile())
 
   def getMoveRepoFileWithoutPasswordCommand(self, targetDir):
-    return "sudo mv " + str(self.getRemoteName(self.AMBARI_REPO_FILENAME)) \
+    return "{sudo} mv ".format(sudo=AMBARI_SUDO) + str(self.getRemoteName(self.AMBARI_REPO_FILENAME)) \
            + " " + os.path.join(str(targetDir), self.AMBARI_REPO_FILENAME)
 
   def getMoveRepoFileCommand(self, targetDir):
@@ -494,11 +524,11 @@ class BootstrapDefault(Bootstrap):
       return self.getMoveRepoFileWithoutPasswordCommand(targetDir)
 
   def getAptUpdateCommand(self):
-    return "sudo apt-get update -o Dir::Etc::sourcelist=\"%s/%s\" -o API::Get::List-Cleanup=\"0\" --no-list-cleanup" %\
-          ("sources.list.d", self.AMBARI_REPO_FILENAME)
+    return "%s apt-get update -o Dir::Etc::sourcelist=\"%s/%s\" -o API::Get::List-Cleanup=\"0\" --no-list-cleanup" %\
+          (AMBARI_SUDO, "sources.list.d", self.AMBARI_REPO_FILENAME)
           
   def getRepoFileChmodCommand(self):
-    return "sudo chmod 644 {0}".format(self.getRepoFile())
+    return "{0} chmod 644 {1}".format(AMBARI_SUDO, self.getRepoFile())
 
   def copyNeededFiles(self):
     # get the params
@@ -580,7 +610,7 @@ class BootstrapDefault(Bootstrap):
     version = self.getAmbariVersion()
     port = self.getAmbariPort()
     passwordFile = self.getPasswordFile()
-    return "sudo -S python " + str(setupFile) + " " + str(expected_hostname) + \
+    return "{sudo} -S python ".format(sudo=AMBARI_SUDO) + str(setupFile) + " " + str(expected_hostname) + \
            " " + str(passphrase) + " " + str(server)+ " " + quote_bash_args(str(user_run_as)) + " " + str(version) + \
            " " + str(port) + " < " + str(passwordFile)
 
@@ -591,9 +621,22 @@ class BootstrapDefault(Bootstrap):
     user_run_as = self.shared_state.user_run_as
     version=self.getAmbariVersion()
     port=self.getAmbariPort()
-    return "sudo python " + str(setupFile) + " " + str(expected_hostname) + \
+    return "{sudo} python ".format(sudo=AMBARI_SUDO) + str(setupFile) + " " + str(expected_hostname) + \
            " " + str(passphrase) + " " + str(server)+ " " + quote_bash_args(str(user_run_as)) + " " + str(version) + \
            " " + str(port)
+
+  def runCreatePythonWrapScript(self):
+    params = self.shared_state
+    self.host_log.write("==========================\n")
+    self.host_log.write("Running create-python-wrap script...")
+
+    command = "chmod a+x {script} && {sudo} {script}".format(sudo=AMBARI_SUDO, script=REMOTE_CREATE_PYTHON_WRAP_SCRIPT)
+
+    ssh = SSH(params.user, params.sshPort, params.sshkey_file, self.host, command,
+              params.bootdir, self.host_log)
+    retcode = ssh.run()
+    self.host_log.write("\n")
+    return retcode
 
   def runOsCheckScript(self):
     params = self.shared_state
@@ -619,6 +662,7 @@ class BootstrapDefault(Bootstrap):
       command = "dpkg --get-selections|grep -e '^sudo\s*install'"
     else:
       command = "rpm -qa | grep -e '^sudo\-'"
+    command = "[ \"$EUID\" -eq 0 ] || " + command
     ssh = SSH(params.user, params.sshPort, params.sshkey_file, self.host, command,
               params.bootdir, self.host_log,
               errorMessage="Error: Sudo command is not available. "
@@ -676,7 +720,7 @@ class BootstrapDefault(Bootstrap):
     params = self.shared_state
     user = params.user
 
-    command = "sudo mkdir -p {0} ; sudo chown -R {1} {0} ; sudo chmod 755 {3} ; sudo chmod 755 {2} ; sudo chmod 1777 {0}".format(
+    command = "SUDO=$([ \"$EUID\" -eq 0 ] && echo || echo sudo) ; $SUDO mkdir -p {0} ; $SUDO chown -R {1} {0} ; $SUDO chmod 755 {3} ; $SUDO chmod 755 {2} ; $SUDO chmod 1777 {0}".format(
       self.TEMP_FOLDER, quote_bash_args(params.user), DEFAULT_AGENT_DATA_FOLDER, DEFAULT_AGENT_LIB_FOLDER)
 
     ssh = SSH(params.user, params.sshPort, params.sshkey_file, self.host, command,
@@ -707,8 +751,11 @@ class BootstrapDefault(Bootstrap):
     self.status["start_time"] = time.time()
     # Population of action queue
     action_queue = [self.createTargetDir,
+                    self.copyAmbariSudo,
                     self.copyCommonFunctions,
+                    self.copyCreatePythonWrapScript,
                     self.copyOsCheckScript,
+                    self.runCreatePythonWrapScript,
                     self.runOsCheckScript,
                     self.checkSudoPackage
     ]
@@ -844,10 +891,10 @@ def main(argv=None):
 
   if not OSCheck.is_windows_family():
     # ssh doesn't like open files
-    subprocess.Popen(["chmod", "600", sshkey_file], stdout=subprocess.PIPE)
+    subprocess32.Popen(["chmod", "600", sshkey_file], stdout=subprocess32.PIPE)
 
     if passwordFile is not None and passwordFile != 'null':
-      subprocess.Popen(["chmod", "600", passwordFile], stdout=subprocess.PIPE)
+      subprocess32.Popen(["chmod", "600", passwordFile], stdout=subprocess32.PIPE)
 
   logging.info("BootStrapping hosts " + pprint.pformat(hostList) +
                " using " + scriptDir + " cluster primary OS: " + cluster_os_type +

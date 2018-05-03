@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,19 +17,24 @@
  */
 package org.apache.ambari.server.api.services;
 
-import com.sun.jersey.core.util.Base64;
-import org.apache.ambari.server.api.resources.ResourceInstance;
-import org.apache.ambari.server.controller.spi.Resource;
+import java.util.HashMap;
+import java.util.Map;
 
-import javax.ws.rs.*;
+import javax.ws.rs.DELETE;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
-import java.nio.charset.Charset;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import org.apache.ambari.annotations.ApiIgnore;
+import org.apache.ambari.server.api.resources.ResourceInstance;
+import org.apache.ambari.server.controller.spi.Resource;
 
 /**
  * WidgetLayout Service
@@ -42,7 +47,7 @@ public class WidgetLayoutService extends BaseService {
     this.clusterName = clusterName;
   }
 
-  @GET
+  @GET @ApiIgnore // until documented
   @Path("{widgetLayoutId}")
   @Produces("text/plain")
   public Response getService(String body, @Context HttpHeaders headers, @Context UriInfo ui,
@@ -61,15 +66,14 @@ public class WidgetLayoutService extends BaseService {
    *
    * @return instance collection resource representation
    */
-  @GET
+  @GET @ApiIgnore // until documented
   @Produces("text/plain")
   public Response getServices(String body, @Context HttpHeaders headers, @Context UriInfo ui) {
-    System.out.println("###########");
     return handleRequest(headers, body, ui, Request.Type.GET,
             createResource(null));
   }
 
-  @POST
+  @POST @ApiIgnore // until documented
   @Path("{widgetLayoutId}")
   @Produces("text/plain")
   public Response createService(String body, @Context HttpHeaders headers, @Context UriInfo ui,
@@ -78,7 +82,7 @@ public class WidgetLayoutService extends BaseService {
             createResource(widgetLayoutId));
   }
 
-  @POST
+  @POST @ApiIgnore // until documented
   @Produces("text/plain")
   public Response createServices(String body, @Context HttpHeaders headers, @Context UriInfo ui) {
 
@@ -86,7 +90,7 @@ public class WidgetLayoutService extends BaseService {
             createResource(null));
   }
 
-  @PUT
+  @PUT @ApiIgnore // until documented
   @Path("{widgetLayoutId}")
   @Produces("text/plain")
   public Response updateService(String body, @Context HttpHeaders headers, @Context UriInfo ui,
@@ -95,14 +99,14 @@ public class WidgetLayoutService extends BaseService {
     return handleRequest(headers, body, ui, Request.Type.PUT, createResource(widgetLayoutId));
   }
 
-  @PUT
+  @PUT @ApiIgnore // until documented
   @Produces("text/plain")
   public Response updateServices(String body, @Context HttpHeaders headers, @Context UriInfo ui) {
 
     return handleRequest(headers, body, ui, Request.Type.PUT, createResource(null));
   }
 
-  @DELETE
+  @DELETE @ApiIgnore // until documented
   @Path("{widgetLayoutId}")
   @Produces("text/plain")
   public Response deleteService(@Context HttpHeaders headers, @Context UriInfo ui,
@@ -112,7 +116,7 @@ public class WidgetLayoutService extends BaseService {
   }
 
   private ResourceInstance createResource(String widgetLayoutId) {
-    Map<Resource.Type,String> mapIds = new HashMap<Resource.Type, String>();
+    Map<Resource.Type,String> mapIds = new HashMap<>();
     mapIds.put(Resource.Type.WidgetLayout, widgetLayoutId);
     mapIds.put(Resource.Type.Cluster, clusterName);
     return createResource(Resource.Type.WidgetLayout, mapIds);

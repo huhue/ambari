@@ -18,31 +18,24 @@
  */
 package org.apache.ambari.logfeeder.input.reader;
 
+import org.apache.log4j.Logger;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.Reader;
 
-import org.apache.log4j.Logger;
-
 public enum LogsearchReaderFactory {
   INSTANCE;
-  private static Logger logger = Logger
-    .getLogger(LogsearchReaderFactory.class);
+  private static final Logger LOG = Logger.getLogger(LogsearchReaderFactory.class);
 
-  /**
-   * @param fileName
-   * @return
-   * @throws FileNotFoundException
-   */
   public Reader getReader(File file) throws FileNotFoundException {
-    logger.debug("Inside reader factory for file:" + file);
+    LOG.debug("Inside reader factory for file:" + file);
     if (GZIPReader.isValidFile(file.getAbsolutePath())) {
-      logger.info("Reading file " + file + " as gzip file");
+      LOG.info("Reading file " + file + " as gzip file");
       return new GZIPReader(file.getAbsolutePath());
     } else {
       return new FileReader(file);
     }
   }
-
 }

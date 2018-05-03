@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -43,7 +43,7 @@ public class Release {
   public String stackId;
 
   /**
-   * The stack version.
+   * The stack-based release version.
    */
   @XmlElement(name="version")
   public String version;
@@ -71,12 +71,6 @@ public class Release {
    */
   @XmlElement(name="display")
   public String display;
-
-  /**
-   * The optional package version
-   */
-  @XmlElement(name="package-version")
-  public String packageVersion;
 
   /**
    * @return the full version

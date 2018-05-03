@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,29 +20,38 @@
 package org.apache.ambari.server.topology;
 
 import java.util.List;
+import java.util.concurrent.Executor;
+
+import org.apache.ambari.server.actionmanager.HostRoleStatus;
+import org.apache.ambari.server.topology.tasks.TopologyHostTask;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Response to a host offer.
  */
-public class HostOfferResponse {
+final class HostOfferResponse {
+
   public enum Answer {ACCEPTED, DECLINED_PREDICATE, DECLINED_DONE}
+
+  private static final Logger LOG = LoggerFactory.getLogger(HostOfferResponse.class);
+  static final HostOfferResponse DECLINED_DUE_TO_PREDICATE = new HostOfferResponse(Answer.DECLINED_PREDICATE);
+  static final HostOfferResponse DECLINED_DUE_TO_DONE = new HostOfferResponse(Answer.DECLINED_DONE);
 
   private final Answer answer;
   private final String hostGroupName;
   private final long hostRequestId;
-  private final List<TopologyTask> tasks;
+  private final List<TopologyHostTask> tasks;
 
-  public HostOfferResponse(Answer answer) {
-    if (answer == Answer.ACCEPTED) {
-      throw new IllegalArgumentException("For accepted response, hostgroup name and tasks must be set");
-    }
-    this.answer = answer;
-    this.hostRequestId = -1;
-    this.hostGroupName = null;
-    this.tasks = null;
+  static HostOfferResponse createAcceptedResponse(long hostRequestId, String hostGroupName, List<TopologyHostTask> tasks) {
+    return new HostOfferResponse(Answer.ACCEPTED, hostRequestId, hostGroupName, tasks);
   }
 
-  public HostOfferResponse(Answer answer, long hostRequestId, String hostGroupName, List<TopologyTask> tasks) {
+  private HostOfferResponse(Answer answer) {
+    this(answer, -1, null, null);
+  }
+
+  private HostOfferResponse(Answer answer, long hostRequestId, String hostGroupName, List<TopologyHostTask> tasks) {
     this.answer = answer;
     this.hostRequestId = hostRequestId;
     this.hostGroupName = hostGroupName;
@@ -63,7 +72,27 @@ public class HostOfferResponse {
     return hostGroupName;
   }
 
-  public List<TopologyTask> getTasks() {
-    return tasks;
+  void executeTasks(Executor executor, final String hostName, final ClusterTopology topology, final AmbariContext ambariContext) {
+    if (answer != Answer.ACCEPTED) {
+      LOG.warn("Attempted to execute tasks for declined host offer", answer);
+    } else {
+      executor.execute(new Runnable() {
+        @Override
+        public void run() {
+          for (TopologyHostTask task : tasks) {
+            try {
+              LOG.info("Running task for accepted host offer for hostname = {}, task = {}", hostName, task.getType());
+              task.run();
+            } catch (Exception e) {
+              HostRequest hostRequest = task.getHostRequest();
+              LOG.error("{} task for host {} failed due to", task.getType(), hostRequest.getHostName(), e);
+              hostRequest.markHostRequestFailed(HostRoleStatus.ABORTED, e, ambariContext.getPersistedTopologyState());
+              break;
+            }
+          }
+        }
+      });
+    }
   }
+
 }

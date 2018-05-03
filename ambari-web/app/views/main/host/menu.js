@@ -58,7 +58,7 @@ App.MainHostMenuView = Em.CollectionView.extend({
         routing: 'logs',
         hidden: function () {
           if (App.get('supports.logSearch')) {
-            return !(App.Service.find().someProperty('serviceName', 'LOGSEARCH') && !App.get('isClusterUser'));
+            return !(App.Service.find().someProperty('serviceName', 'LOGSEARCH') && App.isAuthorized('SERVICE.VIEW_OPERATIONAL_LOGS'));
           }
           return true;
         }.property('App.supports.logSearch'),
@@ -95,9 +95,9 @@ App.MainHostMenuView = Em.CollectionView.extend({
   activateView: function () {
     var defaultRoute = App.router.get('currentState.name') || "summary";
     $.each(this._childViews, function () {
-      this.set('active', (this.get('content.routing') == defaultRoute ? "active" : ""));
+      this.set('active', this.get('content.routing') === defaultRoute ? 'active' : '');
     });
-  },
+  }.observes('App.router.currentState.name'),
 
   deactivateChildViews: function () {
     this.get('_childViews').setEach('active', '');

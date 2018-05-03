@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,7 +20,6 @@
 package org.apache.ambari.server.controller.internal;
 
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -30,7 +29,6 @@ import org.apache.ambari.server.topology.Blueprint;
 import org.apache.ambari.server.topology.Configuration;
 import org.apache.ambari.server.topology.HostGroupInfo;
 import org.apache.ambari.server.topology.InvalidTopologyTemplateException;
-import org.apache.ambari.server.topology.TopologyValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,8 +58,8 @@ public class ScaleClusterRequest extends BaseClusterRequest {
         setClusterName(String.valueOf(properties.get(HostResourceProvider.HOST_CLUSTER_NAME_PROPERTY_ID)));
       }
       // currently don't allow cluster scoped configuration in scaling operation
-      setConfiguration(new Configuration(Collections.<String, Map<String, String>>emptyMap(),
-          Collections.<String, Map<String, Map<String, String>>>emptyMap()));
+      setConfiguration(new Configuration(Collections.emptyMap(),
+          Collections.emptyMap()));
 
       parseHostGroups(properties);
     }
@@ -90,11 +88,6 @@ public class ScaleClusterRequest extends BaseClusterRequest {
   }
 
   @Override
-  public List<TopologyValidator> getTopologyValidators() {
-    return Collections.emptyList();
-  }
-
-  @Override
   public String getDescription() {
     return String.format("Scale Cluster '%s' (+%s hosts)", clusterName, getTotalRequestedHostCount());
   }
@@ -112,7 +105,7 @@ public class ScaleClusterRequest extends BaseClusterRequest {
       throw new InvalidTopologyTemplateException("Blueprint name must be specified for all host groups");
     }
 
-    String hgName = String.valueOf(properties.get(HostResourceProvider.HOSTGROUP_PROPERTY_ID));
+    String hgName = String.valueOf(properties.get(HostResourceProvider.HOST_GROUP_PROPERTY_ID));
     if (hgName == null || hgName.equals("null")) {
       throw new InvalidTopologyTemplateException("A name must be specified for all host groups");
     }
@@ -126,7 +119,7 @@ public class ScaleClusterRequest extends BaseClusterRequest {
           "Currently, a scaling request may only refer to a single blueprint");
     }
 
-    String hostName = getHostNameFromProperties(properties);
+    String hostName = HostResourceProvider.getHostNameFromProperties(properties);
     boolean containsHostCount = properties.containsKey(HostResourceProvider.HOST_COUNT_PROPERTY_ID);
     boolean containsHostPredicate = properties.containsKey(HostResourceProvider.HOST_PREDICATE_PROPERTY_ID);
 
@@ -150,8 +143,8 @@ public class ScaleClusterRequest extends BaseClusterRequest {
     }
 
     // specifying configuration is scaling request isn't permitted
-    hostGroupInfo.setConfiguration(new Configuration(Collections.<String, Map<String, String>>emptyMap(),
-        Collections.<String, Map<String, Map<String, String>>>emptyMap()));
+    hostGroupInfo.setConfiguration(new Configuration(Collections.emptyMap(),
+        Collections.emptyMap()));
 
     // process host_name and host_count
     if (containsHostCount) {
@@ -187,8 +180,8 @@ public class ScaleClusterRequest extends BaseClusterRequest {
     String rackInfo = null;
     if (properties.containsKey(HostResourceProvider.HOST_RACK_INFO_PROPERTY_ID)) {
       rackInfo = (String) properties.get(HostResourceProvider.HOST_RACK_INFO_PROPERTY_ID);
-    } else if (properties.containsKey(HostResourceProvider.HOST_RACK_INFO_NO_CATEGORY_PROPERTY_ID)) {
-      rackInfo = (String) properties.get(HostResourceProvider.HOST_RACK_INFO_NO_CATEGORY_PROPERTY_ID);
+    } else if (properties.containsKey(HostResourceProvider.RACK_INFO_PROPERTY_ID)) {
+      rackInfo = (String) properties.get(HostResourceProvider.RACK_INFO_PROPERTY_ID);
     } else {
       LOGGER.debug("No rack info provided");
     }
@@ -216,21 +209,6 @@ public class ScaleClusterRequest extends BaseClusterRequest {
       throw new InvalidTopologyTemplateException("The specified blueprint doesn't exist: " + blueprintName);
     }
     return blueprint;
-  }
-
-  /**
-   * Get the host name from the request properties.
-   *
-   * @param properties  request properties
-   * @return host name
-   */
-  //todo: this was copied exactly from HostResourceProvider
-  private String getHostNameFromProperties(Map<String, Object> properties) {
-    String hostName = (String) properties.get(HostResourceProvider.HOST_NAME_PROPERTY_ID);
-    if (hostName == null) {
-      hostName = (String) properties.get(HostResourceProvider.HOST_NAME_NO_CATEGORY_PROPERTY_ID);
-    }
-    return hostName;
   }
 
   /**

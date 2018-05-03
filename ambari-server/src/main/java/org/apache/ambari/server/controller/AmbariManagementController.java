@@ -27,10 +27,20 @@ import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.ActionManager;
 import org.apache.ambari.server.agent.ExecutionCommand;
+import org.apache.ambari.server.agent.stomp.dto.HostRepositories;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
+import org.apache.ambari.server.api.services.LoggingService;
+import org.apache.ambari.server.controller.internal.DeleteStatusMetaData;
 import org.apache.ambari.server.controller.internal.RequestStageContainer;
+import org.apache.ambari.server.controller.logging.LoggingSearchPropertyProvider;
+import org.apache.ambari.server.controller.metrics.MetricPropertyProviderFactory;
+import org.apache.ambari.server.controller.metrics.MetricsCollectorHAManager;
 import org.apache.ambari.server.controller.metrics.timeline.cache.TimelineMetricCacheProvider;
+import org.apache.ambari.server.events.AmbariEvent;
+import org.apache.ambari.server.events.MetadataUpdateEvent;
+import org.apache.ambari.server.events.publishers.AmbariEventPublisher;
 import org.apache.ambari.server.metadata.RoleCommandOrder;
+import org.apache.ambari.server.orm.entities.ExtensionLinkEntity;
 import org.apache.ambari.server.scheduler.ExecutionScheduleManager;
 import org.apache.ambari.server.security.authorization.AuthorizationException;
 import org.apache.ambari.server.security.encryption.CredentialStoreService;
@@ -41,17 +51,19 @@ import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.Config;
 import org.apache.ambari.server.state.ConfigHelper;
+import org.apache.ambari.server.state.Host;
 import org.apache.ambari.server.state.HostState;
 import org.apache.ambari.server.state.MaintenanceState;
 import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.ServiceComponent;
 import org.apache.ambari.server.state.ServiceComponentFactory;
 import org.apache.ambari.server.state.ServiceComponentHost;
-import org.apache.ambari.server.state.ServiceFactory;
 import org.apache.ambari.server.state.ServiceInfo;
 import org.apache.ambari.server.state.ServiceOsSpecific;
+import org.apache.ambari.server.state.StackId;
 import org.apache.ambari.server.state.State;
 import org.apache.ambari.server.state.configgroup.ConfigGroupFactory;
+import org.apache.ambari.server.state.quicklinksprofile.QuickLinkVisibilityController;
 import org.apache.ambari.server.state.scheduler.RequestExecutionFactory;
 
 /**
@@ -106,17 +118,8 @@ public interface AmbariManagementController {
    * TODO move this method to Cluster? doesn't seem to be on its place
    * @return config created
    */
-  Config createConfig(Cluster cluster, String type, Map<String, String> properties,
+  Config createConfig(Cluster cluster, StackId stackId, String type, Map<String, String> properties,
                       String versionTag, Map<String, Map<String, String>> propertiesAttributes);
-
-  /**
-   * Creates users.
-   *
-   * @param requests the request objects which define the user.
-   *
-   * @throws AmbariException when the user cannot be created.
-   */
-  void createUsers(Set<UserRequest> requests) throws AmbariException;
 
   /**
    * Creates groups.
@@ -165,6 +168,9 @@ public interface AmbariManagementController {
   Set<ServiceComponentHostResponse> getHostComponents(
       Set<ServiceComponentHostRequest> requests) throws AmbariException;
 
+  Set<ServiceComponentHostResponse> getHostComponents(
+      Set<ServiceComponentHostRequest> requests, boolean statusOnly) throws AmbariException;
+
   /**
    * Gets the configurations identified by the given request objects.
    *
@@ -185,18 +191,6 @@ public interface AmbariManagementController {
    */
   Set<ServiceConfigVersionResponse> getServiceConfigVersions(Set<ServiceConfigVersionRequest> requests)
       throws AmbariException;
-
-  /**
-   * Gets the users identified by the given request objects.
-   *
-   * @param requests the request objects
-   *
-   * @return a set of user responses
-   *
-   * @throws AmbariException if the users could not be read
-   */
-  Set<UserResponse> getUsers(Set<UserRequest> requests)
-      throws AmbariException, AuthorizationException;
 
   /**
    * Gets the user groups identified by the given request objects.
@@ -244,15 +238,6 @@ public interface AmbariManagementController {
       throws AmbariException, AuthorizationException;
 
   /**
-   * Updates the users specified.
-   *
-   * @param requests the users to modify
-   *
-   * @throws AmbariException if the resources cannot be updated
-   */
-  void updateUsers(Set<UserRequest> requests) throws AmbariException, AuthorizationException;
-
-  /**
    * Updates the groups specified.
    *
    * @param requests the groups to modify
@@ -291,17 +276,8 @@ public interface AmbariManagementController {
    *
    * @throws AmbariException thrown if the resource cannot be deleted
    */
-  RequestStatusResponse deleteHostComponents(
+  DeleteStatusMetaData deleteHostComponents(
       Set<ServiceComponentHostRequest> requests) throws AmbariException, AuthorizationException;
-
-  /**
-   * Deletes the users specified.
-   *
-   * @param requests the users to delete
-   *
-   * @throws AmbariException if the resources cannot be deleted
-   */
-  void deleteUsers(Set<UserRequest> requests) throws AmbariException;
 
   /**
    * Deletes the user groups specified.
@@ -353,6 +329,52 @@ public interface AmbariManagementController {
   RequestStatusResponse updateStacks() throws AmbariException;
 
   /**
+   * Create a link between an extension and a stack
+   *
+   * @throws AmbariException if we fail to link the extension to the stack
+   */
+  void createExtensionLink(ExtensionLinkRequest request) throws AmbariException;
+
+  /**
+   * Update a link - switch the link's extension version while keeping the same stack version and extension name
+   *
+   * @throws AmbariException if we fail to link the extension to the stack
+   */
+  void updateExtensionLink(ExtensionLinkRequest request) throws AmbariException;
+
+  /**
+   * Update a link - switch the link's extension version while keeping the same stack version and extension name
+   *
+   * @throws AmbariException if we fail to link the extension to the stack
+   */
+  void updateExtensionLink(ExtensionLinkEntity oldLinkEntity, ExtensionLinkRequest newLinkRequest) throws AmbariException;
+
+  /**
+   * Delete a link between an extension and a stack
+   *
+   * @throws AmbariException if we fail to unlink the extension from the stack
+   */
+  void deleteExtensionLink(ExtensionLinkRequest request) throws AmbariException;
+
+  /**
+   * Get supported extensions.
+   *
+   * @param requests the extensions
+   * @return a set of extensions responses
+   * @throws  AmbariException if the resources cannot be read
+   */
+  Set<ExtensionResponse> getExtensions(Set<ExtensionRequest> requests) throws AmbariException;
+
+  /**
+   * Get supported extension versions.
+   *
+   * @param requests the extension versions
+   * @return a set of extension versions responses
+   * @throws  AmbariException if the resources cannot be read
+   */
+  Set<ExtensionVersionResponse> getExtensionVersions(Set<ExtensionVersionRequest> requests) throws AmbariException;
+
+  /**
    * Get supported stacks versions.
    *
    * @param requests the stacks versions
@@ -362,7 +384,6 @@ public interface AmbariManagementController {
    * @throws  AmbariException if the resources cannot be read
    */
   Set<StackVersionResponse> getStackVersions(Set<StackVersionRequest> requests) throws AmbariException;
-
 
   /**
    * Get repositories by stack name, version and operating system.
@@ -374,15 +395,6 @@ public interface AmbariManagementController {
    * @throws  AmbariException if the resources cannot be read
    */
   Set<RepositoryResponse> getRepositories(Set<RepositoryRequest> requests) throws AmbariException;
-
-  /**
-   * Updates repositories by stack name, version and operating system.
-   *
-   * @param requests the repositories
-   *
-   * @throws AmbariException
-   */
-  void updateRepositories(Set<RepositoryRequest> requests) throws AmbariException;
 
   /**
    * Verifies repositories' base urls.
@@ -427,7 +439,6 @@ public interface AmbariManagementController {
    * @throws  AmbariException if the resources cannot be read
    */
   Set<StackServiceComponentResponse> getStackComponents(Set<StackServiceComponentRequest> requests) throws AmbariException;
-
 
   /**
    * Get operating systems by stack name, version.
@@ -499,13 +510,6 @@ public interface AmbariManagementController {
   AmbariMetaInfo getAmbariMetaInfo();
 
   /**
-   * Get the service factory for this management controller.
-   *
-   * @return the service factory
-   */
-  ServiceFactory getServiceFactory();
-
-  /**
    * Get the service component factory for this management controller.
    *
    * @return the service component factory
@@ -546,6 +550,13 @@ public interface AmbariManagementController {
    * @return the authenticated user's name
    */
   String getAuthName();
+
+  /**
+   * Get the authenticated user's id.
+   *
+   * @return the authenticated user's name
+   */
+  int getAuthId();
 
   /**
    * Create and persist the request stages and return a response containing the
@@ -598,7 +609,7 @@ public interface AmbariManagementController {
                              Map<State, List<ServiceComponent>> changedComponents,
                              Map<String, Map<State, List<ServiceComponentHost>>> changedHosts,
                              Collection<ServiceComponentHost> ignoredHosts,
-                             boolean runSmokeTest, boolean reconfigureClients) throws AmbariException;
+                             boolean runSmokeTest, boolean reconfigureClients, boolean useGeneratedConfigs) throws AmbariException;
 
   /**
    * Getter for the url of JDK, stored at server resources folder
@@ -634,6 +645,17 @@ public interface AmbariManagementController {
    * Getter for the url of MySQL JDBC driver, stored at server resources folder
    */
   String getMysqljdbcUrl();
+
+  /**
+   * Filters hosts to only select healthy ones that are heartbeating.
+   * <p/>
+   * The host's {@link HostState} is used to determine if a host is healthy.
+   *
+   * @return a List of healthy hosts, or an empty List if none exist.
+   * @throws AmbariException
+   * @see {@link HostState#HEALTHY}
+   */
+  List<String> selectHealthyHosts(Set<String> hostList) throws AmbariException;
 
   /**
    * Chooses a healthy host from the list of candidate hosts randomly. If there
@@ -797,6 +819,32 @@ public interface AmbariManagementController {
   TimelineMetricCacheProvider getTimelineMetricCacheProvider();
 
   /**
+   * Gets the {@link MetricPropertyProviderFactory} that was injected into this
+   * class. This is a terrible pattern.
+   *
+   * @return the injected {@link MetricPropertyProviderFactory}
+   */
+  MetricPropertyProviderFactory getMetricPropertyProviderFactory();
+
+  /**
+   * Gets the LoggingSearchPropertyProvider instance.
+   *
+   * @return the injected {@link LoggingSearchPropertyProvider}
+   */
+  LoggingSearchPropertyProvider getLoggingSearchPropertyProvider();
+
+
+  /**
+   * Gets the LoggingService instance from the dependency injection framework.
+   *
+   * @param clusterName the cluster name associated with this LoggingService instance
+   *
+   * @return an instance of LoggingService associated with the specified cluster.
+   */
+  LoggingService getLoggingService(String clusterName);
+
+
+  /**
    * Returns KerberosHelper instance
    * @return
    */
@@ -809,5 +857,33 @@ public interface AmbariManagementController {
    */
   CredentialStoreService getCredentialStoreService();
 
+  /**
+   * Gets an {@link AmbariEventPublisher} which can be used to send and receive
+   * {@link AmbariEvent}s.
+   *
+   * @return
+   */
+  AmbariEventPublisher getAmbariEventPublisher();
+
+  /**
+   * Gets an {@link MetricsCollectorHAManager} which can be used to get/add collector host for a cluster
+   *
+   * @return {@link MetricsCollectorHAManager}
+   */
+  MetricsCollectorHAManager getMetricsCollectorHAManager();
+
+  /**
+   * @return the visibility controller that decides which quicklinks should be visible
+   * based on the actual quick links profile. If no profile is set, all links will be shown.
+   */
+  QuickLinkVisibilityController getQuicklinkVisibilityController();
+
+  ConfigGroupResponse getConfigGroupUpdateResults(ConfigGroupRequest configGroupRequest);
+
+  void saveConfigGroupUpdate(ConfigGroupRequest configGroupRequest, ConfigGroupResponse configGroupResponse);
+
+  HostRepositories retrieveHostRepositories(Cluster cluster, Host host) throws AmbariException;
+
+  MetadataUpdateEvent getClusterMetadataOnConfigsUpdate(Cluster cluster) throws AmbariException;
 }
 

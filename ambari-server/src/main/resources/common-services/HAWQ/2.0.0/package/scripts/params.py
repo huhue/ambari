@@ -20,6 +20,8 @@ import functools
 import hawq_constants
 from resource_management import Script
 from resource_management.core.resources.system import File
+from resource_management.libraries.functions import conf_select
+from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions.default import default
 from resource_management.libraries.resources.hdfs_resource import HdfsResource
 from resource_management.libraries.resources.xml_config import XmlConfig
@@ -27,7 +29,7 @@ from resource_management.libraries.functions import get_kinit_path
 from resource_management.libraries.functions.get_not_managed_resources import get_not_managed_resources
 
 config = Script.get_config()
-config_attrs = config['configuration_attributes']
+config_attrs = config['configurationAttributes']
 
 def __get_component_host(component):
   """
@@ -39,7 +41,7 @@ def __get_component_host(component):
   return component_host
 
 
-hostname = config['hostname']
+hostname = config['agentLevelParams']['hostname']
 
 # Users and Groups
 hdfs_superuser = config['configurations']['hadoop-env']['hdfs_user']
@@ -60,6 +62,8 @@ hawq_all_hosts = sorted(set(hawq_master_hosts + hawqsegment_hosts))
 # HDFS
 hdfs_site = config['configurations']['hdfs-site']
 default_fs = config['configurations']['core-site']['fs.defaultFS']
+hadoop_bin_dir = stack_select.get_hadoop_dir("bin")
+hadoop_conf_dir = conf_select.get_hadoop_conf_dir()
 
 security_enabled = config['configurations']['cluster-env']['security_enabled']
 hdfs_user_keytab = config['configurations']['hadoop-env']['hdfs_user_keytab']
@@ -78,6 +82,8 @@ HdfsResource = functools.partial(HdfsResource,
                                  keytab=hdfs_user_keytab,
                                  kinit_path_local=kinit_path_local,
                                  principal_name=hdfs_principal_name,
+                                 hadoop_bin_dir = hadoop_bin_dir,
+                                 hadoop_conf_dir = hadoop_conf_dir,
                                  hdfs_site=hdfs_site,
                                  default_fs=default_fs,
                                  immutable_paths = get_not_managed_resources())
@@ -97,7 +103,7 @@ XmlConfig = functools.partial(XmlConfig,
 
 # For service Check
 is_pxf_installed = __get_component_host("pxf_hosts") is not None
-namenode_path =  "{0}:{1}".format(__get_component_host("namenode_host"), hawq_constants.PXF_PORT) if dfs_nameservice is None else dfs_nameservice
+namenode_path =  "{0}:{1}".format(__get_component_host("namenode_hosts"), hawq_constants.PXF_PORT) if dfs_nameservice is None else dfs_nameservice
 table_definition = {
   "HAWQ": {
     "name": "ambari_hawq_test",
@@ -122,7 +128,7 @@ table_definition = {
 
 # YARN
 # Note: YARN is not mandatory for HAWQ. It is required only when the users set HAWQ to use YARN as resource manager
-rm_host = __get_component_host('rm_host')
+rm_host = __get_component_host('resourcemanager_hosts')
 is_yarn_ha_enabled = True if str(default('/configurations/yarn-site/yarn.resourcemanager.ha.enabled', False)).lower() == "true" else False
 
 # Config files
@@ -144,8 +150,7 @@ hawq_master_dir = hawq_site.get('hawq_master_directory')
 hawq_segment_dir = hawq_site.get('hawq_segment_directory')
 hawq_master_temp_dirs = hawq_site.get('hawq_master_temp_directory')
 hawq_segment_temp_dirs = hawq_site.get('hawq_segment_temp_directory')
-# Extract hawq hdfs directory from hdfs url. Ex: /hawq/hawq_default from
-# host:8080/hawq/hawq_default
+# Extract hawq hdfs directory from hdfs url. Ex: /hawq/hawq_data from host:8080/hawq/hawq_data
 hawq_hdfs_data_dir = "/{0}".format(hawq_site.get('hawq_dfs_url').split('/', 1)[1])
 hawq_master_address_port = hawq_site.get('hawq_master_address_port')
 hawq_segment_address_port = hawq_site.get('hawq_segment_address_port')

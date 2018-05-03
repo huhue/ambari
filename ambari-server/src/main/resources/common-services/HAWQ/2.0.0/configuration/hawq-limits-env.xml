@@ -16,7 +16,6 @@
    limitations under the License.
 -->
 <configuration supports_adding_forbidden="true">
-
   <property>
     <display-name>soft nofile</display-name>
     <name>soft_nofile</name>
@@ -29,8 +28,8 @@
       <type>int</type>
       <minimum>0</minimum>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <display-name>hard nofile</display-name>
     <name>hard_nofile</name>
@@ -43,8 +42,8 @@
       <type>int</type>
       <minimum>0</minimum>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <display-name>soft nproc</display-name>
     <name>soft_nproc</name>
@@ -57,8 +56,8 @@
       <type>int</type>
       <minimum>0</minimum>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <display-name>hard nproc</display-name>
     <name>hard_nproc</name>
@@ -71,6 +70,6 @@
       <type>int</type>
       <minimum>0</minimum>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
 </configuration>

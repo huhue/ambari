@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,6 +18,12 @@
 
 package org.apache.ambari.server.orm.dao;
 
+import java.sql.SQLException;
+import java.util.LinkedList;
+import java.util.List;
+
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
 import org.apache.ambari.server.orm.OrmTestHelper;
@@ -31,10 +37,6 @@ import org.junit.Test;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
-
-import java.util.LinkedList;
-import java.util.List;
 
 /**
  * WidgetDAO unit tests.
@@ -49,7 +51,7 @@ public class WidgetDAOTest {
 
 
   @Before
-  public void before() {
+  public void before() throws Exception {
     injector = Guice.createInjector(new InMemoryDefaultTestModule());
     widgetDAO = injector.getInstance(WidgetDAO.class);
     widgetLayoutDAO = injector.getInstance(WidgetLayoutDAO.class);
@@ -71,7 +73,7 @@ public class WidgetDAOTest {
       widgetEntity.setWidgetName("widget" + i);
       widgetEntity.setWidgetType("GAUGE");
       widgetEntity.setWidgetValues("${`jvmMemoryHeapUsed + jvmMemoryHeapMax`}");
-      widgetEntity.setListWidgetLayoutUserWidgetEntity(new LinkedList<WidgetLayoutUserWidgetEntity>());
+      widgetEntity.setListWidgetLayoutUserWidgetEntity(new LinkedList<>());
       final WidgetLayoutEntity widgetLayoutEntity = new WidgetLayoutEntity();
       widgetLayoutEntity.setClusterId(clusterId);
       widgetLayoutEntity.setLayoutName("layout name" + i);
@@ -85,7 +87,7 @@ public class WidgetDAOTest {
       widgetLayoutUserWidget.setWidgetOrder(0);
 
       widgetEntity.getListWidgetLayoutUserWidgetEntity().add(widgetLayoutUserWidget);
-      List<WidgetLayoutUserWidgetEntity> widgetLayoutUserWidgetEntityList = new LinkedList<WidgetLayoutUserWidgetEntity>();
+      List<WidgetLayoutUserWidgetEntity> widgetLayoutUserWidgetEntityList = new LinkedList<>();
       widgetLayoutUserWidgetEntityList.add(widgetLayoutUserWidget);
 
       widgetLayoutEntity.setListWidgetLayoutUserWidgetEntity(widgetLayoutUserWidgetEntityList);
@@ -121,8 +123,8 @@ public class WidgetDAOTest {
   }
 
   @After
-  public void after() {
-    injector.getInstance(PersistService.class).stop();
+  public void after() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
     injector = null;
   }
 }

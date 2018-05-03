@@ -17,14 +17,20 @@
  */
 package org.apache.ambari.server.orm.dao;
 
+import java.util.List;
+import java.util.Set;
+
+import javax.persistence.EntityManager;
+import javax.persistence.TypedQuery;
+
+import org.apache.ambari.server.orm.RequiresSession;
+import org.apache.ambari.server.orm.entities.TopologyLogicalRequestEntity;
+
+import com.google.common.collect.Sets;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
 import com.google.inject.persist.Transactional;
-import org.apache.ambari.server.orm.RequiresSession;
-import org.apache.ambari.server.orm.entities.TopologyLogicalRequestEntity;
-import javax.persistence.EntityManager;
-import java.util.List;
 
 @Singleton
 public class TopologyLogicalRequestDAO {
@@ -57,5 +63,16 @@ public class TopologyLogicalRequestDAO {
   @Transactional
   public void remove(TopologyLogicalRequestEntity requestEntity) {
     entityManagerProvider.get().remove(requestEntity);
+  }
+
+  @RequiresSession
+  public Set<Long> findRequestIdsByIds(Set<Long> ids) {
+    EntityManager entityManager = entityManagerProvider.get();
+    TypedQuery<Long> topologyLogicalRequestQuery =
+            entityManager.createNamedQuery("TopologyLogicalRequestEntity.findRequestIds", Long.class);
+
+    topologyLogicalRequestQuery.setParameter("ids", ids);
+
+    return Sets.newHashSet(daoUtils.selectList(topologyLogicalRequestQuery));
   }
 }

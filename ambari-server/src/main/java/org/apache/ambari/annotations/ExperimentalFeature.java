@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,20 +17,12 @@
  */
 package org.apache.ambari.annotations;
 
-import java.util.concurrent.Executor;
-
 /**
  * The {@link ExperimentalFeature} enumeration is meant to be used with the
  * {@link Experimental} annotation to indicate which feature set experimental
  * code belongs to.
  */
 public enum ExperimentalFeature {
-  /**
-   * The processing of arbitrary, atomic list elements by an {@link Executor} in
-   * order to arrive at a full processed list faster.
-   */
-  PARALLEL_PROCESSING,
-
   /**
    * The caching of current alert information in order to reduce overall load on
    * the database by preventing frequent updates and JPA entity invalidation.
@@ -40,5 +32,10 @@ public enum ExperimentalFeature {
   /**
    * Used for code that is targeted for patch upgrades
    */
-  PATCH_UPGRADES
+  PATCH_UPGRADES,
+
+  /**
+   * For code that is for multi-service
+   */
+  MULTI_SERVICE
 }

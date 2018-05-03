@@ -28,6 +28,7 @@ from resource_management.core.source import StaticFile, Template, InlineTemplate
 from resource_management.libraries.functions import format
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions import StackFeature
+from resource_management.libraries.functions import Direction
 
 
 from resource_management.core.logger import Logger
@@ -44,39 +45,23 @@ def kafka(upgrade_type=None):
     effective_version = params.stack_version_formatted if upgrade_type is None else format_stack_version(params.version)
     Logger.info(format("Effective stack version: {effective_version}"))
 
-    if effective_version is not None and effective_version != "" and \
-      check_stack_feature(StackFeature.CREATE_KAFKA_BROKER_ID, effective_version):
-      if len(params.kafka_hosts) > 0 and params.hostname in params.kafka_hosts:
-        brokerid = str(sorted(params.kafka_hosts).index(params.hostname))
-        kafka_server_config['broker.id'] = brokerid
-        Logger.info(format("Calculating broker.id as {brokerid}"))
-
     # listeners and advertised.listeners are only added in 2.3.0.0 onwards.
     if effective_version is not None and effective_version != "" and \
-        check_stack_feature(StackFeature.KAFKA_LISTENERS, effective_version):
-      listeners = kafka_server_config['listeners'].replace("localhost", params.hostname)
-      Logger.info(format("Kafka listeners: {listeners}"))
+       check_stack_feature(StackFeature.KAFKA_LISTENERS, effective_version):
 
-      if params.security_enabled and params.kafka_kerberos_enabled:
-        Logger.info("Kafka kerberos security is enabled.")
-        if "SASL" not in listeners:
-          listeners = listeners.replace("PLAINTEXT", "PLAINTEXTSASL")
+       listeners = kafka_server_config['listeners'].replace("localhost", params.hostname)
+       Logger.info(format("Kafka listeners: {listeners}"))
+       kafka_server_config['listeners'] = listeners       
 
-        kafka_server_config['listeners'] = listeners
-        kafka_server_config['advertised.listeners'] = listeners
-        Logger.info(format("Kafka advertised listeners: {listeners}"))
-      else:
-        kafka_server_config['listeners'] = listeners
-
-        if 'advertised.listeners' in kafka_server_config:
-          advertised_listeners = kafka_server_config['advertised.listeners'].replace("localhost", params.hostname)
-          kafka_server_config['advertised.listeners'] = advertised_listeners
-          Logger.info(format("Kafka advertised listeners: {advertised_listeners}"))
+       if 'advertised.listeners' in kafka_server_config:
+         advertised_listeners = kafka_server_config['advertised.listeners'].replace("localhost", params.hostname)
+         kafka_server_config['advertised.listeners'] = advertised_listeners
+         Logger.info(format("Kafka advertised listeners: {advertised_listeners}"))
     else:
       kafka_server_config['host.name'] = params.hostname
 
     if params.has_metric_collector:
-      kafka_server_config['kafka.timeline.metrics.host'] = params.metric_collector_host
+      kafka_server_config['kafka.timeline.metrics.hosts'] = params.ams_collector_hosts
       kafka_server_config['kafka.timeline.metrics.port'] = params.metric_collector_port
       kafka_server_config['kafka.timeline.metrics.protocol'] = params.metric_collector_protocol
       kafka_server_config['kafka.timeline.metrics.truststore.path'] = params.metric_truststore_path
@@ -85,6 +70,18 @@ def kafka(upgrade_type=None):
 
     kafka_data_dir = kafka_server_config['log.dirs']
     kafka_data_dirs = filter(None, kafka_data_dir.split(","))
+
+    rack="/default-rack"
+    i=0
+    if len(params.all_racks) > 0:
+     for host in params.all_hosts:
+      if host == params.hostname:
+        rack=params.all_racks[i]
+        break
+      i=i+1
+
+    kafka_server_config['broker.rack']=rack
+
     Directory(kafka_data_dirs,
               mode=0755,
               cd_access='a',
@@ -111,13 +108,25 @@ def kafka(upgrade_type=None):
              mode=0644,
              group=params.user_group,
              owner=params.kafka_user,
-             content=params.log4j_props
+             content=InlineTemplate(params.log4j_props)
          )
 
-    if params.security_enabled and params.kafka_kerberos_enabled:
+    if (params.kerberos_security_enabled and params.kafka_kerberos_enabled) or params.kafka_other_sasl_enabled:
+      if params.kafka_jaas_conf_template:
+        File(format("{conf_dir}/kafka_jaas.conf"),
+             owner=params.kafka_user,
+             content=InlineTemplate(params.kafka_jaas_conf_template)
+        )
+      else:
         TemplateConfig(format("{conf_dir}/kafka_jaas.conf"),
                          owner=params.kafka_user)
 
+      if params.kafka_client_jaas_conf_template:
+        File(format("{conf_dir}/kafka_client_jaas.conf"),
+             owner=params.kafka_user,
+             content=InlineTemplate(params.kafka_client_jaas_conf_template)
+        )
+      else:
         TemplateConfig(format("{conf_dir}/kafka_client_jaas.conf"),
                        owner=params.kafka_user)
 
@@ -192,9 +201,15 @@ def setup_symlink(kafka_managed_dir, kafka_ambari_managed_dir):
   if backup_folder_path:
     # Restore backed up files to current relevant dirs if needed - will be triggered only when changing to/from default path;
     for file in os.listdir(backup_folder_path):
-      File(os.path.join(kafka_managed_dir,file),
-           owner=params.kafka_user,
-           content = StaticFile(os.path.join(backup_folder_path,file)))
+      if os.path.isdir(os.path.join(backup_folder_path, file)):
+        Execute(('cp', '-r', os.path.join(backup_folder_path, file), kafka_managed_dir),
+                sudo=True)
+        Execute(("chown", "-R", format("{kafka_user}:{user_group}"), os.path.join(kafka_managed_dir, file)),
+                sudo=True)
+      else:
+        File(os.path.join(kafka_managed_dir,file),
+             owner=params.kafka_user,
+             content = StaticFile(os.path.join(backup_folder_path,file)))
 
     # Clean up backed up folder
     Directory(backup_folder_path,
@@ -216,7 +231,13 @@ def backup_dir_contents(dir_path, backup_folder_suffix):
   )
   # Safely copy top-level contents to backup folder
   for file in os.listdir(dir_path):
-    File(os.path.join(backup_destination_path, file),
+    if os.path.isdir(os.path.join(dir_path, file)):
+      Execute(('cp', '-r', os.path.join(dir_path, file), backup_destination_path),
+              sudo=True)
+      Execute(("chown", "-R", format("{kafka_user}:{user_group}"), os.path.join(backup_destination_path, file)),
+              sudo=True)
+    else:
+      File(os.path.join(backup_destination_path, file),
          owner=params.kafka_user,
          content = StaticFile(os.path.join(dir_path,file)))
 

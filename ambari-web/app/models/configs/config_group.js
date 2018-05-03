@@ -44,6 +44,7 @@ App.ServiceConfigGroup = DS.Model.extend({
    * @type {boolean}
    */
   isDefault: DS.attr('boolean', {defaultValue: false}),
+
   /**
    * this flag is used for installed services' config groups
    * if user make changes to them - mark this flag to true
@@ -100,6 +101,14 @@ App.ServiceConfigGroup = DS.Model.extend({
    */
   displayNameHosts: Em.computed.format('{0} ({1})', 'displayName', 'hosts.length'),
 
+  switchGroupTextShort: function() {
+    return  Em.I18n.t('services.service.config_groups.switchGroupTextShort').format(this.get('displayName'));
+  }.property('displayName'),
+
+  switchGroupTextFull: function() {
+    return  Em.I18n.t('services.service.config_groups.switchGroupTextFull').format(this.get('displayName'));
+  }.property('displayName'),
+
   /**
    * Provides hosts which are available for inclusion in
    * non-default configuration groups.
@@ -141,7 +150,7 @@ App.ServiceConfigGroup = DS.Model.extend({
 
     if (Array.isArray(this.get('properties'))) {
       this.get('properties').forEach(function (item) {
-        result += item.name + " : " + item.value + '<br/>';
+        result += _.escape(item.name) + " : " + _.escape(item.value) + '<br/>';
       }, this);
     }
     return result;
@@ -151,12 +160,16 @@ App.ServiceConfigGroup = DS.Model.extend({
 App.ServiceConfigGroup.FIXTURES = [];
 
 App.ServiceConfigGroup.getParentConfigGroupId = function(serviceName) {
-  return App.ServiceConfigGroup.groupId(serviceName, 'default');
+  return App.ServiceConfigGroup.groupId(serviceName, App.ServiceConfigGroup.defaultGroupName);
 };
 
 App.ServiceConfigGroup.groupId = function(serviceName, groupName) {
   return serviceName + "_" + groupName;
 };
+
+App.ServiceConfigGroup.defaultGroupName = 'Default';
+
+App.ServiceConfigGroup.deletedGroupName = 'Deleted';
 
 /**
  * Delete all records with isTemporary:true

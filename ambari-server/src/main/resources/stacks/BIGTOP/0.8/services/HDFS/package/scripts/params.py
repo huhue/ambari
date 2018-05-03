@@ -55,13 +55,18 @@ falcon_user = config['configurations']['falcon-env']['falcon_user']
 #exclude file
 hdfs_exclude_file = default("/clusterHostInfo/decom_dn_hosts", [])
 exclude_file_path = config['configurations']['hdfs-site']['dfs.hosts.exclude']
-update_exclude_file_only = default("/commandParams/update_exclude_file_only",False)
+slave_hosts = default("/clusterHostInfo/slave_hosts", [])
+include_file_path = default("/configurations/hdfs-site/dfs.hosts", None)
+hdfs_include_file = None
+manage_include_files = default("/configurations/hdfs-site/manage.include.files", False)
+if include_file_path and manage_include_files:
+  hdfs_include_file = slave_hosts
+update_files_only = default("/commandParams/update_files_only",False)
 
 kinit_path_local = functions.get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))
 #hosts
 hostname = config["hostname"]
 rm_host = default("/clusterHostInfo/rm_host", [])
-slave_hosts = default("/clusterHostInfo/slave_hosts", [])
 oozie_servers = default("/clusterHostInfo/oozie_server", [])
 hcat_server_hosts = default("/clusterHostInfo/webhcat_server_host", [])
 hive_server_host =  default("/clusterHostInfo/hive_server_host", [])
@@ -215,8 +220,8 @@ name_node_params = default("/commandParams/namenode", None)
 hadoop_env_sh_template = config['configurations']['hadoop-env']['content']
 
 #hadoop-env.sh
-java_home = config['hostLevelParams']['java_home']
-stack_version = str(config['hostLevelParams']['stack_version'])
+java_home = config['ambariLevelParams']['java_home']
+stack_version = str(config['clusterLevelParams']['stack_version'])
 
 stack_is_champlain_or_further = not (stack_version.startswith('2.0') or stack_version.startswith('2.1'))
 
@@ -241,3 +246,4 @@ ttnode_heapsize = "1024m"
 dtnode_heapsize = config['configurations']['hadoop-env']['dtnode_heapsize']
 mapred_pid_dir_prefix = default("/configurations/mapred-env/mapred_pid_dir_prefix","/var/run/hadoop-mapreduce")
 mapred_log_dir_prefix = default("/configurations/mapred-env/mapred_log_dir_prefix","/var/log/hadoop-mapreduce")
+script_https_protocol = Script.get_force_https_protocol_name()

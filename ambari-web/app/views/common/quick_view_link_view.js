@@ -26,7 +26,7 @@ var App = require('app');
  * @property {?string} status
  */
 
-App.QuickViewLinks = Em.View.extend({
+App.QuickLinksView = Em.View.extend({
 
   /**
    * @type {boolean}
@@ -39,6 +39,11 @@ App.QuickViewLinks = Em.View.extend({
   showQuickLinks: false,
 
   /**
+   * @type {boolean}
+   */
+  showNoLinks: false,
+
+  /**
    * @type {string}
    */
   quickLinksErrorMessage: '',
@@ -49,11 +54,6 @@ App.QuickViewLinks = Em.View.extend({
    * @type {object[]}
    */
   quickLinks: [],
-
-  /**
-   * @type {string[]}
-   */
-  actualTags: [],
 
   /**
    * @type {object[]}
@@ -74,6 +74,12 @@ App.QuickViewLinks = Em.View.extend({
    */
   servicesSupportsHttps: ["HDFS", "HBASE"],
 
+  masterGroups: [],
+
+  tooltipAttribute: 'quick-links-title-tooltip',
+
+  shouldSetGroupedLinks: false,
+
   /**
    * @type {object}
    */
@@ -87,7 +93,6 @@ App.QuickViewLinks = Em.View.extend({
 
   willDestroyElement: function () {
     this.get('configProperties').clear();
-    this.get('actualTags').clear();
     this.get('quickLinks').clear();
     this.get('requiredSiteNames').clear();
   },
@@ -98,66 +103,23 @@ App.QuickViewLinks = Em.View.extend({
    *
    * The flags responsible for correct, up-to-date state of quick links:
    * - App.currentStackVersionNumber
-   * - App.singleNodeInstall
    * - App.router.clusterController.isHostComponentMetricsLoaded
    */
   setQuickLinks: function () {
     if (App.get('router.clusterController.isServiceMetricsLoaded')) {
-      this.loadTags();
+      this.setConfigProperties().done((configProperties) => {
+        this.get('configProperties').pushObjects(configProperties);
+        this.getQuickLinksHosts();
+      });
     }
   }.observes(
     'App.currentStackVersionNumber',
-    'App.singleNodeInstall',
     'App.router.clusterController.isServiceMetricsLoaded',
-    'App.router.clusterController.isHostComponentMetricsLoaded'
+    'App.router.clusterController.isHostComponentMetricsLoaded',
+    'App.router.clusterController.quickLinksUpdateCounter'
   ),
 
-  /**
-   * call for configuration tags
-   *
-   * @returns {$.ajax}
-   */
-  loadTags: function () {
-    return App.ajax.send({
-      name: 'config.tags',
-      sender: this,
-      success: 'loadTagsSuccess',
-      error: 'loadTagsError'
-    });
-  },
-
-  /**
-   * Success-callback for load-tags request
-   *
-   * @param {object} data
-   * @method loadTagsSuccess
-   */
-  loadTagsSuccess: function (data) {
-    this.get('actualTags').clear();
-    var self = this;
-    var tags = Object.keys(data.Clusters.desired_configs).map(function (prop) {
-      return Em.Object.create({
-        siteName: prop,
-        tagName: data.Clusters.desired_configs[prop].tag
-      });
-    });
-    this.get('actualTags').pushObjects(tags);
-    this.setConfigProperties().done(function (configProperties) {
-      self.get('configProperties').pushObjects(configProperties);
-      self.getQuickLinksHosts();
-    });
-  },
-
-  /**
-   * Error-callback for load-tags request
-   *
-   * @method loadTagsError
-   */
-  loadTagsError: function () {
-    this.getQuickLinksHosts();
-  },
-
-  /**
+   /**
    * Request for quick-links config
    *
    * @returns {$.ajax}
@@ -188,7 +150,7 @@ App.QuickViewLinks = Em.View.extend({
     if (!Em.isNone(quickLinksConfig)) {
       var protocolConfig = Em.get(quickLinksConfig, 'protocol');
       var checks = Em.get(protocolConfig, 'checks');
-      var sites = ['core-site', 'hdfs-site'];
+      var sites = ['core-site', 'hdfs-site', 'admin-properties'];
       if (checks) {
         checks.forEach(function (check) {
           var protocolConfigSiteProp = Em.get(check, 'site');
@@ -202,17 +164,27 @@ App.QuickViewLinks = Em.View.extend({
       if (!Em.isEmpty(links)) {
         links.forEach(function (link) {
           if (!link.remove) {
-            var portConfig = Em.get(link, 'port');
-            var portConfigSiteProp = Em.get(portConfig, 'site');
-            if (!sites.contains(portConfigSiteProp)) {
-              sites.push(portConfigSiteProp);
-            }
+            this.addSite(link, 'host', sites);
+            this.addSite(link, 'port', sites);
           }
         }, this);
         this.set('requiredSiteNames', this.get('requiredSiteNames').pushObjects(sites).uniq());
         this.setQuickLinks();
       }
+    } else {
+      this.set('showNoLinks', true);
+
     }
+  },
+
+  addSite: function(link, linkPropertyName, sites) {
+      var config = Em.get(link, linkPropertyName);
+      if (config) {
+        var siteName = Em.get(config, 'site');
+        if (!sites.contains(siteName)) {
+          sites.push(siteName);
+        }
+      }
   },
 
   /**
@@ -222,14 +194,25 @@ App.QuickViewLinks = Em.View.extend({
    * @method getQuickLinksHosts
    */
   getQuickLinksHosts: function () {
-    var masterHosts = App.HostComponent.find().filterProperty('isMaster').mapProperty('hostName').uniq();
+    const links = App.QuickLinksConfig.find().mapProperty('links'),
+      components = links.reduce((componentsArray, currentLinksArray) => {
+        const componentNames = currentLinksArray.mapProperty('component_name').uniq();
+        return [...componentsArray, ...componentNames];
+      }, []),
+      hosts = App.HostComponent.find().filter(component => {
+        return components.contains(component.get('componentName'));
+      }).mapProperty('hostName').uniq();
+
+    if (hosts.length === 0) {
+      return $.Deferred().reject().promise();
+    }
 
     return App.ajax.send({
       name: 'hosts.for_quick_links',
       sender: this,
       data: {
         clusterName: App.get('clusterName'),
-        masterHosts: masterHosts.join(','),
+        hosts: hosts.join(','),
         urlParams: this.get('content.serviceName') === 'HBASE' ? ',host_components/metrics/hbase/master/IsActiveMaster' : ''
       },
       success: 'setQuickLinksSuccessCallback'
@@ -249,25 +232,37 @@ App.QuickViewLinks = Em.View.extend({
     var hasHosts = false;
     var componentNames = hosts.mapProperty('componentName');
     componentNames.forEach(function(_componentName){
-      var masterComponent = App.MasterComponent.find().findProperty('componentName', _componentName);
-      if (masterComponent) {
-        hasHosts = hasHosts || !!masterComponent.get('totalCount');
+      var component = App.MasterComponent.find().findProperty('componentName', _componentName) ||
+        App.SlaveComponent.find().findProperty('componentName', _componentName);
+      if (component) {
+        hasHosts = hasHosts || !!component.get('totalCount');
       }
     });
     // no need to set quicklinks if
     // 1)current service does not have quick links configured
-    // 2)No host component present for the configured quicklinks
-    this.set('showQuickLinks', hasQuickLinks && hasHosts);
+    // 2)No host component present for the configured quicklinks and has no overridden hosts
+    if(hasQuickLinks && (hasHosts || this.hasOverriddenHost())) {
+      this.set('showQuickLinks', true);
+    } else {
+      this.set('showNoLinks', true);
+    }
 
     var isMultipleComponentsInLinks = componentNames.uniq().length > 1;
 
-    if (hosts.length === 0) {
+    if (hosts.length === 0 && !this.hasOverriddenHost()) {
       this.setEmptyLinks();
-    } else if (hosts.length === 1 || isMultipleComponentsInLinks) {
+    } else if (hosts.length === 1 || isMultipleComponentsInLinks || this.hasOverriddenHost()) {
       this.setSingleHostLinks(hosts, response);
+    } else if (this.get('masterGroups.length') > 1 || this.get('shouldSetGroupedLinks')) {
+      this.setMultipleGroupLinks(hosts);
     } else {
       this.setMultipleHostLinks(hosts);
     }
+  },
+
+  hasOverriddenHost: function() {
+    var links = Em.get(this.getQuickLinksConfiguration(), 'links');
+    return links && links.some(function (each) { return each.host; });
   },
 
   /**
@@ -291,11 +286,7 @@ App.QuickViewLinks = Em.View.extend({
    */
   setConfigProperties: function () {
     this.get('configProperties').clear();
-    var requiredSiteNames = this.get('requiredSiteNames');
-    var tags = this.get('actualTags').filter(function (tag) {
-      return requiredSiteNames.contains(tag.siteName);
-    });
-    return App.router.get('configurationController').getConfigsByTags(tags);
+    return App.router.get('configurationController').getCurrentConfigsBySites(this.get('requiredSiteNames'));
   },
 
   /**
@@ -307,8 +298,11 @@ App.QuickViewLinks = Em.View.extend({
   getQuickLinksConfiguration: function () {
     var serviceName = this.get('content.serviceName');
     var self = this;
+    var quicklinks = {};
     if (self.hasQuickLinksConfig(serviceName)) {
-      return App.QuickLinksConfig.find().findProperty('id', serviceName);
+      quicklinks = App.QuickLinksConfig.find().findProperty('id', serviceName);
+      Em.set(quicklinks, 'links', Em.get(quicklinks, 'links').filterProperty('visible', true));
+      return quicklinks;
     }
     return null;
   },
@@ -344,13 +338,21 @@ App.QuickViewLinks = Em.View.extend({
     if (serviceName === 'MAPREDUCE2' && response) {
       var portConfig = Em.get(link, 'port');
       var siteName = Em.get(portConfig, 'site');
-      var siteConfigs = this.get('configProperties').findProperty('type', siteName).properties;
+      const siteConfigs = this.get('configProperties').findProperty('type', siteName).properties;
       var hostPortConfigValue = siteConfigs[Em.get(portConfig, protocol + '_config')];
       if (!Em.isNone(hostPortConfigValue)) {
         var hostPortValue = hostPortConfigValue.match(new RegExp('([\\w\\d.-]*):(\\d+)'));
         var hostObj = response.items.findProperty('Hosts.host_name', hostPortValue[1]);
         if (!Em.isNone(hostObj)) {
           host = hostObj.Hosts.public_host_name;
+        }
+      }
+    } else if (serviceName === 'RANGER') {
+      const siteConfigs = this.get('configProperties').findProperty('type', 'admin-properties').properties;
+      if (siteConfigs['policymgr_external_url']) {
+        return {
+          label: link.label,
+          url: siteConfigs['policymgr_external_url']
         }
       }
     }
@@ -366,9 +368,24 @@ App.QuickViewLinks = Em.View.extend({
         newItem.url = template.fmt(protocol, host, linkPort);
       }
       newItem.label = link.label;
+      newItem.url = this.resolvePlaceholders(newItem.url);
       return newItem;
     }
     return null;
+  },
+
+  /**
+   * Replace placeholders like ${config-type/property-name} in the given URL
+   */
+  resolvePlaceholders: function(url) {
+    return url.replace(/\$\{(\S+)\/(\S+)\}/g, function(match, configType, propertyName) {
+      var config = this.get('configProperties').findProperty('type', configType);
+      if (config) {
+        return config.properties[propertyName] ? config.properties[propertyName] : match;
+      } else {
+        return match;
+      }
+    }.bind(this));
   },
 
   /**
@@ -401,10 +418,8 @@ App.QuickViewLinks = Em.View.extend({
 
       var links = Em.get(quickLinksConfig, 'links');
       links.forEach(function (link) {
-        var componentName = link.component_name;
-        var hostNameForComponent = hosts.findProperty('componentName',componentName);
-        if (hostNameForComponent) {
-          var publicHostName = hostNameForComponent.publicHostName;
+        var publicHostName = this.publicHostName(link, hosts, protocol);
+        if (publicHostName) {
           if (link.protocol) {
             protocol = this.setProtocol(configProperties, link.protocol);
           }
@@ -423,17 +438,33 @@ App.QuickViewLinks = Em.View.extend({
     }
   },
 
+  publicHostName: function(link, hosts, protocol) {
+    if (link.host) { // if quicklink overrides hostcomponent host name, get host from config
+      var configProperties = this.get('configProperties');
+      var hostProperty = Em.get(link.host, protocol + '_property');
+      var site = configProperties.findProperty('type', Em.get(link.host, 'site'));
+      return site && site.properties ? this.parseHostFromUri(site.properties[hostProperty]) : null;
+    } else {
+      var hostNameForComponent = hosts.findProperty('componentName', link.component_name);
+      return hostNameForComponent ? hostNameForComponent.publicHostName : null;
+    }
+  },
+
   /**
-   * set links that contain multiple hosts
-   *
-   * @param {hostForQuickLink[]} hosts
-   * @method setMultipleHostLinks
+   * @param {string} uri
    */
-  setMultipleHostLinks: function (hosts) {
+  parseHostFromUri: function(uri) {
+    if (uri) {
+      var match = uri.match(/:\/\/([^/:]+)/i);
+      return match != null && match.length == 2 ? match[1] : uri;
+    } else {
+      return null;
+    }
+  },
+
+  getMultipleHostLinks: function (hosts) {
     var quickLinksConfig = this.getQuickLinksConfiguration();
     if (Em.isNone(quickLinksConfig)) {
-      this.set('quickLinksArray', []);
-      this.set('isLoaded', false);
       return;
     }
 
@@ -487,8 +518,50 @@ App.QuickViewLinks = Em.View.extend({
       }
       quickLinksArray.push(quickLinks);
     }, this);
-    this.set('quickLinksArray', quickLinksArray);
-    this.set('isLoaded', true);
+    return quickLinksArray;
+  },
+
+  /**
+   * set links that contain multiple hosts
+   *
+   * @param {hostForQuickLink[]} hosts
+   * @method setMultipleHostLinks
+   */
+  setMultipleHostLinks: function (hosts) {
+    const quickLinks = this.getMultipleHostLinks(hosts);
+    this.setProperties({
+      quickLinksArray: [
+        {
+          links: quickLinks || []
+        }
+      ],
+      isLoaded: !!quickLinks
+    });
+  },
+
+  /**
+   * set links that contain for multiple grouped hosts
+   *
+   * @param {hostForQuickLink[]} hosts
+   * @method setMultipleGroupLinks
+   */
+  setMultipleGroupLinks: function (hosts) {
+    let isLoaded = true;
+    const quickLinksArray = this.get('masterGroups').map(group => {
+      const groupHosts = hosts.filter(host => group.hosts.contains(host.hostName)),
+        links = this.getMultipleHostLinks(groupHosts);
+      if (!links) {
+        isLoaded = false;
+      }
+      return {
+        title: group.title,
+        links: links || []
+      };
+    });
+    this.setProperties({
+      quickLinksArray,
+      isLoaded
+    });
   },
 
   /**
@@ -523,20 +596,18 @@ App.QuickViewLinks = Em.View.extend({
    * @method hostForQuickLink
    */
   processHdfsHosts: function (hosts) {
-    return hosts.map(function (host) {
-      if (host.hostName === Em.get(this, 'content.activeNameNode.hostName')) {
+    return hosts.map(host => {
+      const {hostName} = host,
+        isActiveNameNode = Em.get(this, 'content.activeNameNodes').someProperty('hostName', hostName),
+        isStandbyNameNode = Em.get(this, 'content.standbyNameNodes').someProperty('hostName', hostName);
+      if (isActiveNameNode) {
         host.status = Em.I18n.t('quick.links.label.active');
       }
-      else
-        if (host.hostName === Em.get(this, 'content.standbyNameNode.hostName')) {
-          host.status = Em.I18n.t('quick.links.label.standby');
-        }
-        else
-          if (host.hostName === Em.get(this, 'content.standbyNameNode2.hostName')) {
-            host.status = Em.I18n.t('quick.links.label.standby');
-          }
+      if (isStandbyNameNode) {
+        host.status = Em.I18n.t('quick.links.label.standby');
+      }
       return host;
-    }, this);
+    });
   },
 
   /**
@@ -600,12 +671,6 @@ App.QuickViewLinks = Em.View.extend({
   getHosts: function (response, serviceName) {
     //The default error message when we cannot obtain the host information for the given service
     this.set('quickLinksErrorMessage', Em.I18n.t('quick.links.error.nohosts.label').format(serviceName));
-    if (App.get('singleNodeInstall')) {
-      return [{
-        hostName: App.get('singleNodeAlias'),
-        publicHostName: App.get('singleNodeAlias')
-      }];
-    }
     var hosts = [];
     var quickLinkConfigs = App.QuickLinksConfig.find().findProperty("id", serviceName);
     if (quickLinkConfigs) {
@@ -626,6 +691,11 @@ App.QuickViewLinks = Em.View.extend({
           case "YARN":
             hosts = hosts.concat(this.processYarnHosts(componentHosts));
             break;
+          case "SMARTSENSE":
+            if(!App.MasterComponent.find().findProperty('componentName', _componentName)) {
+              hosts = [];
+              break;
+            }
           default:
             hosts = hosts.concat(componentHosts);
             break;
@@ -644,10 +714,11 @@ App.QuickViewLinks = Em.View.extend({
    */
   findHosts: function (componentName, response) {
     var hosts = [];
-    var masterComponent = App.MasterComponent.find().findProperty('componentName', componentName);
-    if (masterComponent) {
-      var masterHostComponents = masterComponent.get('hostNames') || [];
-      masterHostComponents.forEach(function (_hostName) {
+    var component = App.MasterComponent.find().findProperty('componentName', componentName) ||
+      App.SlaveComponent.find().findProperty('componentName', componentName);
+    if (component) {
+      var hostComponents = component.get('hostNames') || [];
+      hostComponents.forEach(function (_hostName) {
         var host = this.getPublicHostName(response.items, _hostName);
         if (host) {
           hosts.push({
@@ -733,6 +804,9 @@ App.QuickViewLinks = Em.View.extend({
     if ('HTTP_ONLY' === protocolType) {
       return 'http';
     }
+
+    protocolType = protocolType.toLowerCase();
+
     var count = 0;
     var checks = Em.get(protocolConfig, 'checks');
     if (!checks) {
@@ -747,6 +821,7 @@ App.QuickViewLinks = Em.View.extend({
         count++;
       }
     }, this);
+
     return count ? this.reverseType(protocolType) : protocolType;
   },
 
@@ -760,7 +835,9 @@ App.QuickViewLinks = Em.View.extend({
    * @method setPort
    */
   setPort: function (portConfigs, protocol, configProperties) {
-
+    if (!portConfigs) {
+      return '';
+    }
     var defaultPort = Em.get(portConfigs, protocol + '_default_port');
     var portProperty = Em.get(portConfigs, protocol + '_property');
     var site = configProperties.findProperty('type', Em.get(portConfigs, 'site'));
@@ -771,6 +848,12 @@ App.QuickViewLinks = Em.View.extend({
     }
 
     var regexValue = Em.get(portConfigs, 'regex');
+    if (protocol === 'https') {
+      var httpsRegex = Em.get(portConfigs, 'https_regex');
+      if (httpsRegex) {
+        regexValue = httpsRegex;
+      }
+    }
     regexValue = regexValue.trim();
     if (regexValue) {
       var re = new RegExp(regexValue);
@@ -783,5 +866,13 @@ App.QuickViewLinks = Em.View.extend({
     } else {
       return propertyValue;
     }
-  }
+  },
+
+  setTooltip: function () {
+    Em.run.next(() => {
+      if (this.get('showQuickLinks') && this.get('isLoaded') && this.get('quickLinksArray.length')) {
+        App.tooltip($(`[rel="${this.get('tooltipAttribute')}"]`));
+      }
+    });
+  }.observes('showQuickLinks', 'isLoaded', 'quickLinksArray.length')
 });

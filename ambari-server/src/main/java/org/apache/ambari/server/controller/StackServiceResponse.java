@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,15 +18,17 @@
 
 package org.apache.ambari.server.controller;
 
-import org.apache.ambari.server.state.CustomCommandDefinition;
-import org.apache.ambari.server.state.ServiceInfo;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.apache.ambari.server.state.CustomCommandDefinition;
+import org.apache.ambari.server.state.ServiceInfo;
+
+import io.swagger.annotations.ApiModelProperty;
 
 public class StackServiceResponse {
 
@@ -38,6 +40,7 @@ public class StackServiceResponse {
   private String userName;
   private String comments;
   private String serviceVersion;
+  private ServiceInfo.Selection selection;
   private boolean serviceCheckSupported;
   private List<String> customCommands;
 
@@ -57,6 +60,28 @@ public class StackServiceResponse {
   private File kerberosDescriptorFile;
 
   /**
+   * Indicates if the stack definition says this service supports
+   * credential store. If not specified, this will be false.
+   */
+  private boolean credentialStoreSupported;
+
+  /**
+   * Indicates if the stack definition says this service is enabled
+   * for credential store use. If not specified, this will be false.
+   */
+  private boolean credentialStoreEnabled;
+
+  /**
+   * Indicates if the stack definition says this service requires
+   * credential store use. If not specified, this will be false.
+   */
+  private boolean credentialStoreRequired;
+
+  private boolean isSupportDeleteViaUI;
+
+  private final boolean ssoIntegrationSupported;
+
+  /**
    * Constructor.
    *
    * @param service
@@ -73,23 +98,37 @@ public class StackServiceResponse {
     excludedConfigTypes = service.getExcludedConfigTypes();
     requiredServices = service.getRequiredServices();
     serviceCheckSupported = null != service.getCommandScript();
+    selection = service.getSelection();
 
     // the custom command names defined at the service (not component) level
     List<CustomCommandDefinition> definitions = service.getCustomCommands();
     if (null == definitions || definitions.size() == 0) {
       customCommands = Collections.emptyList();
     } else {
-      customCommands = new ArrayList<String>(definitions.size());
+      customCommands = new ArrayList<>(definitions.size());
       for (CustomCommandDefinition command : definitions) {
         customCommands.add(command.getName());
       }
     }
 
     kerberosDescriptorFile = service.getKerberosDescriptorFile();
-
     serviceProperties = service.getServiceProperties();
+    credentialStoreSupported = service.isCredentialStoreSupported();
+    credentialStoreEnabled = service.isCredentialStoreEnabled();
+    isSupportDeleteViaUI = service.isSupportDeleteViaUI();
+    ssoIntegrationSupported = service.isSingleSignOnSupported();
   }
 
+  @ApiModelProperty(name = "selection")
+  public ServiceInfo.Selection getSelection() {
+    return selection;
+  }
+
+  public void setSelection(ServiceInfo.Selection selection) {
+    this.selection = selection;
+  }
+
+  @ApiModelProperty(name = "stack_name")
   public String getStackName() {
     return stackName;
   }
@@ -98,6 +137,7 @@ public class StackServiceResponse {
     this.stackName = stackName;
   }
 
+  @ApiModelProperty(name = "stack_version")
   public String getStackVersion() {
     return stackVersion;
   }
@@ -106,6 +146,7 @@ public class StackServiceResponse {
     this.stackVersion = stackVersion;
   }
 
+  @ApiModelProperty(name = "service_name")
   public String getServiceName() {
     return serviceName;
   }
@@ -114,15 +155,17 @@ public class StackServiceResponse {
     this.serviceName = serviceName;
   }
 
+  @ApiModelProperty(name = "service_type")
   public String getServiceType() {
-	return serviceType;
+    return serviceType;
   }
 
   public void setServiceType(String serviceType) {
-	this.serviceType = serviceType;
+    this.serviceType = serviceType;
   }
 
-public String getServiceDisplayName() {
+  @ApiModelProperty(name = "display_name")
+  public String getServiceDisplayName() {
     return serviceDisplayName;
   }
 
@@ -130,6 +173,7 @@ public String getServiceDisplayName() {
     this.serviceDisplayName = serviceDisplayName;
   }
 
+  @ApiModelProperty(name = "user_name")
   public String getUserName() {
     return userName;
   }
@@ -138,6 +182,7 @@ public String getServiceDisplayName() {
     this.userName = userName;
   }
 
+  @ApiModelProperty(name = "comments")
   public String getComments() {
     return comments;
   }
@@ -146,6 +191,7 @@ public String getServiceDisplayName() {
     this.comments = comments;
   }
 
+  @ApiModelProperty(name = "service_version")
   public String getServiceVersion() {
     return serviceVersion;
   }
@@ -154,14 +200,17 @@ public String getServiceDisplayName() {
     this.serviceVersion = serviceVersion;
   }
 
+  @ApiModelProperty(name = "config_types")
   public Map<String, Map<String, Map<String, String>>> getConfigTypes() {
     return configTypes;
   }
 
+  @ApiModelProperty(hidden = true)
   public Set<String> getExcludedConfigTypes() {
     return excludedConfigTypes;
   }
 
+  @ApiModelProperty(name = "required_services")
   public List<String> getRequiredServices() {
     return requiredServices;
   }
@@ -176,6 +225,7 @@ public String getServiceDisplayName() {
    * @return a File pointing to the service-level Kerberos descriptor, or null if no relevant file is
    * available
    */
+  @ApiModelProperty(hidden =  true)
   public File getKerberosDescriptorFile() {
     return kerberosDescriptorFile;
   }
@@ -199,6 +249,7 @@ public String getServiceDisplayName() {
    *         {@code false} otherwise.
    *
    */
+  @ApiModelProperty(name = "service_check_supported")
   public boolean isServiceCheckSupported() {
     return serviceCheckSupported;
   }
@@ -208,6 +259,7 @@ public String getServiceDisplayName() {
    *
    * @return the commands or an empty list (never {@code null}).
    */
+  @ApiModelProperty(name = "custom_commands")
   public List<String> getCustomCommands() {
     return customCommands;
   }
@@ -216,8 +268,83 @@ public String getServiceDisplayName() {
    * Get the service properties of this service.
    * @return the properties or an empty map (never {@code null}).
    */
+  @ApiModelProperty(name = "properties")
   public Map<String, String> getServiceProperties() {
     return serviceProperties;
   }
 
+  /**
+   * Get whether credential store is supported by the service
+   *
+   * @return true or false.
+   */
+  @ApiModelProperty(name = "credential_store_supported")
+  public boolean isCredentialStoreSupported() {
+    return credentialStoreSupported;
+  }
+
+  /**
+   * Set credential store supported value
+   *
+   * @param credentialStoreSupported
+   */
+  public void setCredentialStoreSupported(boolean credentialStoreSupported) {
+    this.credentialStoreSupported = credentialStoreSupported;
+  }
+
+  /**
+   * Get whether credential store use is enabled
+   *
+   * @return true or false
+   */
+  @ApiModelProperty(name = "credential_store_enabled")
+  public boolean isCredentialStoreEnabled() {
+    return credentialStoreEnabled;
+  }
+
+  /**
+   * Set credential store enabled value.
+   *
+   * @param credentialStoreEnabled
+   */
+  public void setCredentialStoreEnabled(boolean credentialStoreEnabled) {
+    this.credentialStoreEnabled = credentialStoreEnabled;
+  }
+
+  /**
+   * Get whether credential store use is required
+   *
+   * @return true or false
+   */
+  @ApiModelProperty(name = "credential_store_required")
+  public boolean isCredentialStoreRequired() {
+    return credentialStoreRequired;
+  }
+
+  /**
+   * Set credential store required value.
+   *
+   * @param credentialStoreRequired
+   */
+  public void setCredentialStoreRequired(boolean credentialStoreRequired) {
+    this.credentialStoreRequired = credentialStoreRequired;
+  }
+
+  @ApiModelProperty(hidden = true)
+  public boolean isSupportDeleteViaUI(){
+    return isSupportDeleteViaUI;
+  }
+
+  /**
+   * Indicates if this service supports single sign-on integration.
+   */
+  @ApiModelProperty(name = "sso_integration_supported")
+  public boolean isSsoIntegrationSupported() {
+    return ssoIntegrationSupported;
+  }
+
+  public interface StackServiceResponseSwagger extends ApiModel {
+    @ApiModelProperty(name = "StackServices")
+    public StackServiceResponse getStackServiceResponse();
+  }
 }

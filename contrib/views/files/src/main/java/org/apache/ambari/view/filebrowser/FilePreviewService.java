@@ -23,28 +23,37 @@ import org.apache.ambari.view.commons.exceptions.NotFoundFormattedException;
 import org.apache.ambari.view.commons.exceptions.ServiceFormattedException;
 import org.apache.ambari.view.commons.hdfs.HdfsService;
 import org.apache.ambari.view.utils.hdfs.HdfsApi;
+import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.io.compress.CompressionCodecFactory;
 import org.json.simple.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
+import java.util.Map;
 
 /**
  * File Preview Service
  */
 public class FilePreviewService extends HdfsService {
+  protected static final Logger LOG = LoggerFactory.getLogger(FilePreviewService.class);
 
   private CompressionCodecFactory compressionCodecFactory;
 
   public FilePreviewService(ViewContext context) {
     super(context);
 
+    initCompressionCodecFactory();
+  }
+
+  private void initCompressionCodecFactory() {
     Configuration conf = new Configuration();
     conf.set("io.compression.codecs","org.apache.hadoop.io.compress.GzipCodec," +
       "org.apache.hadoop.io.compress.DefaultCodec,org.apache.hadoop.io.compress.SnappyCodec," +
@@ -53,13 +62,22 @@ public class FilePreviewService extends HdfsService {
     compressionCodecFactory = new CompressionCodecFactory(conf);
   }
 
+  /**
+   * @param context
+   * @param viewConfigs : extra properties that needs to be included into configs
+   */
+  public FilePreviewService(ViewContext context, Map<String, String> viewConfigs) {
+    super(context, viewConfigs);
+    initCompressionCodecFactory();
+  }
+
   @GET
   @Path("/file")
   @Produces(MediaType.APPLICATION_JSON)
-  public Response previewFile(@QueryParam("path") String path,@QueryParam("start") int start,@QueryParam("end") int end) {
-
+  public Response previewFile(@QueryParam("path") String path, @QueryParam("start") int start, @QueryParam("end") int end) {
+    LOG.info("previewing file {}, from start {}, till end {}", path, start, end);
     try {
-      HdfsApi api = getApi(context);
+      HdfsApi api = getApi();
       FileStatus status = api.getFileStatus(path);
 
       CompressionCodec codec = compressionCodecFactory.getCodec(status.getPath());
@@ -69,9 +87,9 @@ public class FilePreviewService extends HdfsService {
 
       int length = end - start;
       byte[] bytes = new byte[length];
-     // ((Seekable)stream).seek(start); //seek(start);
-      stream.skip(start);
-      int readBytes = stream.read(bytes, 0, length);
+
+      if (start != 0) IOUtils.skip(stream, start);
+      int readBytes = IOUtils.read(stream, bytes);
       boolean isFileEnd = false;
 
       if (readBytes < length) isFileEnd = true;
@@ -83,10 +101,13 @@ public class FilePreviewService extends HdfsService {
 
       return Response.ok(response).build();
     } catch (WebApplicationException ex) {
+      LOG.error("Error occurred while previewing {} : ", path, ex);
       throw ex;
     } catch (FileNotFoundException ex) {
+      LOG.error("Error occurred while previewing {} : ", path, ex);
       throw new NotFoundFormattedException(ex.getMessage(), ex);
     } catch (Exception ex) {
+      LOG.error("Error occurred while previewing {} : ", path, ex);
       throw new ServiceFormattedException(ex.getMessage(), ex);
     }
   }

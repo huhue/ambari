@@ -18,48 +18,62 @@
 
 package org.apache.ambari.server.controller.internal;
 
-import com.google.common.collect.Lists;
-import junit.framework.Assert;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.expect;
+
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Set;
+
+import javax.persistence.EntityManager;
+
+import org.apache.ambari.server.controller.GroupPrivilegeResponse;
 import org.apache.ambari.server.controller.spi.Predicate;
 import org.apache.ambari.server.controller.spi.Request;
 import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.SystemException;
 import org.apache.ambari.server.controller.utilities.PredicateBuilder;
 import org.apache.ambari.server.controller.utilities.PropertyHelper;
+import org.apache.ambari.server.hooks.HookContextFactory;
+import org.apache.ambari.server.hooks.HookService;
+import org.apache.ambari.server.orm.DBAccessor;
 import org.apache.ambari.server.orm.dao.ClusterDAO;
 import org.apache.ambari.server.orm.dao.GroupDAO;
 import org.apache.ambari.server.orm.dao.PrivilegeDAO;
 import org.apache.ambari.server.orm.dao.ViewInstanceDAO;
 import org.apache.ambari.server.orm.entities.ClusterEntity;
-import org.apache.ambari.server.orm.entities.MemberEntity;
+import org.apache.ambari.server.orm.entities.GroupEntity;
 import org.apache.ambari.server.orm.entities.PermissionEntity;
 import org.apache.ambari.server.orm.entities.PrincipalEntity;
 import org.apache.ambari.server.orm.entities.PrincipalTypeEntity;
 import org.apache.ambari.server.orm.entities.PrivilegeEntity;
 import org.apache.ambari.server.orm.entities.ResourceEntity;
 import org.apache.ambari.server.orm.entities.ResourceTypeEntity;
-import org.apache.ambari.server.orm.entities.GroupEntity;
 import org.apache.ambari.server.orm.entities.ViewEntity;
 import org.apache.ambari.server.orm.entities.ViewInstanceEntity;
 import org.apache.ambari.server.security.TestAuthenticationFactory;
 import org.apache.ambari.server.security.authorization.AuthorizationException;
 import org.apache.ambari.server.security.authorization.ResourceType;
+import org.apache.ambari.server.security.authorization.Users;
+import org.apache.ambari.server.state.stack.OsFamily;
 import org.easymock.EasyMockSupport;
 import org.junit.Test;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
+import com.google.inject.AbstractModule;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
 
-import static org.easymock.EasyMock.anyObject;
-import static org.easymock.EasyMock.expect;
+import junit.framework.Assert;
 
 /**
  * GroupPrivilegeResourceProvider tests.
  */
-public class GroupPrivilegeResourceProviderTest extends EasyMockSupport {
+public class GroupPrivilegeResourceProviderTest extends EasyMockSupport{
 
   @Test(expected = SystemException.class)
   public void testCreateResources() throws Exception {
@@ -77,7 +91,7 @@ public class GroupPrivilegeResourceProviderTest extends EasyMockSupport {
   public void testGetResources_NonAdministrator() throws Exception {
     getResourcesTest(TestAuthenticationFactory.createClusterAdministrator("user1", 2L), "Group1");
   }
-  
+
   @Test(expected = SystemException.class)
   public void testUpdateResources() throws Exception {
     SecurityContextHolder.getContext().setAuthentication(TestAuthenticationFactory.createClusterAdministrator("user1", 2L));
@@ -124,15 +138,16 @@ public class GroupPrivilegeResourceProviderTest extends EasyMockSupport {
 
     ClusterDAO clusterDAO = createMock(ClusterDAO.class);
     ViewInstanceDAO viewInstanceDAO = createMock(ViewInstanceDAO.class);
-    PrivilegeDAO privilegeDAO = createNiceMock(PrivilegeDAO.class);
+    Users users = createNiceMock(Users.class);
 
     replayAll();
 
-    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, privilegeDAO);
+    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, users);
     GroupPrivilegeResourceProvider provider = new GroupPrivilegeResourceProvider();
-    Resource resource = provider.toResource(privilegeEntity, "group1", provider.getPropertyIds());
+    GroupPrivilegeResponse response = provider.getResponse(privilegeEntity, "group1");
+    Resource resource = provider.toResource(response, provider.getPropertyIds());
 
-    Assert.assertEquals(ResourceType.AMBARI.name(), resource.getPropertyValue(GroupPrivilegeResourceProvider.PRIVILEGE_TYPE_PROPERTY_ID));
+    Assert.assertEquals(ResourceType.AMBARI.name(), resource.getPropertyValue(GroupPrivilegeResourceProvider.TYPE));
 
     verifyAll();
   }
@@ -175,16 +190,17 @@ public class GroupPrivilegeResourceProviderTest extends EasyMockSupport {
 
     GroupDAO groupDAO = createMock(GroupDAO.class);
     expect(groupDAO.findGroupByPrincipal(anyObject(PrincipalEntity.class))).andReturn(groupEntity).anyTimes();
-    PrivilegeDAO privilegeDAO = createNiceMock(PrivilegeDAO.class);
+    Users users = createNiceMock(Users.class);
 
     replayAll();
 
-    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, privilegeDAO);
+    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, users);
     GroupPrivilegeResourceProvider provider = new GroupPrivilegeResourceProvider();
-    Resource resource = provider.toResource(privilegeEntity, "group1", provider.getPropertyIds());
+    GroupPrivilegeResponse response = provider.getResponse(privilegeEntity, "group1");
+    Resource resource = provider.toResource(response, provider.getPropertyIds());
 
-    Assert.assertEquals("TestCluster", resource.getPropertyValue(ClusterPrivilegeResourceProvider.PRIVILEGE_CLUSTER_NAME_PROPERTY_ID));
-    Assert.assertEquals(ResourceType.CLUSTER.name(), resource.getPropertyValue(GroupPrivilegeResourceProvider.PRIVILEGE_TYPE_PROPERTY_ID));
+    Assert.assertEquals("TestCluster", resource.getPropertyValue(ClusterPrivilegeResourceProvider.CLUSTER_NAME));
+    Assert.assertEquals(ResourceType.CLUSTER.name(), resource.getPropertyValue(GroupPrivilegeResourceProvider.TYPE));
 
     verifyAll();
   }
@@ -226,25 +242,26 @@ public class GroupPrivilegeResourceProviderTest extends EasyMockSupport {
     expect(groupEntity.getGroupName()).andReturn("group1").atLeastOnce();
 
     ClusterDAO clusterDAO = createMock(ClusterDAO.class);
-    
+
     ViewInstanceDAO viewInstanceDAO = createMock(ViewInstanceDAO.class);
     expect(viewInstanceDAO.findByResourceId(1L)).andReturn(viewInstanceEntity).atLeastOnce();
 
     GroupDAO groupDAO = createMock(GroupDAO.class);
     expect(groupDAO.findGroupByPrincipal(anyObject(PrincipalEntity.class))).andReturn(groupEntity).anyTimes();
 
-    PrivilegeDAO privilegeDAO = createNiceMock(PrivilegeDAO.class);
+    Users users = createNiceMock(Users.class);
 
     replayAll();
 
-    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, privilegeDAO);
+    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, users);
     GroupPrivilegeResourceProvider provider = new GroupPrivilegeResourceProvider();
-    Resource resource = provider.toResource(privilegeEntity, "group1", provider.getPropertyIds());
+    GroupPrivilegeResponse response = provider.getResponse(privilegeEntity, "group1");
+    Resource resource = provider.toResource(response, provider.getPropertyIds());
 
-    Assert.assertEquals("Test View", resource.getPropertyValue(ViewPrivilegeResourceProvider.PRIVILEGE_INSTANCE_NAME_PROPERTY_ID));
-    Assert.assertEquals("TestView", resource.getPropertyValue(ViewPrivilegeResourceProvider.PRIVILEGE_VIEW_NAME_PROPERTY_ID));
-    Assert.assertEquals("1.2.3.4", resource.getPropertyValue(ViewPrivilegeResourceProvider.PRIVILEGE_VIEW_VERSION_PROPERTY_ID));
-    Assert.assertEquals(ResourceType.VIEW.name(), resource.getPropertyValue(GroupPrivilegeResourceProvider.PRIVILEGE_TYPE_PROPERTY_ID));
+    Assert.assertEquals("Test View", resource.getPropertyValue(ViewPrivilegeResourceProvider.INSTANCE_NAME));
+    Assert.assertEquals("TestView", resource.getPropertyValue(ViewPrivilegeResourceProvider.VIEW_NAME));
+    Assert.assertEquals("1.2.3.4", resource.getPropertyValue(ViewPrivilegeResourceProvider.VERSION));
+    Assert.assertEquals(ResourceType.VIEW.name(), resource.getPropertyValue(GroupPrivilegeResourceProvider.TYPE));
 
     verifyAll();
   }
@@ -292,18 +309,19 @@ public class GroupPrivilegeResourceProviderTest extends EasyMockSupport {
 
     GroupDAO groupDAO = createMock(GroupDAO.class);
     expect(groupDAO.findGroupByPrincipal(anyObject(PrincipalEntity.class))).andReturn(groupEntity).anyTimes();
-    PrivilegeDAO privilegeDAO = createNiceMock(PrivilegeDAO.class);
+    Users users = createNiceMock(Users.class);
 
     replayAll();
 
-    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, privilegeDAO);
+    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, users);
     GroupPrivilegeResourceProvider provider = new GroupPrivilegeResourceProvider();
-    Resource resource = provider.toResource(privilegeEntity, "group1", provider.getPropertyIds());
+    GroupPrivilegeResponse response = provider.getResponse(privilegeEntity, "group1");
+    Resource resource = provider.toResource(response, provider.getPropertyIds());
 
-    Assert.assertEquals("Test View", resource.getPropertyValue(ViewPrivilegeResourceProvider.PRIVILEGE_INSTANCE_NAME_PROPERTY_ID));
-    Assert.assertEquals("TestView", resource.getPropertyValue(ViewPrivilegeResourceProvider.PRIVILEGE_VIEW_NAME_PROPERTY_ID));
-    Assert.assertEquals("1.2.3.4", resource.getPropertyValue(ViewPrivilegeResourceProvider.PRIVILEGE_VIEW_VERSION_PROPERTY_ID));
-    Assert.assertEquals(ResourceType.VIEW.name(), resource.getPropertyValue(GroupPrivilegeResourceProvider.PRIVILEGE_TYPE_PROPERTY_ID));
+    Assert.assertEquals("Test View", resource.getPropertyValue(ViewPrivilegeResourceProvider.INSTANCE_NAME));
+    Assert.assertEquals("TestView", resource.getPropertyValue(ViewPrivilegeResourceProvider.VIEW_NAME));
+    Assert.assertEquals("1.2.3.4", resource.getPropertyValue(ViewPrivilegeResourceProvider.VERSION));
+    Assert.assertEquals(ResourceType.VIEW.name(), resource.getPropertyValue(GroupPrivilegeResourceProvider.TYPE));
 
     verifyAll();
   }
@@ -320,36 +338,62 @@ public class GroupPrivilegeResourceProviderTest extends EasyMockSupport {
     final PrincipalTypeEntity principalTypeEntity = createNiceMock(PrincipalTypeEntity.class);
     final ResourceEntity resourceEntity = createNiceMock(ResourceEntity.class);
     final ResourceTypeEntity resourceTypeEntity = createNiceMock(ResourceTypeEntity.class);
-    final PrivilegeDAO privilegeDAO = createNiceMock(PrivilegeDAO.class);
+    final PrivilegeDAO privilegeDAO = createMock(PrivilegeDAO.class);
 
-    expect(groupDAO.findGroupByName(requestedGroupName)).andReturn(groupEntity).anyTimes();
-    expect(groupEntity.getPrincipal()).andReturn(principalEntity).anyTimes();
-    expect(groupEntity.getMemberEntities()).andReturn(Collections.<MemberEntity>emptySet()).anyTimes();
-    expect(privilegeEntity.getPermission()).andReturn(permissionEntity).anyTimes();
-    expect(privilegeEntity.getPrincipal()).andReturn(principalEntity).anyTimes();
-    expect(principalEntity.getPrincipalType()).andReturn(principalTypeEntity).anyTimes();
-    expect(principalTypeEntity.getName()).andReturn(PrincipalTypeEntity.GROUP_PRINCIPAL_TYPE_NAME).anyTimes();
-    expect(principalEntity.getPrivileges()).andReturn(new HashSet<PrivilegeEntity>() {
-      {
-        add(privilegeEntity);
-      }
-    }).anyTimes();
-    expect(groupDAO.findGroupByPrincipal(anyObject(PrincipalEntity.class))).andReturn(groupEntity).anyTimes();
-    expect(groupEntity.getGroupName()).andReturn(requestedGroupName).anyTimes();
-    expect(privilegeEntity.getResource()).andReturn(resourceEntity).anyTimes();
-    expect(resourceEntity.getResourceType()).andReturn(resourceTypeEntity).anyTimes();
+    final Injector injector = Guice.createInjector(new AbstractModule() {
+                                                     @Override
+                                                     protected void configure() {
+                                                       bind(OsFamily.class).toInstance(createNiceMock(OsFamily.class));
+                                                       bind(EntityManager.class).toInstance(createNiceMock(EntityManager.class));
+                                                       bind(DBAccessor.class).toInstance(createNiceMock(DBAccessor.class));
+                                                       bind(PasswordEncoder.class).toInstance(createNiceMock(PasswordEncoder.class));
+                                                       bind(HookService.class).toInstance(createMock(HookService.class));
+                                                       bind(HookContextFactory.class).toInstance(createMock(HookContextFactory.class));
+
+                                                       bind(GroupDAO.class).toInstance(groupDAO);
+                                                       bind(ClusterDAO.class).toInstance(clusterDAO);
+                                                       bind(ViewInstanceDAO.class).toInstance(viewInstanceDAO);
+                                                       bind(GroupEntity.class).toInstance(groupEntity);
+                                                       bind(PrincipalEntity.class).toInstance(principalEntity);
+                                                       bind(PrivilegeEntity.class).toInstance(privilegeEntity);
+                                                       bind(PermissionEntity.class).toInstance(permissionEntity);
+                                                       bind(PrincipalTypeEntity.class).toInstance(principalTypeEntity);
+                                                       bind(ResourceEntity.class).toInstance(resourceEntity);
+                                                       bind(ResourceTypeEntity.class).toInstance(resourceTypeEntity);
+                                                       bind(PrivilegeDAO.class).toInstance(privilegeDAO);
+                                                     }
+                                                   }
+    );
+
+    final Users users = injector.getInstance(Users.class);
+
+    List<PrincipalEntity> groupPrincipals = new LinkedList<>();
+    groupPrincipals.add(principalEntity);
+
+    expect(privilegeDAO.findAllByPrincipal(groupPrincipals)).
+        andReturn(Collections.singletonList(privilegeEntity))
+        .once();
+    expect(groupDAO.findGroupByName(requestedGroupName)).andReturn(groupEntity).atLeastOnce();
+    expect(groupEntity.getPrincipal()).andReturn(principalEntity).atLeastOnce();
+    expect(privilegeEntity.getPermission()).andReturn(permissionEntity).atLeastOnce();
+    expect(privilegeEntity.getPrincipal()).andReturn(principalEntity).atLeastOnce();
+    expect(principalEntity.getPrincipalType()).andReturn(principalTypeEntity).atLeastOnce();
+    expect(principalTypeEntity.getName()).andReturn(PrincipalTypeEntity.GROUP_PRINCIPAL_TYPE_NAME).atLeastOnce();
+    expect(groupDAO.findGroupByPrincipal(anyObject(PrincipalEntity.class))).andReturn(groupEntity).atLeastOnce();
+    expect(groupEntity.getGroupName()).andReturn(requestedGroupName).atLeastOnce();
+    expect(privilegeEntity.getResource()).andReturn(resourceEntity).atLeastOnce();
+    expect(resourceEntity.getResourceType()).andReturn(resourceTypeEntity).atLeastOnce();
     expect(resourceTypeEntity.getName()).andReturn(ResourceType.AMBARI.name());
-    expect(viewInstanceDAO.findAll()).andReturn(Lists.<ViewInstanceEntity>newArrayList()).anyTimes();
 
     replayAll();
 
-    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, privilegeDAO);
+    GroupPrivilegeResourceProvider.init(clusterDAO, groupDAO, viewInstanceDAO, users);
 
-    final Set<String> propertyIds = new HashSet<String>();
-    propertyIds.add(GroupPrivilegeResourceProvider.PRIVILEGE_GROUP_NAME_PROPERTY_ID);
+    final Set<String> propertyIds = new HashSet<>();
+    propertyIds.add(GroupPrivilegeResourceProvider.GROUP_NAME);
 
     final Predicate predicate = new PredicateBuilder()
-        .property(GroupPrivilegeResourceProvider.PRIVILEGE_GROUP_NAME_PROPERTY_ID)
+        .property(GroupPrivilegeResourceProvider.GROUP_NAME)
         .equals(requestedGroupName)
         .toPredicate();
     Request request = PropertyHelper.getReadRequest(propertyIds);
@@ -361,11 +405,10 @@ public class GroupPrivilegeResourceProviderTest extends EasyMockSupport {
 
     Assert.assertEquals(1, resources.size());
     for (Resource resource : resources) {
-      String groupName = (String) resource.getPropertyValue(GroupPrivilegeResourceProvider.PRIVILEGE_GROUP_NAME_PROPERTY_ID);
+      String groupName = (String) resource.getPropertyValue(GroupPrivilegeResourceProvider.GROUP_NAME);
       Assert.assertEquals(requestedGroupName, groupName);
     }
 
     verifyAll();
   }
-
 }

@@ -22,6 +22,7 @@ var stringUtils = require('utils/string_utils');
 var validator = require('utils/validator');
 
 var configTagFromFileNameMap = {};
+var PASSWORD = "PASSWORD";
 
 App.config = Em.Object.create({
 
@@ -34,6 +35,17 @@ App.config = Em.Object.create({
   filenameExceptions: ['alert_notification'],
 
   preDefinedServiceConfigs: [],
+
+  /**
+   * Map for methods used to parse hosts lists from certain config properties
+   */
+  uniqueHostsListParsers: [
+    {
+      propertyName: 'templeton.hive.properties',
+      type: 'webhcat-site',
+      method: 'getTempletonHiveHosts'
+    }
+  ],
 
   /**
    *
@@ -130,7 +142,7 @@ App.config = Em.Object.create({
     this.set('preDefinedServiceConfigs', allTabs);
   },
 
-  secureConfigs: require('data/HDP2/secure_mapping'),
+  secureConfigs: require('data/configs/wizards/secure_mapping'),
 
   secureConfigsMap: function () {
     var ret = {};
@@ -140,7 +152,7 @@ App.config = Em.Object.create({
     return ret;
   }.property('secureConfigs.[]'),
 
-  kerberosIdentities: require('data/HDP2/kerberos_identities').configProperties,
+  kerberosIdentities: require('data/configs/wizards/kerberos_identities').configProperties,
 
   kerberosIdentitiesMap: function() {
     var map = {};
@@ -157,15 +169,15 @@ App.config = Em.Object.create({
     var
       baseStackFolder = App.get('currentStackName'),
       singMap = {
-        "1": ">",
-        "-1": "<",
-        "0": "="
+        "1": [">", ">="],
+        "-1": ["<", "<="],
+        "0": ["=", ">=","<="]
       };
 
     this.get('customStackMapping').every(function (stack) {
       if(stack.stackName == App.get('currentStackName')){
         var versionCompare = Em.compare(App.get('currentStackVersionNumber'), stack.stackVersionNumber);
-        if(singMap[versionCompare+""] === stack.sign){
+        if(singMap[versionCompare+""].contains(stack.sign)){
           baseStackFolder = stack.baseStackFolder;
           return false;
         }
@@ -176,23 +188,14 @@ App.config = Em.Object.create({
     return baseStackFolder;
   },
 
-  allPreDefinedSiteProperties: function() {
-    var sitePropertiesForCurrentStack = this.preDefinedConfigFile(this.mapCustomStack(), 'site_properties');
-    if (sitePropertiesForCurrentStack) {
-      return sitePropertiesForCurrentStack.configProperties;
-    } else if (App.get('isHadoop23Stack')) {
-      return require('data/HDP2.3/site_properties').configProperties;
-    } else {
-      return require('data/HDP2.2/site_properties').configProperties;
-    }
-  }.property('App.isHadoop23Stack'),
+  allPreDefinedSiteProperties: require('data/configs/site_properties').configProperties,
 
   preDefinedSiteProperties: function () {
     var serviceNames = App.StackService.find().mapProperty('serviceName').concat('MISC');
     return this.get('allPreDefinedSiteProperties').filter(function(p) {
       return serviceNames.contains(p.serviceName);
     });
-  }.property('allPreDefinedSiteProperties'),
+  }.property().volatile(),
 
   /**
    * map of <code>preDefinedSiteProperties</code> provide search by index
@@ -206,14 +209,6 @@ App.config = Em.Object.create({
     }, this);
     return map;
   }.property('preDefinedSiteProperties'),
-
-  preDefinedConfigFile: function(folder, file) {
-    try {
-      return require('data/{0}/{1}'.format(folder, file));
-    } catch (err) {
-      // the file doesn't exist, which might be expected.
-    }
-  },
 
   serviceByConfigTypeMap: function () {
     var ret = {};
@@ -237,14 +232,34 @@ App.config = Em.Object.create({
     var configs = [],
       filename = App.config.getOriginalFileName(configJSON.type),
       properties = configJSON.properties,
-      finalAttributes = Em.get(configJSON, 'properties_attributes.final') || {};
+      attributes = [];
+      ['FINAL', 'PASSWORD', 'USER', 'GROUP', 'TEXT', 'ADDITIONAL_USER_PROPERTY', 'NOT_MANAGED_HDFS_PATH', 'VALUE_FROM_PROPERTY_FILE'].forEach(function (attribute){
+        var json = {};
+        json[attribute] = Em.get(configJSON, 'properties_attributes.' + attribute.toLowerCase()) || {};
+        attributes.push(json);
+      });
 
     for (var index in properties) {
       var serviceConfigObj = this.getDefaultConfig(index, filename);
 
       if (serviceConfigObj.isRequiredByAgent !== false) {
         serviceConfigObj.value = serviceConfigObj.savedValue = this.formatPropertyValue(serviceConfigObj, properties[index]);
-        serviceConfigObj.isFinal = serviceConfigObj.savedIsFinal = finalAttributes[index] === "true";
+        serviceConfigObj.isFinal = serviceConfigObj.savedIsFinal = attributes[0]['FINAL'][index] === "true";
+
+        var propertyType = [];
+        // iterate through all the attributes, except for FINAL
+        for (var i=1; i<attributes.length; i++) {
+          for (var type in attributes[i]) {
+            if (attributes[i][type][index] === "true") {
+              propertyType.push(type);
+
+              if (type === PASSWORD) {
+                serviceConfigObj.displayType = "password";
+              }
+            }
+          }
+        }
+        serviceConfigObj.propertyType = propertyType;
         serviceConfigObj.isEditable = serviceConfigObj.isReconfigurable;
       }
 
@@ -268,6 +283,7 @@ App.config = Em.Object.create({
    * @returns {*|Object}
    */
   getDefaultConfig: function(name, fileName, coreObject) {
+    name = JSON.parse('"' + name + '"');
     var cfg = App.configsCollection.getConfigByName(name, fileName) ||
       App.config.createDefaultConfig(name, fileName, false);
     if (Em.typeOf(coreObject) === 'object') {
@@ -305,7 +321,7 @@ App.config = Em.Object.create({
       supportsAddingForbidden: this.shouldSupportAddingForbidden(serviceName, fileName),
       serviceName: serviceName,
       displayName: name,
-      displayType: this.getDefaultDisplayType(coreObject ? coreObject.value : ''),
+      displayType: (coreObject && coreObject.propertyType && coreObject.propertyType.contains(PASSWORD)) ? 'password' : this.getDefaultDisplayType(coreObject ? coreObject.value : ''),
       description: '',
       category: this.getDefaultCategory(definedInStack, fileName),
       isSecureConfig: this.getIsSecure(name),
@@ -323,7 +339,9 @@ App.config = Em.Object.create({
       dependentConfigPattern: null,
       options: null,
       radioName: null,
-      widgetType: null
+      widgetType: null,
+      errorMessage: '',
+      warnMessage: ''
     };
     return Object.keys(coreObject|| {}).length ?
       $.extend(tpl, coreObject) : tpl;
@@ -339,8 +357,11 @@ App.config = Em.Object.create({
    */
   createHostNameProperty: function(serviceName, componentName, value, stackComponent) {
     var hostOrHosts = stackComponent.get('isMultipleAllowed') ? 'hosts' : 'host';
+    var name = componentName.toLowerCase() + '_' + hostOrHosts;
+    var filename = serviceName.toLowerCase() + "-site.xml";
     return {
-      "name": componentName.toLowerCase() + '_' + hostOrHosts,
+      "id": App.config.configId(name, filename),
+      "name": name,
       "displayName":  stackComponent.get('displayName') + ' ' + (value.length > 1 ? 'hosts' : 'host'),
       "value": value,
       "recommendedValue": value,
@@ -349,7 +370,7 @@ App.config = Em.Object.create({
       "isOverridable": false,
       "isRequiredByAgent": false,
       "serviceName": serviceName,
-      "filename": serviceName.toLowerCase() + "-site.xml",
+      "filename": filename,
       "category": componentName,
       "index": 0
     }
@@ -463,6 +484,59 @@ App.config = Em.Object.create({
   },
 
   /**
+   * parse Kerberos descriptor
+   *
+   * @param kerberosDescriptor
+   * @returns {{}}
+   */
+  parseDescriptor: function(kerberosDescriptor) {
+    var identitiesMap = {};
+    Em.get(kerberosDescriptor, 'KerberosDescriptor.kerberos_descriptor.services').forEach(function (service) {
+      this.parseIdentities(service, identitiesMap);
+      if (Array.isArray(service.components)) {
+        service.components.forEach(function (component) {
+          this.parseIdentities(component, identitiesMap);
+        }, this);
+      }
+    }, this);
+    return identitiesMap;
+  },
+
+  /**
+   * Looking for configs identities and add them to <code>identitiesMap<code>
+   *
+   * @param item
+   * @param identitiesMap
+   */
+  parseIdentities: function (item, identitiesMap) {
+    if (item.identities) {
+      item.identities.forEach(function (identity) {
+
+        Em.keys(identity).without('name').forEach(function (item) {
+          if (identity[item].configuration) {
+            var cfg = identity[item].configuration.split('/'), name = cfg[1], fileName = cfg[0];
+            identitiesMap[App.config.configId(name, fileName)] = true;
+          }
+        });
+      });
+    }
+    return identitiesMap;
+  },
+
+  /**
+   * Update description for disabled kerberos configs which are identities
+   *
+   * @param description
+   * @returns {*}
+   */
+  kerberosIdentitiesDescription: function(description) {
+    if (!description) return Em.I18n.t('services.service.config.secure.additionalDescription');
+    description = description.trim();
+    return (description.endsWith('.') ? description + ' ' : description + '. ') +
+      Em.I18n.t('services.service.config.secure.additionalDescription');
+  },
+
+  /**
    * Get view class based on display type of config
    *
    * @param displayType
@@ -472,9 +546,14 @@ App.config = Em.Object.create({
    */
   getViewClass: function (displayType, dependentConfigPattern, unit) {
     switch (displayType) {
+      case 'user':
+      case 'group':
+        return App.ServiceConfigTextFieldUserGroupWithID;
       case 'checkbox':
       case 'boolean':
         return dependentConfigPattern ? App.ServiceConfigCheckboxWithDependencies : App.ServiceConfigCheckbox;
+      case 'boolean-inverted':
+        return App.ServiceConfigCheckbox;
       case 'password':
         return App.ServiceConfigPasswordField;
       case 'combobox':
@@ -507,12 +586,12 @@ App.config = Em.Object.create({
   },
 
   /**
-   * Returns validator function based on config type
+   * Returns error validator function based on config type
    *
    * @param displayType
    * @returns {Function}
    */
-  getValidator: function (displayType) {
+  getErrorValidator: function (displayType) {
     switch (displayType) {
       case 'checkbox':
       case 'custom':
@@ -553,6 +632,11 @@ App.config = Em.Object.create({
         };
       case 'password':
         return function (value, name, retypedPassword) {
+          if (name === 'ranger_admin_password') {
+            if (String(value).length < 9) {
+              return Em.I18n.t('errorMessage.config.password.length').format(9);
+            }
+          }
           return value !== retypedPassword ? Em.I18n.t('errorMessage.config.password') : '';
         };
       case 'user':
@@ -561,15 +645,49 @@ App.config = Em.Object.create({
         return function (value) {
           return !validator.isValidDbName(value) ? Em.I18n.t('errorMessage.config.user') : '';
         };
+      case 'ldap_url':
+        return function (value) {
+          return !validator.isValidLdapsURL(value) ? Em.I18n.t('errorMessage.config.ldapUrl') : '';
+        };
       default:
         return function (value, name) {
           if (['javax.jdo.option.ConnectionURL', 'oozie.service.JPAService.jdbc.url'].contains(name)
             && !validator.isConfigValueLink(value) && validator.isConfigValueLink(value)) {
             return Em.I18n.t('errorMessage.config.spaces.trim');
-          } else {
-            return validator.isNotTrimmedRight(value) ? Em.I18n.t('errorMessage.config.spaces.trailing') : '';
           }
+          return validator.isNotTrimmedRight(value) ? Em.I18n.t('errorMessage.config.spaces.trailing') : '';
         };
+    }
+  },
+
+  /**
+   * Returns warning validator function based on config type
+   *
+   * @param displayType
+   * @returns {Function}
+   */
+  getWarningValidator: function(displayType) {
+    switch (displayType) {
+      case 'int':
+      case 'float':
+        return function (value, name, filename, stackConfigProperty, unitLabel) {
+          stackConfigProperty = stackConfigProperty || App.configsCollection.getConfigByName(name, filename);
+          var maximum = Em.get(stackConfigProperty || {}, 'valueAttributes.maximum'),
+            minimum = Em.get(stackConfigProperty || {}, 'valueAttributes.minimum'),
+            min = validator.isValidFloat(minimum) ? parseFloat(minimum) : NaN,
+            max = validator.isValidFloat(maximum) ? parseFloat(maximum) : NaN,
+            val = validator.isValidFloat(value) ? parseFloat(value) : NaN;
+
+          if (!isNaN(val) && !isNaN(max) && val > max) {
+            return Em.I18n.t('config.warnMessage.outOfBoundaries.greater').format(max + unitLabel);
+          }
+          if (!isNaN(val) && !isNaN(min) && val < min) {
+            return Em.I18n.t('config.warnMessage.outOfBoundaries.less').format(min + unitLabel);
+          }
+          return '';
+        };
+      default:
+        return function () { return ''; }
     }
   },
 
@@ -659,8 +777,8 @@ App.config = Em.Object.create({
     return configs.sort(function(a, b) {
       if (Em.get(a, 'index') > Em.get(b, 'index')) return 1;
       if (Em.get(a, 'index') < Em.get(b, 'index')) return -1;
-      if (Em.get(a, 'name') > Em.get(b, 'index')) return 1;
-      if (Em.get(a, 'name') < Em.get(b, 'index')) return -1;
+      if (Em.get(a, 'name') > Em.get(b, 'name')) return 1;
+      if (Em.get(a, 'name') < Em.get(b, 'name')) return -1;
       return 0;
     });
   },
@@ -799,7 +917,7 @@ App.config = Em.Object.create({
    */
   getPropertiesFromTheme: function (serviceName) {
     var properties = [];
-    App.Tab.find().forEach(function (t) {
+    App.Tab.find().rejectProperty('isCategorized').forEach(function (t) {
       if (!t.get('isAdvanced') && t.get('serviceName') === serviceName) {
         t.get('sections').forEach(function (s) {
           s.get('subSections').forEach(function (ss) {
@@ -826,7 +944,7 @@ App.config = Em.Object.create({
       properties.forEach(function (_property) {
         var name, value;
         if (_property) {
-          _property = _property.split('=');
+          _property = _property.split(/=(.+)/);
           name = _property[0];
           value = (_property[1]) ? _property[1] : "";
           configs.push(Em.Object.create({
@@ -1036,7 +1154,8 @@ App.config = Em.Object.create({
       'isOriginalSCP': false,
       'overrides': null,
       'group': configGroup,
-      'parentSCP': null
+      'parentSCP': null,
+      isCustomGroupConfig: true
     });
 
     if (!configGroup.get('properties.length')) {
@@ -1084,7 +1203,9 @@ App.config = Em.Object.create({
 
     serviceConfigProperty.get('overrides').pushObject(newOverride);
 
-    var savedOverrides = serviceConfigProperty.get('overrides').filterProperty('savedValue');
+    var savedOverrides = serviceConfigProperty.get('overrides').filter(function (override) {
+      return !Em.isNone(Em.get(override, 'savedValue'));
+    });
     serviceConfigProperty.set('overrideValues', savedOverrides.mapProperty('savedValue'));
     serviceConfigProperty.set('overrideIsFinalValues', savedOverrides.mapProperty('savedIsFinal'));
 
@@ -1096,16 +1217,18 @@ App.config = Em.Object.create({
    * Merge values in "stored" to "base" if name matches, it's a value only merge.
    * @param base {Array} Em.Object
    * @param stored {Array} Object
+   * @returns {Object[]|Em.Object[]} base
    */
   mergeStoredValue: function(base, stored) {
     if (stored) {
       base.forEach(function (p) {
-        var sp = stored.filterProperty("filename", p.filename).findProperty("name", p.name);
+        var sp = stored.filterProperty('filename', p.filename).findProperty('name', p.name);
         if (sp) {
-          p.set("value", sp.value);
+          Em.set(p, 'value', Em.get(sp, 'value'));
         }
       });
     }
+    return base;
   },
 
 
@@ -1118,7 +1241,7 @@ App.config = Em.Object.create({
    * @return {App.ServiceConfigProperty|Boolean} - App.ServiceConfigProperty instance or <code>false</code> when property not found
    */
   findConfigProperty: function(stepConfigs, name, fileName) {
-    if (!name && !fileName) return false;
+    if (!name || !fileName) return false;
     if (stepConfigs && stepConfigs.length) {
       return stepConfigs.mapProperty('configs').filter(function(item) {
         return item.length;
@@ -1129,6 +1252,12 @@ App.config = Em.Object.create({
       }).filterProperty('filename', fileName).findProperty('name', name);
     }
     return false;
+  },
+
+  getTempletonHiveHosts: function (value) {
+    var pattern = /thrift:\/\/.+:\d+/,
+      patternMatch = value.match(pattern);
+    return patternMatch ? patternMatch[0].split('\\,') : [];
   },
 
   /**
@@ -1148,14 +1277,31 @@ App.config = Em.Object.create({
    *
    * @method updateHostsListValue
    * @param {Object} siteConfigs - prepared site config object to store
+   * @param {String} propertyType - type of the property to update
    * @param {String} propertyName - name of the property to update
    * @param {String} hostsList - list of ZooKeeper Server names to set as config property value
+   * @param {Boolean} isArray - determines whether value string is formatted as array
    * @return {String} - result value
    */
-  updateHostsListValue: function(siteConfigs, propertyName, hostsList) {
-    var value = hostsList;
-    var propertyHosts = (siteConfigs[propertyName] || '').split(',');
-    var hostsToSet = hostsList.split(',');
+  updateHostsListValue: function(siteConfigs, propertyType, propertyName, hostsList, isArray) {
+    var value = hostsList,
+      propertyHosts = (siteConfigs[propertyName] || ''),
+      hostsToSet = hostsList,
+      parser = this.get('uniqueHostsListParsers').find(function (property) {
+        return property.type === propertyType && property.propertyName === propertyName;
+      });
+    if (parser) {
+      propertyHosts = this.get(parser.method)(propertyHosts);
+      hostsToSet = this.get(parser.method)(hostsToSet);
+    } else {
+      if (isArray) {
+        var pattern = /(^\[|]$)/g;
+        propertyHosts = propertyHosts.replace(pattern, '');
+        hostsToSet = hostsToSet.replace(pattern, '');
+      }
+      propertyHosts = propertyHosts.split(',');
+      hostsToSet = hostsToSet.split(',');
+    }
 
     if (!Em.isEmpty(siteConfigs[propertyName])) {
       var diffLength = propertyHosts.filter(function(hostName) {
@@ -1167,5 +1313,45 @@ App.config = Em.Object.create({
     }
     siteConfigs[propertyName] = value;
     return value;
+  },
+
+  /**
+   * Load cluster-env configs mapped to array
+   * @return {*|{then}}
+   */
+  getConfigsByTypes: function (sites) {
+    const dfd = $.Deferred();
+    App.router.get('configurationController').getCurrentConfigsBySites(sites.mapProperty('site')).done((configs) => {
+      dfd.resolve(this.getMappedConfigs(configs, sites));
+    });
+    return dfd.promise();
+  },
+
+  /**
+   *
+   * @param configs
+   * @param sites
+   */
+  getMappedConfigs: function (configs, sites) {
+    const result = [];
+    configs.forEach(function (config) {
+      var configsArray = [];
+      var configsObject = config.properties;
+      for (var property in configsObject) {
+        if (configsObject.hasOwnProperty(property)) {
+          configsArray.push(Em.Object.create({
+            name: property,
+            value: configsObject[property],
+            filename: App.config.getOriginalFileName(config.type)
+          }));
+        }
+      }
+      result.push(Em.Object.create({
+        serviceName: sites.findProperty('site', config.type).serviceName,
+        configs: configsArray
+      }));
+    });
+
+    return result;
   }
 });

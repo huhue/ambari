@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,8 +19,8 @@ package org.apache.ambari.server.state.alerts;
 
 import java.util.UUID;
 
-import junit.framework.Assert;
-
+import org.apache.ambari.server.H2DatabaseCleaner;
+import org.apache.ambari.server.controller.internal.DeleteHostComponentStatusMetaData;
 import org.apache.ambari.server.events.AlertDefinitionChangedEvent;
 import org.apache.ambari.server.events.AlertDefinitionDeleteEvent;
 import org.apache.ambari.server.events.AmbariEvent;
@@ -34,6 +34,7 @@ import org.apache.ambari.server.orm.entities.AlertCurrentEntity;
 import org.apache.ambari.server.orm.entities.AlertDefinitionEntity;
 import org.apache.ambari.server.orm.entities.AlertGroupEntity;
 import org.apache.ambari.server.orm.entities.AlertHistoryEntity;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.state.AlertState;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
@@ -51,16 +52,19 @@ import org.apache.ambari.server.utils.EventBusSynchronizer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import com.google.gson.Gson;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
+
+import junit.framework.Assert;
 
 /**
  * Tests that {@link AmbariEvent} instances are fired correctly and that alert
  * data is bootstrapped into the database.
  */
+@Category({ category.AlertTest.class})
 public class AlertEventPublisherTest {
 
   private AlertDispatchDAO dispatchDao;
@@ -73,6 +77,9 @@ public class AlertEventPublisherTest {
   private ServiceFactory serviceFactory;
   private OrmTestHelper ormHelper;
   private AggregateDefinitionMapping aggregateMapping;
+
+  private final String STACK_VERSION = "2.0.6";
+  private final String REPO_VERSION = "2.0.6-1234";
 
   /**
    *
@@ -93,7 +100,10 @@ public class AlertEventPublisherTest {
     aggregateMapping = injector.getInstance(AggregateDefinitionMapping.class);
 
     clusterName = "foo";
-    clusters.addCluster(clusterName, new StackId("HDP", "2.0.6"));
+    StackId stackId = new StackId("HDP", STACK_VERSION);
+    ormHelper.createStack(stackId);
+
+    clusters.addCluster(clusterName, stackId);
     cluster = clusters.getCluster(clusterName);
     Assert.assertNotNull(cluster);
   }
@@ -103,7 +113,7 @@ public class AlertEventPublisherTest {
    */
   @After
   public void teardown() throws Exception {
-    injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
     injector = null;
   }
 
@@ -131,7 +141,7 @@ public class AlertEventPublisherTest {
     Assert.assertEquals(0, dispatchDao.findAllGroups().size());
     installHdfsService();
     Assert.assertEquals(1, dispatchDao.findAllGroups().size());
-    cluster.getService("HDFS").delete();
+    cluster.getService("HDFS").delete(new DeleteHostComponentStatusMetaData());
     Assert.assertEquals(0, dispatchDao.findAllGroups().size());
   }
 
@@ -159,7 +169,7 @@ public class AlertEventPublisherTest {
     installHdfsService();
 
     int definitionCount = definitionDao.findAll().size();
-    AlertDefinitionEntity definition = ormHelper.createAlertDefinition(1L);
+    AlertDefinitionEntity definition = ormHelper.createAlertDefinition(cluster.getClusterId());
     Assert.assertEquals(definitionCount + 1, definitionDao.findAll().size());
 
     AggregateSource source = new AggregateSource();
@@ -173,7 +183,7 @@ public class AlertEventPublisherTest {
     source.setType(SourceType.AGGREGATE);
 
     AlertDefinitionEntity aggregateEntity = new AlertDefinitionEntity();
-    aggregateEntity.setClusterId(1L);
+    aggregateEntity.setClusterId(cluster.getClusterId());
     aggregateEntity.setComponentName("DATANODE");
     aggregateEntity.setEnabled(true);
     aggregateEntity.setDefinitionName("datanode_aggregate");
@@ -188,7 +198,7 @@ public class AlertEventPublisherTest {
     definitionDao.create(aggregateEntity);
 
     // pull it out of the mapping and compare fields
-    AlertDefinition aggregate = aggregateMapping.getAggregateDefinition(1L,
+    AlertDefinition aggregate = aggregateMapping.getAggregateDefinition(cluster.getClusterId(),
         source.getAlertName());
 
     Assert.assertNotNull(aggregate);
@@ -205,7 +215,7 @@ public class AlertEventPublisherTest {
     definitionDao.merge(aggregateEntity);
 
     // check the aggregate mapping for the new value
-    aggregate = aggregateMapping.getAggregateDefinition(1L,
+    aggregate = aggregateMapping.getAggregateDefinition(cluster.getClusterId(),
         source.getAlertName());
 
     Assert.assertNotNull(aggregate);
@@ -270,14 +280,14 @@ public class AlertEventPublisherTest {
   @Test
   public void testAlertDefinitionRemoval() throws Exception {
     Assert.assertEquals(0, definitionDao.findAll().size());
-    AlertDefinitionEntity definition = ormHelper.createAlertDefinition(1L);
+    AlertDefinitionEntity definition = ormHelper.createAlertDefinition(cluster.getClusterId());
     Assert.assertEquals(1, definitionDao.findAll().size());
 
     AggregateSource source = new AggregateSource();
     source.setAlertName(definition.getDefinitionName());
 
     AlertDefinition aggregate = new AlertDefinition();
-    aggregate.setClusterId(1L);
+    aggregate.setClusterId(cluster.getClusterId());
     aggregate.setComponentName("DATANODE");
     aggregate.setEnabled(true);
     aggregate.setInterval(1);
@@ -288,23 +298,22 @@ public class AlertEventPublisherTest {
     aggregate.setSource(source);
     aggregate.setUuid("uuid");
 
-    aggregateMapping.registerAggregate(1L, aggregate);
-    Assert.assertNotNull(aggregateMapping.getAggregateDefinition(1L,
+    aggregateMapping.registerAggregate(cluster.getClusterId(), aggregate);
+    Assert.assertNotNull(aggregateMapping.getAggregateDefinition(cluster.getClusterId(),
         source.getAlertName()));
 
     definitionDao.remove(definition);
 
-    Assert.assertNull(aggregateMapping.getAggregateDefinition(1L,
+    Assert.assertNull(aggregateMapping.getAggregateDefinition(cluster.getClusterId(),
         source.getAlertName()));
   }
 
-  /**
-   * Calls {@link Service#persist()} to mock a service install.
-   */
   private void installHdfsService() throws Exception {
+    RepositoryVersionEntity repositoryVersion = ormHelper.getOrCreateRepositoryVersion(
+        cluster.getCurrentStackVersion(), REPO_VERSION);
+
     String serviceName = "HDFS";
-    Service service = serviceFactory.createNew(cluster, serviceName);
-    service.persist();
+    Service service = serviceFactory.createNew(cluster, serviceName, repositoryVersion);
     service = cluster.getService(serviceName);
 
     Assert.assertNotNull(service);

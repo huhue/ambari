@@ -17,14 +17,19 @@
  */
 package org.apache.ambari.server.update;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.inject.Guice;
-import com.google.inject.Inject;
-import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.agent.stomp.AgentConfigsHolder;
+import org.apache.ambari.server.audit.AuditLoggerModule;
 import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.controller.AmbariManagementController;
 import org.apache.ambari.server.controller.ControllerModule;
@@ -50,22 +55,21 @@ import org.apache.ambari.server.orm.entities.TopologyRequestEntity;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.Config;
+import org.apache.ambari.server.state.ConfigFactory;
 import org.apache.ambari.server.state.ConfigHelper;
-import org.apache.ambari.server.state.ConfigImpl;
 import org.apache.ambari.server.state.Host;
 import org.apache.ambari.server.utils.EventBusSynchronizer;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.inject.Guice;
+import com.google.inject.Inject;
+import com.google.inject.Injector;
+import com.google.inject.persist.PersistService;
 
 /*
 * Class for host names update.
@@ -125,6 +129,21 @@ public class HostUpdateHelper {
 
   public void setHostChangesFileMap(Map<String, Map<String, String>> hostChangesFileMap) {
     this.hostChangesFileMap = hostChangesFileMap;
+  }
+
+  /**
+   * Extension of audit logger module
+   */
+  public static class CheckHelperAuditModule extends AuditLoggerModule {
+
+    public CheckHelperAuditModule() throws Exception {
+    }
+
+    @Override
+    protected void configure() {
+      super.configure();
+    }
+
   }
 
   /**
@@ -199,6 +218,7 @@ public class HostUpdateHelper {
 
       // going through all clusters with host pairs from file
       for (Map.Entry<String, Map<String,String>> clusterHosts : hostChangesFileMap.entrySet()) {
+        boolean hostConfigsUpdated = false;
         String clusterName = clusterHosts.getKey();
         ClusterEntity clusterEntity = clusterDAO.findByName(clusterName);
         Cluster cluster = clusters.getCluster(clusterName);
@@ -217,12 +237,12 @@ public class HostUpdateHelper {
           boolean configUpdated;
 
           // going through all cluster configs and update property values
+          ConfigFactory configFactory = injector.getInstance(ConfigFactory.class);
           for (ClusterConfigEntity clusterConfigEntity : clusterConfigEntities) {
-            ConfigImpl config = new ConfigImpl(cluster, clusterConfigEntity, injector);
+            Config config = configFactory.createExisting(cluster, clusterConfigEntity);
             configUpdated = false;
 
             for (Map.Entry<String,String> property : config.getProperties().entrySet()) {
-
               updatedPropertyValue = replaceHosts(property.getValue(), currentHostNames, hostMapping);
 
               if (updatedPropertyValue != null) {
@@ -232,10 +252,17 @@ public class HostUpdateHelper {
                 configUpdated = true;
               }
             }
+
             if (configUpdated) {
-              config.persist(false);
+              hostConfigsUpdated = true;
+              config.save();
             }
           }
+        }
+        if (hostConfigsUpdated) {
+          AgentConfigsHolder agentConfigsHolder = injector.getInstance(AgentConfigsHolder.class);
+          agentConfigsHolder.updateData(cluster.getClusterId(), currentHostNames.stream()
+              .map(hm -> cluster.getHost(hm).getHostId()).collect(Collectors.toList()));
         }
 
         //******************************
@@ -300,6 +327,7 @@ public class HostUpdateHelper {
   * */
   public class StringComparator implements Comparator<String> {
 
+    @Override
     public int compare(String s1, String s2) {
       return s2.length() - s1.length();
     }
@@ -345,7 +373,7 @@ public class HostUpdateHelper {
     for (Map.Entry<String, JsonElement> clusterEntry : hostChangesJsonObject.entrySet()) {
       try {
         Gson gson = new Gson();
-        hostChangesFileMap.put(clusterEntry.getKey(), gson.fromJson(clusterEntry.getValue(), Map.class));
+        hostChangesFileMap.put(clusterEntry.getKey(), gson.<Map<String, String>>fromJson(clusterEntry.getValue(), Map.class));
       } catch(Exception e) {
         throw new AmbariException("Error occurred during mapping Json to Map structure. Please check json structure in file.", e);
       }
@@ -513,7 +541,7 @@ public class HostUpdateHelper {
         throw new AmbariException("Path to file with host names changes is empty or null.");
       }
 
-      Injector injector = Guice.createInjector(new UpdateHelperModule());
+      Injector injector = Guice.createInjector(new UpdateHelperModule(), new CheckHelperAuditModule());
       HostUpdateHelper hostUpdateHelper = injector.getInstance(HostUpdateHelper.class);
 
       hostUpdateHelper.setHostChangesFile(hostChangesFile);

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -59,13 +59,6 @@ public class ExecuteTask extends Task {
   @XmlElement(name="function")
   public String function;
 
-  /**
-   * Command to run under normal conditions.
-   *  If both a function and command are defined, only the function will be executed.
-   */
-  @XmlElement(name="command")
-  public String command;
-
   public static final String actionVerb = "Executing";
 
   @Override
@@ -75,7 +68,7 @@ public class ExecuteTask extends Task {
 
   @Override
   public StageWrapper.Type getStageWrapperType() {
-    return StageWrapper.Type.RU_TASKS;
+    return StageWrapper.Type.UPGRADE_TASKS;
   }
 
   @Override

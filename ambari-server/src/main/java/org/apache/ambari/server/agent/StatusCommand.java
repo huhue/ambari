@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,11 +17,12 @@
  */
 package org.apache.ambari.server.agent;
 
-import com.google.gson.annotations.SerializedName;
-import org.apache.ambari.server.state.State;
-
 import java.util.HashMap;
 import java.util.Map;
+
+import org.apache.ambari.server.state.State;
+
+import com.google.gson.annotations.SerializedName;
 
 /**
  * Command to report the status of a list of services in roles.
@@ -33,39 +34,54 @@ public class StatusCommand extends AgentCommand {
   }
 
   @SerializedName("clusterName")
+  @com.fasterxml.jackson.annotation.JsonProperty("clusterName")
   private String clusterName;
 
   @SerializedName("serviceName")
+  @com.fasterxml.jackson.annotation.JsonProperty("serviceName")
   private String serviceName;
 
+  @SerializedName("role")
+  private String role;
+
   @SerializedName("componentName")
+  @com.fasterxml.jackson.annotation.JsonProperty("componentName")
   private String componentName;
 
   @SerializedName("configurations")
+  @com.fasterxml.jackson.annotation.JsonProperty("configurations")
   private Map<String, Map<String, String>> configurations;
 
   @SerializedName("configuration_attributes")
+  @com.fasterxml.jackson.annotation.JsonProperty("configuration_attributes")
   private Map<String, Map<String, Map<String, String>>> configurationAttributes;
 
   @SerializedName("commandParams")
-  private Map<String, String> commandParams = new HashMap<String, String>();
+  @com.fasterxml.jackson.annotation.JsonProperty("commandParams")
+  private Map<String, String> commandParams = new HashMap<>();
 
   @SerializedName("hostLevelParams")
-  private Map<String, String> hostLevelParams = new HashMap<String, String>();
+  @com.fasterxml.jackson.annotation.JsonProperty("hostLevelParams")
+  private Map<String, String> hostLevelParams = new HashMap<>();
 
   @SerializedName("hostname")
+  @com.fasterxml.jackson.annotation.JsonProperty("hostname")
   private String hostname = null;
 
   @SerializedName("payloadLevel")
+  @com.fasterxml.jackson.annotation.JsonProperty("payloadLevel")
   private StatusCommandPayload payloadLevel = StatusCommandPayload.DEFAULT;
 
   @SerializedName("desiredState")
+  @com.fasterxml.jackson.annotation.JsonProperty("desiredState")
   private State desiredState;
 
   @SerializedName("hasStaleConfigs")
+  @com.fasterxml.jackson.annotation.JsonProperty("hasStaleConfigs")
   private Boolean hasStaleConfigs;
 
   @SerializedName("executionCommandDetails")
+  @com.fasterxml.jackson.annotation.JsonProperty("executionCommandDetails")
   private ExecutionCommand executionCommand;
 
   public ExecutionCommand getExecutionCommand() {
@@ -120,8 +136,17 @@ public class StatusCommand extends AgentCommand {
     return componentName;
   }
 
+  /**
+   * Sets both the {@code componentName} and the {@code role}. Status commands
+   * use the {@code componentName}, while execution commands use the
+   * {@code role}. It's simpler for the Python to just worry about {@code role},
+   * so this ensures that both are set.
+   *
+   * @param componentName
+   */
   public void setComponentName(String componentName) {
     this.componentName = componentName;
+    role = componentName;
   }
 
   public Map<String, Map<String, String>> getConfigurations() {
@@ -162,6 +187,10 @@ public class StatusCommand extends AgentCommand {
 
   public String getHostname() {
     return hostname;
+  }
+
+  public String getRole() {
+    return role;
   }
 
   public enum StatusCommandPayload {

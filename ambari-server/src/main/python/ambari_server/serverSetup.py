@@ -23,8 +23,9 @@ import os
 import re
 import shutil
 import sys
-import subprocess
+from ambari_commons import subprocess32
 import getpass
+import logging
 
 from ambari_commons.exceptions import FatalException
 from ambari_commons.firewall import Firewall
@@ -34,21 +35,24 @@ from ambari_commons.os_check import OSConst
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
 from ambari_commons.os_utils import copy_files, run_os_command, is_root
 from ambari_commons.str_utils import compress_backslashes
-from ambari_server.dbConfiguration import DBMSConfigFactory, check_jdbc_drivers
-from ambari_server.serverConfiguration import configDefaults, JDKRelease, \
-  get_ambari_properties, get_is_secure, get_is_persisted, get_java_exe_path, get_JAVA_HOME, \
-  get_resources_location, get_value_from_properties, read_ambari_user, update_properties, validate_jdk, write_property, \
+from ambari_server.dbConfiguration import DBMSConfigFactory, TAR_GZ_ARCHIVE_TYPE, default_connectors_map, check_jdbc_drivers
+from ambari_server.serverConfiguration import configDefaults, JDKRelease, get_stack_location,\
+  get_ambari_properties, get_is_secure, get_is_persisted, get_java_exe_path, get_JAVA_HOME, get_missing_properties, \
+  get_resources_location, get_value_from_properties, read_ambari_user, update_properties, validate_jdk, write_property, write_gpl_license_accepted,\
   JAVA_HOME, JAVA_HOME_PROPERTY, JCE_NAME_PROPERTY, JDBC_RCA_URL_PROPERTY, JDBC_URL_PROPERTY, \
   JDK_NAME_PROPERTY, JDK_RELEASES, NR_USER_PROPERTY, OS_FAMILY, OS_FAMILY_PROPERTY, OS_TYPE, OS_TYPE_PROPERTY, OS_VERSION, \
-  VIEWS_DIR_PROPERTY, JDBC_DATABASE_PROPERTY, JDK_DOWNLOAD_SUPPORTED_PROPERTY, JCE_DOWNLOAD_SUPPORTED_PROPERTY
+  VIEWS_DIR_PROPERTY, JDBC_DATABASE_PROPERTY, JDK_DOWNLOAD_SUPPORTED_PROPERTY, JCE_DOWNLOAD_SUPPORTED_PROPERTY, SETUP_DONE_PROPERTIES, \
+  STACK_JAVA_HOME_PROPERTY, STACK_JDK_NAME_PROPERTY, STACK_JCE_NAME_PROPERTY, STACK_JAVA_VERSION, GPL_LICENSE_ACCEPTED_PROPERTY
 from ambari_server.serverUtils import is_server_runing
 from ambari_server.setupSecurity import adjust_directory_permissions
 from ambari_server.userInput import get_YN_input, get_validated_string_input
-from ambari_server.utils import locate_file
+from ambari_server.utils import locate_file, update_latest_in_repoinfos_for_all_stacks, get_json_url_from_repo_file
 from ambari_server.serverClassPath import ServerClassPath
 from ambari_server.ambariPath import AmbariPath
 
 from ambari_commons.constants import AMBARI_SUDO_BINARY
+
+logger = logging.getLogger(__name__)
 
 # selinux commands
 GET_SE_LINUX_ST_CMD = locate_file('sestatus', '/usr/sbin')
@@ -60,7 +64,6 @@ SE_MODE_PERMISSIVE = "permissive"
 
 PERSISTENCE_TYPE_PROPERTY = "server.persistence.type"
 
-TAR_GZ_ARCHIVE_TYPE = ".tar.gz"
 
 # Non-root user setup commands
 NR_USER_COMMENT = "Ambari user"
@@ -76,6 +79,8 @@ UNTAR_JDK_ARCHIVE = "tar --no-same-owner -xvf {0}"
 
 JDK_PROMPT = "[{0}] {1}\n"
 JDK_VALID_CHOICES = "^[{0}{1:d}]$"
+
+JDK_VERSION_CHECK_CMD = """{0} -version 2>&1 | grep -i version | sed 's/.*version ".*\.\(.*\)\..*"/\\1/; 1q' 2>&1"""
 
 def get_supported_jdbc_drivers():
   factory = DBMSConfigFactory()
@@ -405,7 +410,7 @@ class JDKSetup(object):
   #
   # Downloads and installs the JDK and the JCE policy archive
   #
-  def download_and_install_jdk(self, args, properties):
+  def download_and_install_jdk(self, args, properties, ambariOnly = False):
     conf_file = properties.fileName
 
     jcePolicyWarn = "JCE Policy files are required for configuring Kerberos security. If you plan to use Kerberos," \
@@ -425,8 +430,22 @@ class JDKSetup(object):
       properties.removeOldProp(JDK_NAME_PROPERTY)
       properties.removeOldProp(JCE_NAME_PROPERTY)
 
+      if not ambariOnly:
+        properties.process_pair(STACK_JAVA_HOME_PROPERTY, args.java_home)
+        properties.removeOldProp(STACK_JDK_NAME_PROPERTY)
+        properties.removeOldProp(STACK_JCE_NAME_PROPERTY)
+
       self._ensure_java_home_env_var_is_set(args.java_home)
       self.jdk_index = self.custom_jdk_number
+
+      if args.stack_java_home: # reset stack specific jdk properties if stack_java_home exists
+        print 'Setting JAVA_HOME for stack services...'
+        print_warning_msg("JAVA_HOME " + args.stack_java_home + " (Stack) must be valid on ALL hosts")
+        print_warning_msg(jcePolicyWarn)
+        properties.process_pair(STACK_JAVA_HOME_PROPERTY, args.stack_java_home)
+        properties.removeOldProp(STACK_JDK_NAME_PROPERTY)
+        properties.removeOldProp(STACK_JCE_NAME_PROPERTY)
+
       return
 
     java_home_var = get_JAVA_HOME()
@@ -436,7 +455,10 @@ class JDKSetup(object):
       progress_func = download_progress
 
     if java_home_var:
-      change_jdk = get_YN_input("Do you want to change Oracle JDK [y/n] (n)? ", False)
+      message = "Do you want to change Oracle JDK [y/n] (n)? "
+      if ambariOnly:
+        message = "Do you want to change Oracle JDK for Ambari Server [y/n] (n)? "
+      change_jdk = get_YN_input(message, False)
       if not change_jdk:
         self._ensure_java_home_env_var_is_set(java_home_var)
         self.jdk_index = self.custom_jdk_number
@@ -444,7 +466,7 @@ class JDKSetup(object):
 
     #Continue with the normal setup, taking the first listed JDK version as the default option
     jdk_num = str(self.jdk_index + 1)
-    (self.jdks, jdk_choice_prompt, jdk_valid_choices, self.custom_jdk_number) = self._populate_jdk_configs(properties, jdk_num)
+    (self.jdks, jdk_choice_prompt, jdk_valid_choices, self.custom_jdk_number) = self._populate_jdk_configs(properties, jdk_num, ambariOnly)
 
     jdk_num = get_validated_string_input(
       jdk_choice_prompt,
@@ -459,6 +481,11 @@ class JDKSetup(object):
     if self.jdk_index == self.custom_jdk_number:
       print_warning_msg("JDK must be installed on all hosts and JAVA_HOME must be valid on all hosts.")
       print_warning_msg(jcePolicyWarn)
+
+      if get_silent():
+        print_error_msg("Path to JAVA_HOME should be specified via -j option.")
+        sys.exit(1)
+
       args.java_home = get_validated_string_input("Path to JAVA_HOME: ", None, None, None, False, False)
       if not os.path.exists(args.java_home) or not os.path.isfile(os.path.join(args.java_home, "bin", self.JAVA_BIN)):
         err = "Java home path or java binary file is unavailable. Please put correct path to java home."
@@ -469,10 +496,18 @@ class JDKSetup(object):
       properties.removeOldProp(JDK_NAME_PROPERTY)
       properties.removeOldProp(JCE_NAME_PROPERTY)
 
+      if not ambariOnly:
+        properties.process_pair(STACK_JAVA_HOME_PROPERTY, args.java_home)
+        properties.removeOldProp(STACK_JDK_NAME_PROPERTY)
+        properties.removeOldProp(STACK_JCE_NAME_PROPERTY)
+
       # Make sure any previously existing JDK and JCE name properties are removed. These will
       # confuse things in a Custom JDK scenario
       properties.removeProp(JDK_NAME_PROPERTY)
       properties.removeProp(JCE_NAME_PROPERTY)
+      if not ambariOnly:
+        properties.removeOldProp(STACK_JDK_NAME_PROPERTY)
+        properties.removeOldProp(STACK_JCE_NAME_PROPERTY)
 
       self._ensure_java_home_env_var_is_set(args.java_home)
       return
@@ -542,10 +577,13 @@ class JDKSetup(object):
 
     properties.process_pair(JDK_NAME_PROPERTY, jdk_cfg.dest_file)
     properties.process_pair(JAVA_HOME_PROPERTY, java_home_dir)
+    if not ambariOnly:
+      properties.process_pair(STACK_JDK_NAME_PROPERTY, jdk_cfg.dest_file)
+      properties.process_pair(STACK_JAVA_HOME_PROPERTY, java_home_dir)
 
     self._ensure_java_home_env_var_is_set(java_home_dir)
 
-  def download_and_unpack_jce_policy(self, properties):
+  def download_and_unpack_jce_policy(self, properties, ambariOnly = False):
     err_msg_stdout = "JCE Policy files are required for secure HDP setup. Please ensure " \
               " all hosts have the JCE unlimited strength policy 6, files."
 
@@ -554,7 +592,7 @@ class JDKSetup(object):
     jdk_cfg = self.jdks[self.jdk_index]
 
     try:
-      JDKSetup._download_jce_policy(jdk_cfg.jcpol_url, jdk_cfg.dest_jcpol_file, resources_dir, properties)
+      JDKSetup._download_jce_policy(jdk_cfg.jcpol_url, jdk_cfg.dest_jcpol_file, resources_dir, properties, ambariOnly)
     except FatalException, e:
       print err_msg_stdout
       print_error_msg("Failed to download JCE policy files:")
@@ -581,9 +619,22 @@ class JDKSetup(object):
     jce_zip_path = os.path.abspath(os.path.join(resources_dir, jce_packed_file))
     expand_jce_zip_file(jce_zip_path, jdk_security_path)
 
-  def _populate_jdk_configs(self, properties, jdk_num):
+  def _populate_jdk_configs(self, properties, jdk_num, ambariOnly = False):
+    def remove_jdk_condition(name):
+      """
+      Removes jdk1.7 from the default choices.
+      This method can be removed if JDK 7 support (for stack services) will be dropped.
+      """
+      if name != "jdk1.7":
+        return True
+      else:
+       print "JDK 7 detected. Removed from choices."
+       return False
     if properties.has_key(JDK_RELEASES):
       jdk_names = properties[JDK_RELEASES].split(',')
+      jdk_names = filter(None, jdk_names)
+      if ambariOnly:
+        jdk_names = filter(lambda x : remove_jdk_condition(x), jdk_names)
       jdks = []
       for jdk_name in jdk_names:
         jdkR = JDKRelease.from_properties(properties, jdk_name)
@@ -620,7 +671,7 @@ class JDKSetup(object):
       raise FatalException(1, err)
 
   @staticmethod
-  def _download_jce_policy(jcpol_url, dest_jcpol_file, resources_dir, properties):
+  def _download_jce_policy(jcpol_url, dest_jcpol_file, resources_dir, properties, ambariOnly = False):
     dest_file = os.path.abspath(os.path.join(resources_dir, dest_jcpol_file))
 
     if not os.path.exists(dest_file):
@@ -643,6 +694,8 @@ class JDKSetup(object):
       print "JCE Policy archive already exists, using " + dest_file
 
     properties.process_pair(JCE_NAME_PROPERTY, dest_jcpol_file)
+    if not ambariOnly:
+      properties.process_pair(STACK_JCE_NAME_PROPERTY, dest_jcpol_file)
 
   # Base implementation, overriden in the subclasses
   def _install_jdk(self, java_inst_file, java_home_dir):
@@ -732,9 +785,9 @@ class JDKSetupLinux(JDKSetup):
     super(JDKSetupLinux, self).__init__()
     self.JDK_DEFAULT_CONFIGS = [
       JDKRelease("jdk1.8", "Oracle JDK 1.8 + Java Cryptography Extension (JCE) Policy Files 8",
-                 "http://public-repo-1.hortonworks.com/ARTIFACTS/jdk-8u60-linux-x64.tar.gz", "jdk-8u60-linux-x64.tar.gz",
+                 "http://public-repo-1.hortonworks.com/ARTIFACTS/jdk-8u112-linux-x64.tar.gz", "jdk-8u112-linux-x64.tar.gz",
                  "http://public-repo-1.hortonworks.com/ARTIFACTS/jce_policy-8.zip", "jce_policy-8.zip",
-                 AmbariPath.get("/usr/jdk64/jdk1.8.0_40"),
+                 AmbariPath.get("/usr/jdk64/jdk1.8.0_112"),
                  "(jdk.*)/jre")
     ]
 
@@ -746,7 +799,8 @@ class JDKSetupLinux(JDKSetup):
     self.CREATE_JDK_DIR_CMD = "/bin/mkdir -p {0}"
     self.CHMOD_JDK_DIR_CMD = "chmod a+x {0}"
     self.SET_JCE_PERMISSIONS = "chown {0} {1}/{2}/*"
-
+    self.SET_JCE_JAR_MODE = "chmod 664 {0}/{1}/{2}"
+    self.SET_JCE_FILE_MODE = "chmod 644 {0}/{1}/{2}"
     # use --no-same-owner when running as root to prevent uucp as the user (AMBARI-6478)
     self.UNTAR_JDK_ARCHIVE = "tar --no-same-owner -xvf {0}"
 
@@ -784,14 +838,24 @@ class JDKSetupLinux(JDKSetup):
 
   def adjust_jce_permissions(self, jdk_path):
     ambari_user = read_ambari_user()
-    cmd = self.SET_JCE_PERMISSIONS.format(ambari_user, jdk_path,configDefaults.JDK_SECURITY_DIR)
-    process = subprocess.Popen(cmd,
-                           stdout=subprocess.PIPE,
-                           stdin=subprocess.PIPE,
-                           stderr=subprocess.PIPE,
+    cmds = []
+    if ambari_user:
+      cmds.append(self.SET_JCE_PERMISSIONS.format(ambari_user, jdk_path, configDefaults.JDK_SECURITY_DIR))
+    cmds.append(self.SET_JCE_FILE_MODE.format(jdk_path, configDefaults.JDK_SECURITY_DIR, "*"))
+    cmds.append(self.SET_JCE_JAR_MODE.format(jdk_path, configDefaults.JDK_SECURITY_DIR, "*.jar"))
+
+    cmd = " && ".join(cmds)
+
+    process = subprocess32.Popen(cmd,
+                           stdout=subprocess32.PIPE,
+                           stdin=subprocess32.PIPE,
+                           stderr=subprocess32.PIPE,
                            shell=True
                            )
     (stdoutdata, stderrdata) = process.communicate()
+
+    if process.returncode != 0:
+      print_warning_msg("Failed to change jce permissions. {0}\n{1}".format(stderrdata, stdoutdata))
 
 def download_and_install_jdk(options):
   properties = get_ambari_properties()
@@ -806,6 +870,14 @@ def download_and_install_jdk(options):
     jdkSetup.download_and_unpack_jce_policy(properties)
 
   update_properties(properties)
+
+  ambari_java_version_valid = check_ambari_java_version_is_valid(get_JAVA_HOME(), jdkSetup.JAVA_BIN, 8, properties)
+  if not ambari_java_version_valid:
+    jdkSetup = JDKSetup() # recreate object
+    jdkSetup.download_and_install_jdk(options, properties, True)
+    if jdkSetup.jdk_index != jdkSetup.custom_jdk_number:
+      jdkSetup.download_and_unpack_jce_policy(properties, True)
+    update_properties(properties)
 
   return 0
 
@@ -870,21 +942,46 @@ def _cache_jdbc_driver(args):
 
   resources_dir = get_resources_location(properties)
   path, jdbc_name = os.path.split(args.jdbc_driver)
+  custom_db_jdbc_property_name = "custom." + args.jdbc_db + ".jdbc.name"
+  custom_db_jdbc_property_value = properties[custom_db_jdbc_property_name]
 
-  properties.process_pair("custom." + args.jdbc_db + ".jdbc.name", jdbc_name)
+  symlink_name = os.path.join(resources_dir, default_connectors_map[args.jdbc_db])
 
-  if os.path.isfile(os.path.join(resources_dir, jdbc_name)):
-    os.remove(os.path.join(resources_dir, jdbc_name))
+  if custom_db_jdbc_property_value:
+    properties.process_pair("previous." + custom_db_jdbc_property_name, custom_db_jdbc_property_value)
+  else:
+    if os.path.lexists(symlink_name):
+      properties.process_pair("previous." + custom_db_jdbc_property_name, default_connectors_map[args.jdbc_db])
+
+  properties.process_pair(custom_db_jdbc_property_name, jdbc_name)
+
+  dest = os.path.join(resources_dir, jdbc_name)
+  if os.path.isfile(dest):
+    os.remove(dest)
 
   try:
-    shutil.copy(args.jdbc_driver, resources_dir)
-    print "Copying {0} to {1}".format(args.jdbc_driver, resources_dir)
+    shutil.copy(args.jdbc_driver, dest)
+    print "Copying {0} to {1}".format(args.jdbc_driver, dest)
   except Exception, e:
-    err = "Can not copy file {0} to {1} due to: {2} . Please check file " \
-          "permissions and free disk space.".format(args.jdbc_driver, resources_dir, str(e))
+    err = "Cannot copy file {0} to {1} due to: {2} . Please check file " \
+          "permissions and free disk space.".format(args.jdbc_driver, dest, str(e))
+    raise FatalException(1, err)
+
+  try:
+    if (dest != symlink_name):
+      if os.path.isfile(symlink_name):
+        os.remove(symlink_name)
+      os.symlink(dest, symlink_name)
+      print "Creating symlink {0} to {1}".format(dest, symlink_name)
+  except Exception, e:
+    err = "Cannot create symlink {0} to {1} due to: {2} . Please check file " \
+          "permissions and free disk space.".format(dest, symlink_name, str(e))
     raise FatalException(1, err)
 
   update_properties(properties)
+  print "If you are updating existing jdbc driver jar for " + args.jdbc_db + " with " + jdbc_name + ". Please remove the " \
+        "old driver jar, from all hosts. Restarting services that need the driver, will " \
+        "automatically copy the new jar to the hosts."
   print "JDBC driver was successfully initialized."
 
 #
@@ -1045,12 +1142,13 @@ def check_setup_already_done():
     print_error_msg("Error getting ambari properties")
     return -1
 
-  return properties.get_property(JDK_NAME_PROPERTY) and properties.get_property(JDBC_DATABASE_PROPERTY)
+  return not bool(get_missing_properties(properties, property_set=SETUP_DONE_PROPERTIES))
 
 #
 # Setup the Ambari Server.
 #
 def setup(options):
+  logger.info("Setup ambari-server.")
   if options.only_silent:
     if check_setup_already_done():
       print "Nothing was done. Ambari Setup already performed and cannot re-run setup in silent mode. Use \"ambari-server setup\" command without -s option to change Ambari setup."
@@ -1093,6 +1191,9 @@ def setup(options):
     err = 'Downloading or installing JDK failed: {0}. Exiting.'.format(e)
     raise FatalException(e.code, err)
 
+  print 'Checking GPL software agreement...'
+  write_gpl_license_accepted(default_prompt_value=options.accept_gpl)
+
   print 'Completing setup...'
   retcode = configure_os_settings()
   if not retcode == 0:
@@ -1108,11 +1209,21 @@ def setup(options):
 
   check_jdbc_drivers(options)
 
-  print 'Extracting system views...'
-  retcode = extract_views(options)
-  if not retcode == 0:
-    err = 'Error while extracting system views. Exiting'
-    raise FatalException(retcode, err)
+  if not options.skip_view_extraction:
+    print 'Extracting system views...'
+    retcode = extract_views(options)
+    if not retcode == 0:
+      err = 'Error while extracting system views. Exiting'
+      raise FatalException(retcode, err)
+
+  json_url = get_json_url_from_repo_file()
+  if json_url:
+    print "Ambari repo file contains latest json url {0}, updating stacks repoinfos with it...".format(json_url)
+    properties = get_ambari_properties()
+    stack_root = get_stack_location(properties)
+    update_latest_in_repoinfos_for_all_stacks(stack_root, json_url)
+  else:
+    print "Ambari repo file doesn't contain latest json url, skipping repoinfos modification"
 
   # we've already done this, but new files were created so run it one time.
   adjust_directory_permissions(svc_user)
@@ -1123,6 +1234,7 @@ def setup(options):
 # Setup the JCE policy for Ambari Server.
 #
 def setup_jce_policy(args):
+  logger.info("Setup JCE policy for ambari-server.")
   if not os.path.exists(args[1]):
     err = "Can not run 'setup-jce'. Invalid path {0}.".format(args[1])
     raise FatalException(1, err)
@@ -1160,11 +1272,48 @@ def setup_jce_policy(args):
   print 'NOTE: Restart Ambari Server to apply changes' + \
         ' ("ambari-server restart|stop|start")'
 
+def check_ambari_java_version_is_valid(java_home, java_bin, min_version, properties):
+  """
+  Check that ambari uses the proper (minimum) JDK with a shell command.
+  Returns true, if Ambari meets with the minimal JDK version requirement.
+  """
+  result = True
+  print 'Check JDK version for Ambari Server...'
+  try:
+    command = JDK_VERSION_CHECK_CMD.format(os.path.join(java_home, 'bin', java_bin))
+    process = subprocess32.Popen(command,
+                               stdout=subprocess32.PIPE,
+                               stdin=subprocess32.PIPE,
+                               stderr=subprocess32.PIPE,
+                               shell=True
+                               )
+    (out, err) = process.communicate()
+    if process.returncode != 0:
+      err = "Checking JDK version command returned with exit code %s" % process.returncode
+      raise FatalException(process.returncode, err)
+    else:
+      actual_jdk_version = int(out)
+      print 'JDK version found: {0}'.format(actual_jdk_version)
+      if actual_jdk_version < min_version:
+        print 'Minimum JDK version is {0} for Ambari. Setup JDK again only for Ambari Server.'.format(min_version)
+        properties.process_pair(STACK_JAVA_VERSION, out)
+        result = False
+      else:
+        print 'Minimum JDK version is {0} for Ambari. Skipping to setup different JDK for Ambari Server.'.format(min_version)
 
+  except FatalException as e:
+    err = 'Running java version check command failed: {0}. Exiting.'.format(e)
+    raise FatalException(e.code, err)
+  except Exception as e:
+    err = 'Running java version check command failed: {0}. Exiting.'.format(e)
+    raise FatalException(1, err)
+
+  return result
 #
 # Resets the Ambari Server.
 #
 def reset(options):
+  logger.info("Reset ambari-server.")
   if not is_root():
     err = configDefaults.MESSAGE_ERROR_RESET_NOT_ROOT
     raise FatalException(4, err)

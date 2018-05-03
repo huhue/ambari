@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -21,7 +21,6 @@ package org.apache.ambari.server.api.services;
 import static org.easymock.EasyMock.createNiceMock;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.reset;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -46,8 +45,10 @@ import java.util.UUID;
 import javax.persistence.EntityManager;
 
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.StackAccessException;
 import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.controller.internal.DeleteHostComponentStatusMetaData;
 import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.events.publishers.AmbariEventPublisher;
 import org.apache.ambari.server.metadata.ActionMetadata;
@@ -58,7 +59,7 @@ import org.apache.ambari.server.orm.OrmTestHelper;
 import org.apache.ambari.server.orm.dao.AlertDefinitionDAO;
 import org.apache.ambari.server.orm.dao.MetainfoDAO;
 import org.apache.ambari.server.orm.entities.AlertDefinitionEntity;
-import org.apache.ambari.server.orm.entities.MetainfoEntity;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.stack.StackManager;
 import org.apache.ambari.server.stack.StackManagerFactory;
 import org.apache.ambari.server.state.AutoDeployInfo;
@@ -84,14 +85,16 @@ import org.apache.ambari.server.state.alert.SourceType;
 import org.apache.ambari.server.state.kerberos.KerberosDescriptor;
 import org.apache.ambari.server.state.kerberos.KerberosDescriptorFactory;
 import org.apache.ambari.server.state.kerberos.KerberosServiceDescriptorFactory;
+import org.apache.ambari.server.state.repository.VersionDefinitionXml;
 import org.apache.ambari.server.state.stack.Metric;
 import org.apache.ambari.server.state.stack.MetricDefinition;
 import org.apache.ambari.server.state.stack.OsFamily;
+import org.apache.ambari.server.utils.EventBusSynchronizer;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
-import org.easymock.Capture;
-import org.easymock.EasyMock;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -127,12 +130,11 @@ public class AmbariMetaInfoTest {
   private static final String NON_EXT_VALUE = "XXX";
 
   private static final int REPOS_CNT = 3;
-  private static final int PROPERTIES_CNT = 62;
+  private static final int PROPERTIES_CNT = 64;
   private static final int OS_CNT = 4;
 
-  private static AmbariMetaInfo metaInfo = null;
-  private final static Logger LOG =
-      LoggerFactory.getLogger(AmbariMetaInfoTest.class);
+  private static TestAmbariMetaInfo metaInfo = null;
+  private final static Logger LOG = LoggerFactory.getLogger(AmbariMetaInfoTest.class);
   private static final String FILE_NAME = "hbase-site.xml";
   private static final String HADOOP_ENV_FILE_NAME = "hadoop-env.xml";
   private static final String HDFS_LOG4J_FILE_NAME = "hdfs-log4j.xml";
@@ -149,11 +151,17 @@ public class AmbariMetaInfoTest {
   public static void beforeClass() throws Exception {
     File stacks = new File("src/test/resources/stacks");
     File version = new File("src/test/resources/version");
+    File resourcesRoot = new File("src/test/resources/");
     if (System.getProperty("os.name").contains("Windows")) {
       stacks = new File(ClassLoader.getSystemClassLoader().getResource("stacks").getPath());
       version = new File(new File(ClassLoader.getSystemClassLoader().getResource("").getPath()).getParent(), "version");
     }
-    metaInfo = createAmbariMetaInfo(stacks, version);
+    metaInfo = createAmbariMetaInfo(stacks, version, resourcesRoot);
+  }
+
+  @AfterClass
+  public static void tearDown() throws Exception {
+    H2DatabaseCleaner.clearDatabase(metaInfo.injector.getProvider(EntityManager.class).get());
   }
 
   public class MockModule extends AbstractModule {
@@ -221,6 +229,7 @@ public class AmbariMetaInfoTest {
   }
 
   @Test
+  @Ignore
   public void testGetRepositoryDefault() throws Exception {
     // Scenario: user has internet and does nothing to repos via api
     // use the latest
@@ -237,8 +246,7 @@ public class AmbariMetaInfoTest {
     assertNotNull(redhat6Repo);
     for (RepositoryInfo ri : redhat6Repo) {
       if (STACK_NAME_HDP.equals(ri.getRepoName())) {
-        assertFalse(ri.getBaseUrl().equals(ri.getDefaultBaseUrl()));
-        assertEquals(ri.getBaseUrl(), ri.getLatestBaseUrl());
+        assertTrue(ri.getBaseUrl().equals(ri.getDefaultBaseUrl()));
       }
     }
   }
@@ -248,7 +256,7 @@ public class AmbariMetaInfoTest {
     // Scenario: user has no internet and does nothing to repos via api
     // use the default
     String buildDir = tmpFolder.getRoot().getAbsolutePath();
-    AmbariMetaInfo ambariMetaInfo = setupTempAmbariMetaInfo(buildDir);
+    setupTempAmbariMetaInfoDirs(buildDir);
     // The current stack already has (HDP, 2.1.1, redhat6).
 
     // Deleting the json file referenced by the latestBaseUrl to simulate No
@@ -261,7 +269,7 @@ public class AmbariMetaInfoTest {
       FileUtils.deleteQuietly(latestUrlFile);
       assertTrue(!latestUrlFile.exists());
     }
-    ambariMetaInfo.init();
+    AmbariMetaInfo ambariMetaInfo = setupTempAmbariMetaInfoExistingDirs(buildDir);
 
     List<RepositoryInfo> redhat6Repo = ambariMetaInfo.getRepositories(
         STACK_NAME_HDP, "2.1.1", "redhat6");
@@ -273,165 +281,6 @@ public class AmbariMetaInfoTest {
         assertEquals(ri.getBaseUrl(), ri.getDefaultBaseUrl());
       }
     }
-  }
-
-  @Test
-  public void testGetRepositoryUpdatedBaseUrl() throws Exception {
-    // Scenario: user has internet and but calls to set repos via api
-    // use whatever they set
-    String buildDir = tmpFolder.getRoot().getAbsolutePath();
-    TestAmbariMetaInfo ambariMetaInfo = setupTempAmbariMetaInfo(buildDir);
-    // The current stack already has (HDP, 2.1.1, redhat6)
-
-    // Updating the baseUrl
-    String newBaseUrl = "http://myprivate-repo-1.hortonworks.com/HDP/centos6/2.x/updates/2.0.6.0";
-    ambariMetaInfo.updateRepoBaseURL(STACK_NAME_HDP, "2.1.1", "redhat6",
-            HDP_REPO_ID, newBaseUrl);
-    RepositoryInfo repoInfo = ambariMetaInfo.getRepository(STACK_NAME_HDP, "2.1.1", "redhat6",
-            HDP_REPO_ID);
-    assertEquals(newBaseUrl, repoInfo.getBaseUrl());
-    String prevBaseUrl = repoInfo.getDefaultBaseUrl();
-
-    // mock expectations
-    MetainfoDAO metainfoDAO = ambariMetaInfo.metaInfoDAO;
-    reset(metainfoDAO);
-    MetainfoEntity entity = createNiceMock(MetainfoEntity.class);
-    expect(metainfoDAO.findByKey("repo:/HDP/2.1.1/redhat6/HDP-2.1.1:baseurl")).andReturn(entity).atLeastOnce();
-    expect(entity.getMetainfoValue()).andReturn(newBaseUrl).atLeastOnce();
-    replay(metainfoDAO, entity);
-
-    ambariMetaInfo.init();
-
-    waitForAllReposToBeResolved(ambariMetaInfo);
-
-    List<RepositoryInfo> redhat6Repo = ambariMetaInfo.getRepositories(
-        STACK_NAME_HDP, "2.1.1", "redhat6");
-
-    assertNotNull(redhat6Repo);
-
-    for (RepositoryInfo ri : redhat6Repo) {
-      if (HDP_REPO_NAME.equals(ri.getRepoName())) {
-        assertEquals(newBaseUrl, ri.getBaseUrl());
-        // defaultBaseUrl and baseUrl should not be same, since it is updated.
-        assertFalse(ri.getBaseUrl().equals(ri.getDefaultBaseUrl()));
-      }
-    }
-
-    Capture<MetainfoEntity> c = new Capture<MetainfoEntity>();
-
-    metainfoDAO = ambariMetaInfo.metaInfoDAO;
-    reset(metainfoDAO);
-    reset(entity);
-    expect(metainfoDAO.findByKey("repo:/HDP/2.1.1/redhat6/HDP-2.1.1:baseurl")).andReturn(entity).atLeastOnce();
-    expect(metainfoDAO.merge(EasyMock.capture(c))).andReturn(entity).atLeastOnce();
-    replay(metainfoDAO, entity);
-
-    // Reset the database with the original baseUrl
-    ambariMetaInfo.updateRepoBaseURL(STACK_NAME_HDP, "2.1.1", "redhat6",
-            HDP_REPO_ID, prevBaseUrl);
-
-    assertEquals(prevBaseUrl, c.getValue().getMetainfoValue());
-    assertTrue(repoInfo.isBaseUrlFromSaved());
-
-  }
-
-  @Test
-  public void testGetRepositoryUpdatedUtilsBaseUrl() throws Exception {
-    // Scenario: user has internet and but calls to set repos via api
-    // use whatever they set
-    String stackVersion = "0.2";
-    String buildDir = tmpFolder.getRoot().getAbsolutePath();
-    TestAmbariMetaInfo ambariMetaInfo = setupTempAmbariMetaInfo(buildDir);
-
-    // Updating the baseUrl
-    String newBaseUrl = "http://myprivate-repo-1.hortonworks.com/HDP-Utils/centos6/2.x/updates/2.0.6.0";
-    ambariMetaInfo.updateRepoBaseURL(STACK_NAME_HDP, stackVersion, "redhat6",
-            REPO_ID, newBaseUrl);
-    RepositoryInfo repoInfo = ambariMetaInfo.getRepository(STACK_NAME_HDP, stackVersion, "redhat6",
-            REPO_ID);
-    assertEquals(newBaseUrl, repoInfo.getBaseUrl());
-    String prevBaseUrl = repoInfo.getDefaultBaseUrl();
-
-    // mock expectations
-    MetainfoDAO metainfoDAO = ambariMetaInfo.metaInfoDAO;
-    reset(metainfoDAO);
-    MetainfoEntity entity = createNiceMock(MetainfoEntity.class);
-    expect(metainfoDAO.findByKey("repo:/HDP/0.2/redhat6/HDP-UTILS-1.1.0.15:baseurl")).andReturn(entity).atLeastOnce();
-    expect(entity.getMetainfoValue()).andReturn(newBaseUrl).atLeastOnce();
-    replay(metainfoDAO, entity);
-
-    ambariMetaInfo.init();
-
-    List<RepositoryInfo> redhat6Repo = ambariMetaInfo.getRepositories(
-            STACK_NAME_HDP, stackVersion, "redhat6");
-    assertNotNull(redhat6Repo);
-    for (RepositoryInfo ri : redhat6Repo) {
-      if (HDP_UTILS_REPO_NAME.equals(ri.getRepoName())) {
-        assertEquals(newBaseUrl, ri.getBaseUrl());
-        // defaultBaseUrl and baseUrl should not be same, since it is updated.
-        assertFalse(ri.getBaseUrl().equals(ri.getDefaultBaseUrl()));
-      }
-    }
-
-    // Reset the database with the original baseUrl
-    ambariMetaInfo.updateRepoBaseURL(STACK_NAME_HDP, stackVersion, "redhat6",
-            REPO_ID, prevBaseUrl);
-  }
-
-  @Test
-  public void testGetRepositoryNoInternetUpdatedBaseUrl() throws Exception {
-    // Scenario: user has no internet and but calls to set repos via api
-    // use whatever they set
-    String newBaseUrl = "http://myprivate-repo-1.hortonworks.com/HDP/centos6/2.x/updates/2.0.6.0";
-    String buildDir = tmpFolder.getRoot().getAbsolutePath();
-    TestAmbariMetaInfo ambariMetaInfo = setupTempAmbariMetaInfo(buildDir);
-    // The current stack already has (HDP, 2.1.1, redhat6).
-
-    // Deleting the json file referenced by the latestBaseUrl to simulate No
-    // Internet.
-    File latestUrlFile = new File(buildDir, "ambari-metaInfo/HDP/2.1.1/repos/hdp.json");
-    if (System.getProperty("os.name").contains("Windows")) {
-      latestUrlFile.deleteOnExit();
-    }
-    else {
-      FileUtils.deleteQuietly(latestUrlFile);
-      assertTrue(!latestUrlFile.exists());
-    }
-
-    // Update baseUrl
-    ambariMetaInfo.updateRepoBaseURL("HDP", "2.1.1", "redhat6", "HDP-2.1.1",
-        newBaseUrl);
-    RepositoryInfo repoInfo = ambariMetaInfo.getRepository(STACK_NAME_HDP, "2.1.1", "redhat6",
-        STACK_NAME_HDP + "-2.1.1");
-    assertEquals(newBaseUrl, repoInfo.getBaseUrl());
-    String prevBaseUrl = repoInfo.getDefaultBaseUrl();
-
-    // mock expectations
-    MetainfoDAO metainfoDAO = ambariMetaInfo.metaInfoDAO;
-    reset(metainfoDAO);
-    MetainfoEntity entity = createNiceMock(MetainfoEntity.class);
-    expect(metainfoDAO.findByKey("repo:/HDP/2.1.1/redhat6/HDP-2.1.1:baseurl")).andReturn(entity).atLeastOnce();
-    expect(entity.getMetainfoValue()).andReturn(newBaseUrl).atLeastOnce();
-    replay(metainfoDAO, entity);
-
-    ambariMetaInfo.init();
-
-    waitForAllReposToBeResolved(ambariMetaInfo);
-
-    List<RepositoryInfo> redhat6Repo = ambariMetaInfo.getRepositories(
-        STACK_NAME_HDP, "2.1.1", "redhat6");
-    assertNotNull(redhat6Repo);
-    for (RepositoryInfo ri : redhat6Repo) {
-      if (STACK_NAME_HDP.equals(ri.getRepoName())) {
-        // baseUrl should point to the updated baseUrl
-        assertEquals(newBaseUrl, ri.getBaseUrl());
-        assertFalse(ri.getDefaultBaseUrl().equals(ri.getBaseUrl()));
-      }
-    }
-
-    // Reset the database with the original baseUrl
-    ambariMetaInfo.updateRepoBaseURL(STACK_NAME_HDP, "2.1.1", "redhat6",
-        STACK_NAME_HDP + "-2.1.1", prevBaseUrl);
   }
 
   @Test
@@ -453,6 +302,13 @@ public class AmbariMetaInfoTest {
 
     boolean invalid = metaInfo.isValidService(STACK_NAME_HDP, STACK_VERSION_HDP, NON_EXT_VALUE);
     assertFalse(invalid);
+  }
+
+  @Test
+  public void isServiceWithNoConfigs() throws AmbariException {
+    assertTrue(metaInfo.isServiceWithNoConfigs(STACK_NAME_HDP, "2.0.8", "SYSTEMML"));
+    assertTrue(metaInfo.isServiceWithNoConfigs(STACK_NAME_HDP, "2.0.7", "SYSTEMML"));
+    assertFalse(metaInfo.isServiceWithNoConfigs(STACK_NAME_HDP, "2.0.8", "HIVE"));
   }
 
   @Test
@@ -504,14 +360,14 @@ public class AmbariMetaInfoTest {
   public void testGetRepos() throws Exception {
     Map<String, List<RepositoryInfo>> repos = metaInfo.getRepository(
         STACK_NAME_HDP, STACK_VERSION_HDP);
-    Set<String> centos5Cnt = new HashSet<String>();
-    Set<String> centos6Cnt = new HashSet<String>();
-    Set<String> redhat6cnt = new HashSet<String>();
-    Set<String> redhat5cnt = new HashSet<String>();
+    Set<String> centos5Cnt = new HashSet<>();
+    Set<String> centos6Cnt = new HashSet<>();
+    Set<String> redhat6cnt = new HashSet<>();
+    Set<String> redhat5cnt = new HashSet<>();
 
     for (List<RepositoryInfo> vals : repos.values()) {
       for (RepositoryInfo repo : vals) {
-        LOG.debug("Dumping repo info : " + repo.toString());
+        LOG.debug("Dumping repo info : {}", repo);
         if (repo.getOsType().equals("centos5")) {
           centos5Cnt.add(repo.getRepoId());
         } else if (repo.getOsType().equals("centos6")) {
@@ -541,17 +397,16 @@ public class AmbariMetaInfoTest {
   }
 
 
-  @Test
   /**
    * Make sure global mapping is avaliable when global.xml is
    * in the path.
-   * @throws Exception
    */
+  @Test
   public void testGlobalMapping() throws Exception {
     ServiceInfo sinfo = metaInfo.getService("HDP",
         "0.2", "HDFS");
     List<PropertyInfo> pinfo = sinfo.getProperties();
-    /** check all the config knobs and make sure the global one is there **/
+    // check all the config knobs and make sure the global one is there
     boolean checkforglobal = false;
 
     for (PropertyInfo pinfol: pinfo) {
@@ -583,9 +438,9 @@ public class AmbariMetaInfoTest {
       stackRoot = new File(ClassLoader.getSystemClassLoader().getResource("stacks").getPath());
       version = new File(new File(ClassLoader.getSystemClassLoader().getResource("").getPath()).getParent(), "version");
     }
-    File stackRootTmp = new File(buildDir + "/ambari-metaInfo"); stackRootTmp.mkdir();
+    File stackRootTmp = getStackRootTmp(buildDir);
+    stackRootTmp.mkdir();
     FileUtils.copyDirectory(stackRoot, stackRootTmp);
-    AmbariMetaInfo ambariMetaInfo = createAmbariMetaInfo(stackRootTmp, version);
     //todo
     //ambariMetaInfo.injector = injector;
     File f1, f2, f3;
@@ -596,7 +451,7 @@ public class AmbariMetaInfoTest {
       f3.createNewFile();
     }
 
-    ambariMetaInfo.init();
+    AmbariMetaInfo ambariMetaInfo = createAmbariMetaInfo(stackRootTmp, version, new File(""));
 
     // Tests the stack is loaded as expected
     getServices();
@@ -883,7 +738,7 @@ public class AmbariMetaInfoTest {
     LOG.info("Stacks file " + stackRoot.getAbsolutePath());
 
 
-    TestAmbariMetaInfo ambariMetaInfo = createAmbariMetaInfo(stackRoot, version);
+    TestAmbariMetaInfo ambariMetaInfo = createAmbariMetaInfo(stackRoot, version, new File(""));
     Assert.assertEquals(1, ambariMetaInfo.getStackManager().getStacks().size());
     Assert.assertEquals(false, ambariMetaInfo.getStackManager().getStack("HDP", "0.1").isValid());
     Assert.assertEquals(2, ambariMetaInfo.getStackManager().getStack("HDP", "0.1").getErrors().size());
@@ -929,9 +784,9 @@ public class AmbariMetaInfoTest {
     }
 
     Properties properties = new Properties();
-    properties.setProperty(Configuration.METADATA_DIR_PATH, stacks.getPath());
-    properties.setProperty(Configuration.COMMON_SERVICES_DIR_PATH, commonServicesRoot.getPath());
-    properties.setProperty(Configuration.SERVER_VERSION_FILE, version.getPath());
+    properties.setProperty(Configuration.METADATA_DIR_PATH.getKey(), stacks.getPath());
+    properties.setProperty(Configuration.COMMON_SERVICES_DIR_PATH.getKey(), commonServicesRoot.getPath());
+    properties.setProperty(Configuration.SERVER_VERSION_FILE.getKey(), version.getPath());
     Configuration configuration = new Configuration(properties);
 
     TestAmbariMetaInfo ambariMetaInfo = new TestAmbariMetaInfo(configuration);
@@ -979,7 +834,7 @@ public class AmbariMetaInfoTest {
                 }
               }
             }
-            LinkedList<String> failedMetrics = new LinkedList<String>();
+            LinkedList<String> failedMetrics = new LinkedList<>();
             for (MetricDefinition metricDefinition : list) {
               if ("ganglia".equals(metricDefinition.getType())) {
                 //all ams metrics should be temporal
@@ -995,7 +850,7 @@ public class AmbariMetaInfoTest {
 
               }
             }
-            Assert.assertEquals(failedMetrics.toString() +
+            Assert.assertEquals(failedMetrics +
                 " metrics defined with pointInTime=true for both jmx and ganglia types.",
               0, failedMetrics.size());
           }
@@ -1411,25 +1266,6 @@ public class AmbariMetaInfoTest {
     }
   }
 
-
-  @Test
-  public void testHooksDirInheritance() throws Exception {
-    String hookAssertionTemplate = "HDP/%s/hooks";
-    if (System.getProperty("os.name").contains("Windows")) {
-      hookAssertionTemplate = "HDP\\%s\\hooks";
-    }
-    // Test hook dir determination in parent
-    StackInfo stackInfo = metaInfo.getStack(STACK_NAME_HDP, "2.0.6");
-    Assert.assertEquals(String.format(hookAssertionTemplate, "2.0.6"), stackInfo.getStackHooksFolder());
-    // Test hook dir inheritance
-    stackInfo = metaInfo.getStack(STACK_NAME_HDP, "2.0.7");
-    Assert.assertEquals(String.format(hookAssertionTemplate, "2.0.6"), stackInfo.getStackHooksFolder());
-    // Test hook dir override
-    stackInfo = metaInfo.getStack(STACK_NAME_HDP, "2.0.8");
-    Assert.assertEquals(String.format(hookAssertionTemplate, "2.0.8"), stackInfo.getStackHooksFolder());
-  }
-
-
   @Test
   public void testServicePackageDirInheritance() throws Exception {
     String assertionTemplate07 = StringUtils.join(
@@ -1660,26 +1496,39 @@ public class AmbariMetaInfoTest {
 
     for (RepositoryInfo ri : metaInfo.getRepositories("HDP", "2.1.1", "centos6")) {
       Assert.assertEquals(
-          "Expected the base url to be set properly",
-          "http://s3.amazonaws.com/dev.hortonworks.com/HDP/centos6/2.x/BUILDS/2.1.1.0-118",
-          ri.getLatestBaseUrl());
-      Assert.assertEquals(
           "Expected the default URL to be the same as in the xml file",
           "http://public-repo-1.hortonworks.com/HDP/centos6/2.x/updates/2.0.6.0",
           ri.getDefaultBaseUrl());
     }
+  }
 
-    for (RepositoryInfo ri : metaInfo.getRepositories("HDP", "2.1.1", "suse11")) {
-      Assert.assertEquals(
-          "Expected hdp.json to be stripped from the url",
-          "http://s3.amazonaws.com/dev.hortonworks.com/HDP/suse11/2.x/BUILDS/2.1.1.0-118",
-          ri.getLatestBaseUrl());
+
+  @Test
+  public void testLatestVdf() throws Exception {
+    // ensure that all of the latest repo retrieval tasks have completed
+    StackManager sm = metaInfo.getStackManager();
+    int maxWait = 45000;
+    int waitTime = 0;
+    while (waitTime < maxWait && ! sm.haveAllRepoUrlsBeenResolved()) {
+      Thread.sleep(5);
+      waitTime += 5;
     }
 
-    for (RepositoryInfo ri : metaInfo.getRepositories("HDP", "2.1.1", "sles11")) {
-      Assert.assertEquals("http://s3.amazonaws.com/dev.hortonworks.com/HDP/suse11/2.x/BUILDS/2.1.1.0-118",
-          ri.getLatestBaseUrl());
+    if (waitTime >= maxWait) {
+      fail("Latest Repo tasks did not complete");
     }
+
+    // !!! default stack version is from latest-vdf.  2.2.0 only has one entry
+    VersionDefinitionXml vdf = metaInfo.getVersionDefinition("HDP-2.2.0");
+    assertNotNull(vdf);
+    assertEquals(1, vdf.repositoryInfo.getOses().size());
+
+    // !!! this stack has no "manifests" and no "latest-vdf".  So the default VDF should contain
+    // information from repoinfo.xml and the "latest" structure
+    vdf = metaInfo.getVersionDefinition("HDP-2.2.1");
+    assertNotNull(vdf);
+
+    assertEquals(2, vdf.repositoryInfo.getOses().size());
   }
 
   @Test
@@ -1821,7 +1670,7 @@ public class AmbariMetaInfoTest {
     assertNotNull( metricSource.getUri().getHttpsPropertyValue() );
     assertNotNull( metricSource.getUri().getHttpsUri() );
     assertNotNull( metricSource.getUri().getHttpUri() );
-    assertEquals(12345, metricSource.getUri().getDefaultPort());
+    assertEquals(12345, metricSource.getUri().getDefaultPort().intValue());
 //
     // ignore host
     assertTrue(ignoreHost.isHostIgnored());
@@ -1836,13 +1685,19 @@ public class AmbariMetaInfoTest {
    */
   @Test
   public void testAlertDefinitionMerging() throws Exception {
+    final String stackVersion = "2.0.6";
+    final String repoVersion = "2.0.6-1234";
+
     Injector injector = Guice.createInjector(Modules.override(
         new InMemoryDefaultTestModule()).with(new MockModule()));
 
+    EventBusSynchronizer.synchronizeAmbariEventPublisher(injector);
+
     injector.getInstance(GuiceJpaInitializer.class);
     injector.getInstance(EntityManager.class);
-    long clusterId = injector.getInstance(OrmTestHelper.class).createCluster(
-        "cluster" + System.currentTimeMillis());
+
+    OrmTestHelper ormHelper = injector.getInstance(OrmTestHelper.class);
+    long clusterId = ormHelper.createCluster("cluster" + System.currentTimeMillis());
 
     Class<?> c = metaInfo.getClass().getSuperclass();
 
@@ -1857,15 +1712,18 @@ public class AmbariMetaInfoTest {
     Clusters clusters = injector.getInstance(Clusters.class);
     Cluster cluster = clusters.getClusterById(clusterId);
     cluster.setDesiredStackVersion(
-        new StackId(STACK_NAME_HDP, "2.0.6"));
+        new StackId(STACK_NAME_HDP, stackVersion));
 
-    cluster.addService("HDFS");
+    RepositoryVersionEntity repositoryVersion = ormHelper.getOrCreateRepositoryVersion(
+        cluster.getCurrentStackVersion(), repoVersion);
 
-    metaInfo.reconcileAlertDefinitions(clusters);
+    cluster.addService("HDFS", repositoryVersion);
+
+    metaInfo.reconcileAlertDefinitions(clusters, false);
 
     AlertDefinitionDAO dao = injector.getInstance(AlertDefinitionDAO.class);
     List<AlertDefinitionEntity> definitions = dao.findAll(clusterId);
-    assertEquals(10, definitions.size());
+    assertEquals(13, definitions.size());
 
     // figure out how many of these alerts were merged into from the
     // non-stack alerts.json
@@ -1877,18 +1735,18 @@ public class AmbariMetaInfoTest {
       }
     }
 
-    assertEquals(1, hostAlertCount);
-    assertEquals(9, definitions.size() - hostAlertCount);
+    assertEquals(3, hostAlertCount);
+    assertEquals(10, definitions.size() - hostAlertCount);
 
     for (AlertDefinitionEntity definition : definitions) {
       definition.setScheduleInterval(28);
       dao.merge(definition);
     }
 
-    metaInfo.reconcileAlertDefinitions(clusters);
+    metaInfo.reconcileAlertDefinitions(clusters, false);
 
     definitions = dao.findAll();
-    assertEquals(10, definitions.size());
+    assertEquals(13, definitions.size());
 
     for (AlertDefinitionEntity definition : definitions) {
       assertEquals(28, definition.getScheduleInterval().intValue());
@@ -1897,7 +1755,7 @@ public class AmbariMetaInfoTest {
     // find all enabled for the cluster should find 6 (the ones from HDFS;
     // it will not find the agent alert since it's not bound to the cluster)
     definitions = dao.findAllEnabled(cluster.getClusterId());
-    assertEquals(9, definitions.size());
+    assertEquals(12, definitions.size());
 
     // create new definition
     AlertDefinitionEntity entity = new AlertDefinitionEntity();
@@ -1916,22 +1774,75 @@ public class AmbariMetaInfoTest {
 
     // verify the new definition is found (6 HDFS + 1 new one)
     definitions = dao.findAllEnabled(cluster.getClusterId());
-    assertEquals(10, definitions.size());
+    assertEquals(13, definitions.size());
 
     // reconcile, which should disable our bad definition
-    metaInfo.reconcileAlertDefinitions(clusters);
+    metaInfo.reconcileAlertDefinitions(clusters, false);
 
     // find all enabled for the cluster should find 6
     definitions = dao.findAllEnabled(cluster.getClusterId());
-    assertEquals(9, definitions.size());
+    assertEquals(12, definitions.size());
 
     // find all should find 6 HDFS + 1 disabled + 1 agent alert + 2 server
     // alerts
     definitions = dao.findAll();
-    assertEquals(11, definitions.size());
+    assertEquals(14, definitions.size());
 
     entity = dao.findById(entity.getDefinitionId());
     assertFalse(entity.getEnabled());
+  }
+
+  /**
+   * Test scenario when service were removed and not mapped alerts need to be disabled
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testAlertDefinitionMergingRemoveScenario() throws Exception {
+    final String repoVersion = "2.0.6-1234";
+    final String stackVersion = "2.0.6";
+
+    Injector injector = Guice.createInjector(Modules.override(
+      new InMemoryDefaultTestModule()).with(new MockModule()));
+
+    EventBusSynchronizer.synchronizeAmbariEventPublisher(injector);
+
+    injector.getInstance(GuiceJpaInitializer.class);
+    injector.getInstance(EntityManager.class);
+
+    OrmTestHelper ormHelper = injector.getInstance(OrmTestHelper.class);
+    long clusterId = ormHelper.createCluster("cluster" + System.currentTimeMillis());
+
+    Class<?> c = metaInfo.getClass().getSuperclass();
+
+    Field f = c.getDeclaredField("alertDefinitionDao");
+    f.setAccessible(true);
+    f.set(metaInfo, injector.getInstance(AlertDefinitionDAO.class));
+
+    f = c.getDeclaredField("ambariServiceAlertDefinitions");
+    f.setAccessible(true);
+    f.set(metaInfo, injector.getInstance(AmbariServiceAlertDefinitions.class));
+
+    Clusters clusters = injector.getInstance(Clusters.class);
+    Cluster cluster = clusters.getClusterById(clusterId);
+    cluster.setDesiredStackVersion(
+      new StackId(STACK_NAME_HDP, stackVersion));
+
+    RepositoryVersionEntity repositoryVersion = ormHelper.getOrCreateRepositoryVersion(
+      cluster.getCurrentStackVersion(), repoVersion);
+
+    cluster.addService("HDFS", repositoryVersion);
+
+    metaInfo.reconcileAlertDefinitions(clusters, false);
+
+    AlertDefinitionDAO dao = injector.getInstance(AlertDefinitionDAO.class);
+    List<AlertDefinitionEntity> definitions = dao.findAll(clusterId);
+    assertEquals(13, definitions.size());
+
+    cluster.deleteService("HDFS", new DeleteHostComponentStatusMetaData());
+    metaInfo.reconcileAlertDefinitions(clusters, false);
+    List<AlertDefinitionEntity> updatedDefinitions = dao.findAll(clusterId);
+    assertEquals(7, updatedDefinitions.size());
   }
 
   @Test
@@ -1962,8 +1873,29 @@ public class AmbariMetaInfoTest {
   }
 
   @Test
+  public void testReadKerberosDescriptorFromFile() throws AmbariException {
+    String path = metaInfo.getCommonKerberosDescriptorFileLocation();
+    KerberosDescriptor descriptor = metaInfo.readKerberosDescriptorFromFile(path);
+
+    Assert.assertNotNull(descriptor);
+    Assert.assertNotNull(descriptor.getProperties());
+    Assert.assertEquals(3, descriptor.getProperties().size());
+
+    Assert.assertNotNull(descriptor.getIdentities());
+    Assert.assertEquals(1, descriptor.getIdentities().size());
+    Assert.assertEquals("spnego", descriptor.getIdentities().get(0).getName());
+
+    Assert.assertNotNull(descriptor.getConfigurations());
+    Assert.assertEquals(1, descriptor.getConfigurations().size());
+    Assert.assertNotNull(descriptor.getConfigurations().get("core-site"));
+    Assert.assertNotNull(descriptor.getConfiguration("core-site"));
+
+    Assert.assertNull(descriptor.getServices());
+  }
+
+  @Test
   public void testGetKerberosDescriptor() throws AmbariException {
-    KerberosDescriptor descriptor = metaInfo.getKerberosDescriptor(STACK_NAME_HDP, "2.0.8");
+    KerberosDescriptor descriptor = metaInfo.getKerberosDescriptor(STACK_NAME_HDP, "2.0.8", false);
 
     Assert.assertNotNull(descriptor);
     Assert.assertNotNull(descriptor.getProperties());
@@ -1982,32 +1914,122 @@ public class AmbariMetaInfoTest {
     Assert.assertEquals(1, descriptor.getServices().size());
     Assert.assertNotNull(descriptor.getServices().get("HDFS"));
     Assert.assertNotNull(descriptor.getService("HDFS"));
+    Assert.assertFalse(descriptor.getService("HDFS").shouldPreconfigure());
   }
 
+  @Test
+  public void testGetKerberosDescriptorWithPreconfigure() throws AmbariException {
+    KerberosDescriptor descriptor = metaInfo.getKerberosDescriptor(STACK_NAME_HDP, "2.0.8", true);
 
-  private TestAmbariMetaInfo setupTempAmbariMetaInfo(String buildDir) throws Exception {
-    File stackRootTmp = new File(buildDir + "/ambari-metaInfo");
-    File stackRoot = new File("src/test/resources/stacks");
+    Assert.assertNotNull(descriptor);
+    Assert.assertNotNull(descriptor.getProperties());
+    Assert.assertEquals(3, descriptor.getProperties().size());
+
+    Assert.assertNotNull(descriptor.getIdentities());
+    Assert.assertEquals(1, descriptor.getIdentities().size());
+    Assert.assertEquals("spnego", descriptor.getIdentities().get(0).getName());
+
+    Assert.assertNotNull(descriptor.getConfigurations());
+    Assert.assertEquals(1, descriptor.getConfigurations().size());
+    Assert.assertNotNull(descriptor.getConfigurations().get("core-site"));
+    Assert.assertNotNull(descriptor.getConfiguration("core-site"));
+
+    Assert.assertNotNull(descriptor.getServices());
+    Assert.assertEquals(2, descriptor.getServices().size());
+    Assert.assertNotNull(descriptor.getServices().get("HDFS"));
+    Assert.assertNotNull(descriptor.getService("HDFS"));
+    Assert.assertTrue(descriptor.getService("HDFS").shouldPreconfigure());
+    Assert.assertNotNull(descriptor.getServices().get("HDFS"));
+    Assert.assertNotNull(descriptor.getService("HDFS"));
+    Assert.assertTrue(descriptor.getService("HDFS").shouldPreconfigure());
+    Assert.assertNotNull(descriptor.getServices().get("NEW_SERVICE"));
+    Assert.assertNotNull(descriptor.getService("NEW_SERVICE"));
+    Assert.assertTrue(descriptor.getService("NEW_SERVICE").shouldPreconfigure());
+  }
+
+  @Test
+  public void testGetCommonWidgetsFile() throws AmbariException {
+    File widgetsFile = metaInfo.getCommonWidgetsDescriptorFile();
+
+    Assert.assertNotNull(widgetsFile);
+    Assert.assertEquals("src/test/resources/widgets.json", widgetsFile.getPath());
+  }
+
+  @Test
+  public void testGetVersionDefinitionsForDisabledStack() throws AmbariException {
+    Map<String, VersionDefinitionXml> versionDefinitions = metaInfo.getVersionDefinitions();
+    Assert.assertNotNull(versionDefinitions);
+    // Check presence
+    Map.Entry<String, VersionDefinitionXml> vdfEntry = null;
+    for (Map.Entry<String, VersionDefinitionXml> entry : versionDefinitions.entrySet()) {
+      if (entry.getKey().equals("HDP-2.2.1")) {
+        vdfEntry = entry;
+      }
+    }
+    Assert.assertNotNull("Candidate stack and vdf for test case.", vdfEntry);
+    StackInfo stackInfo = metaInfo.getStack("HDP", "2.2.1");
+    // Strange that this is not immutable but works for this test !
+    stackInfo.setActive(false);
+
+    // Hate to use reflection hence changed contract to be package private
+    metaInfo.versionDefinitions = null;
+
+    versionDefinitions = metaInfo.getVersionDefinitions();
+    vdfEntry = null;
+    for (Map.Entry<String, VersionDefinitionXml> entry : versionDefinitions.entrySet()) {
+      if (entry.getKey().equals("HDP-2.2.1")) {
+        vdfEntry = entry;
+      }
+    }
+    Assert.assertNull("Disabled stack should not be returned by the API", vdfEntry);
+  }
+
+  private File getStackRootTmp(String buildDir) {
+    return new File(buildDir + "/ambari-metaInfo");
+  }
+
+  private File getVersion() {
     File version = new File("src/test/resources/version");
 
     if (System.getProperty("os.name").contains("Windows")) {
-      stackRoot = new File(ClassLoader.getSystemClassLoader().getResource("stacks").getPath());
       version = new File(new File(ClassLoader.getSystemClassLoader().getResource("").getPath()).getParent(), "version");
+    }
+
+    return version;
+  }
+
+  private void setupTempAmbariMetaInfoDirs(String buildDir) throws Exception {
+    File stackRootTmp = getStackRootTmp(buildDir);
+    File stackRoot = new File("src/test/resources/stacks");
+
+    if (System.getProperty("os.name").contains("Windows")) {
+      stackRoot = new File(ClassLoader.getSystemClassLoader().getResource("stacks").getPath());
     }
 
     stackRootTmp.mkdir();
     FileUtils.copyDirectory(stackRoot, stackRootTmp);
-    TestAmbariMetaInfo ambariMetaInfo = createAmbariMetaInfo(stackRootTmp, version);
+  }
 
+  private TestAmbariMetaInfo setupTempAmbariMetaInfo(String buildDir) throws Exception {
+    setupTempAmbariMetaInfoDirs(buildDir);
+    TestAmbariMetaInfo ambariMetaInfo = setupTempAmbariMetaInfoExistingDirs(buildDir);
+    return ambariMetaInfo;
+  }
+
+  private TestAmbariMetaInfo setupTempAmbariMetaInfoExistingDirs(String buildDir) throws Exception {
+    File version = getVersion();
+    File stackRootTmp = getStackRootTmp(buildDir);
+    TestAmbariMetaInfo ambariMetaInfo = createAmbariMetaInfo(stackRootTmp, version, new File(""));
     return ambariMetaInfo;
   }
 
   private static TestAmbariMetaInfo createAmbariMetaInfo(File stackRoot,
-    File versionFile) throws Exception {
+    File versionFile, File resourcesRoot) throws Exception {
 
     Properties properties = new Properties();
-    properties.setProperty(Configuration.METADATA_DIR_PATH, stackRoot.getPath());
-    properties.setProperty(Configuration.SERVER_VERSION_FILE, versionFile.getPath());
+    properties.setProperty(Configuration.METADATA_DIR_PATH.getKey(), stackRoot.getPath());
+    properties.setProperty(Configuration.SERVER_VERSION_FILE.getKey(), versionFile.getPath());
+    properties.setProperty(Configuration.RESOURCES_DIR.getKey(), resourcesRoot.getPath());
     Configuration configuration = new Configuration(properties);
 
     TestAmbariMetaInfo metaInfo = new TestAmbariMetaInfo(configuration);
@@ -2057,11 +2079,12 @@ public class AmbariMetaInfoTest {
     AlertDefinitionDAO alertDefinitionDAO;
     AlertDefinitionFactory alertDefinitionFactory;
     OsFamily osFamily;
+    Injector injector;
 
     public TestAmbariMetaInfo(Configuration configuration) throws Exception {
       super(configuration);
 
-      Injector injector = Guice.createInjector(Modules.override(
+      injector = Guice.createInjector(Modules.override(
           new InMemoryDefaultTestModule()).with(new MockModule()));
 
       injector.getInstance(GuiceJpaInitializer.class);
@@ -2116,9 +2139,11 @@ public class AmbariMetaInfoTest {
       Configuration config = createNiceMock(Configuration.class);
       if (System.getProperty("os.name").contains("Windows")) {
         expect(config.getSharedResourcesDirPath()).andReturn(ClassLoader.getSystemClassLoader().getResource("").getPath()).anyTimes();
+        expect(config.getResourceDirPath()).andReturn(ClassLoader.getSystemClassLoader().getResource("").getPath()).anyTimes();
       }
       else {
         expect(config.getSharedResourcesDirPath()).andReturn("./src/test/resources").anyTimes();
+        expect(config.getResourceDirPath()).andReturn("./src/test/resources").anyTimes();
       }
 
       replay(config);

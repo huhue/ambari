@@ -17,49 +17,81 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
-from resource_management import *
 from ambari_commons.constants import AMBARI_SUDO_BINARY
 from resource_management.libraries.functions import format
 from resource_management.libraries.functions import conf_select
 from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions import StackFeature
+from resource_management.libraries.functions import upgrade_summary
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions.default import default
 from resource_management.libraries.functions import get_kinit_path
 from resource_management.libraries.functions import get_port_from_url
 from resource_management.libraries.functions.get_not_managed_resources import get_not_managed_resources
+from resource_management.libraries.functions.setup_atlas_hook import has_atlas_in_cluster
 from resource_management.libraries.script.script import Script
-
-from resource_management.libraries.functions.get_lzo_packages import get_lzo_packages
+from resource_management.libraries.functions.lzo_utils import should_install_lzo
 from resource_management.libraries.functions.expect import expect
+from resource_management.libraries.resources.hdfs_resource import HdfsResource
+from resource_management.libraries.functions.get_architecture import get_architecture
+from resource_management.libraries.functions.stack_features import get_stack_feature_version
+from resource_management.libraries.functions.stack_tools import get_stack_name
+from resource_management.libraries.functions.version import get_major_version
 
+
+from resource_management.core.utils import PasswordString
+from ambari_commons.credential_store_helper import get_password_from_credential_store
 from urlparse import urlparse
 
 import status_params
 import os
+import re
 
 # server configurations
 config = Script.get_config()
 tmp_dir = Script.get_tmp_dir()
 sudo = AMBARI_SUDO_BINARY
 
-hostname = config["hostname"]
+architecture = get_architecture()
+
+
+# Needed since this writes out the Atlas Hive Hook config file.
+cluster_name = config['clusterName']
+serviceName = config['serviceName']
+role = config['role']
+
+hostname = config['agentLevelParams']['hostname']
 
 # New Cluster Stack Version that is defined during the RESTART of a Rolling Upgrade
 version = default("/commandParams/version", None)
 stack_name = status_params.stack_name
 stack_name_uppercase = stack_name.upper()
 upgrade_direction = default("/commandParams/upgrade_direction", None)
-agent_stack_retry_on_unavailability = config['hostLevelParams']['agent_stack_retry_on_unavailability']
-agent_stack_retry_count = expect("/hostLevelParams/agent_stack_retry_count", int)
+agent_stack_retry_on_unavailability = config['ambariLevelParams']['agent_stack_retry_on_unavailability']
+agent_stack_retry_count = expect("/ambariLevelParams/agent_stack_retry_count", int)
 
 stack_root = status_params.stack_root
+
+# The source stack will be present during a cross-stack upgrade.
+# E.g., BigInsights-4.2.5 or HDP-2.6
+source_stack = default("/commandParams/source_stack", None)
+if source_stack is None:
+  source_stack = upgrade_summary.get_source_stack("OOZIE")
+
+# This variable name is important, do not change
+source_stack_name = get_stack_name(source_stack)
+
 stack_version_unformatted =  status_params.stack_version_unformatted
 stack_version_formatted =  status_params.stack_version_formatted
+major_stack_version = get_major_version(stack_version_formatted)
+version_for_stack_feature_checks = get_stack_feature_version(config)
 
 hadoop_conf_dir = conf_select.get_hadoop_conf_dir()
 hadoop_bin_dir = stack_select.get_hadoop_dir("bin")
 hadoop_lib_home = stack_select.get_hadoop_dir("lib")
+
+#spark_conf
+spark_conf_dir = format("{stack_root}/current/spark-client/conf")
 
 #hadoop params
 if stack_version_formatted and check_stack_feature(StackFeature.ROLLING_UPGRADE,stack_version_formatted):
@@ -112,20 +144,24 @@ execute_path = oozie_bin_dir + os.pathsep + hadoop_bin_dir
 oozie_user = config['configurations']['oozie-env']['oozie_user']
 smokeuser = config['configurations']['cluster-env']['smokeuser']
 smokeuser_principal = config['configurations']['cluster-env']['smokeuser_principal_name']
+smoke_hdfs_user_mode = 0770
+service_check_queue_name = default('/configurations/yarn-env/service_check.queue.name', 'default')
 
 # This config actually contains {oozie_user}
 oozie_admin_users = format(config['configurations']['oozie-env']['oozie_admin_users'])
 
 user_group = config['configurations']['cluster-env']['user_group']
-jdk_location = config['hostLevelParams']['jdk_location']
+jdk_location = config['ambariLevelParams']['jdk_location']
 check_db_connection_jar_name = "DBConnectionVerification.jar"
 check_db_connection_jar = format("/usr/lib/ambari-agent/{check_db_connection_jar_name}")
-oozie_tmp_dir = config['configurations']['oozie-env']['oozie_tmp_dir']
+oozie_tmp_dir = default("configurations/oozie-env/oozie_tmp_dir", "/var/tmp/oozie")
 oozie_hdfs_user_dir = format("/user/{oozie_user}")
 oozie_pid_dir = status_params.oozie_pid_dir
 pid_file = status_params.pid_file
 hadoop_jar_location = "/usr/lib/hadoop/"
 java_share_dir = "/usr/share/java"
+java64_home = config['ambariLevelParams']['java_home']
+java_exec = format("{java64_home}/bin/java")
 ext_js_file = "ext-2.2.zip"
 ext_js_path = format("/usr/share/{stack_name_uppercase}-oozie/{ext_js_file}")
 security_enabled = config['configurations']['cluster-env']['security_enabled']
@@ -134,8 +170,8 @@ oozie_permsize = config['configurations']['oozie-env']['oozie_permsize']
 
 limits_conf_dir = "/etc/security/limits.d"
 
-oozie_user_nofile_limit = config['configurations']['oozie-env']['oozie_user_nofile_limit']
-oozie_user_nproc_limit = config['configurations']['oozie-env']['oozie_user_nproc_limit']
+oozie_user_nofile_limit = default('/configurations/oozie-env/oozie_user_nofile_limit', 32000)
+oozie_user_nproc_limit = default('/configurations/oozie-env/oozie_user_nproc_limit', 16000)
 
 kinit_path_local = get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))
 oozie_service_keytab = config['configurations']['oozie-site']['oozie.service.HadoopAccessorService.keytab.file']
@@ -144,14 +180,37 @@ http_principal = config['configurations']['oozie-site']['oozie.authentication.ke
 oozie_site = config['configurations']['oozie-site']
 # Need this for yarn.nodemanager.recovery.dir in yarn-site
 yarn_log_dir_prefix = config['configurations']['yarn-env']['yarn_log_dir_prefix']
+yarn_resourcemanager_address = config['configurations']['yarn-site']['yarn.resourcemanager.address']
+zk_namespace = default('/configurations/oozie-site/oozie.zookeeper.namespace', 'oozie')
+zk_connection_string = default('/configurations/oozie-site/oozie.zookeeper.connection.string', None)
+jaas_file = os.path.join(conf_dir, 'zkmigrator_jaas.conf')
+stack_supports_zk_security = check_stack_feature(StackFeature.SECURE_ZOOKEEPER, version_for_stack_feature_checks)
 
-if security_enabled and stack_version_formatted and check_stack_feature(StackFeature.OOZIE_HOST_KERBEROS, stack_version_formatted):
-  #older versions of oozie have problems when using _HOST in principal
+credential_store_enabled = False
+if 'credentialStoreEnabled' in config:
+  credential_store_enabled = config['credentialStoreEnabled']
+
+if security_enabled:
   oozie_site = dict(config['configurations']['oozie-site'])
-  oozie_site['oozie.service.HadoopAccessorService.kerberos.principal'] = \
-    oozie_principal.replace('_HOST', hostname)
-  oozie_site['oozie.authentication.kerberos.principal'] = \
-    http_principal.replace('_HOST', hostname)
+  oozie_principal_with_host = oozie_principal.replace('_HOST', hostname)
+
+  # If a user-supplied oozie.ha.authentication.kerberos.principal property exists in oozie-site,
+  # use it to replace the existing oozie.authentication.kerberos.principal value. This is to ensure
+  # that any special principal name needed for HA is used rather than the Ambari-generated value
+  if "oozie.ha.authentication.kerberos.principal" in oozie_site:
+    oozie_site['oozie.authentication.kerberos.principal'] = oozie_site['oozie.ha.authentication.kerberos.principal']
+    http_principal = oozie_site['oozie.authentication.kerberos.principal']
+
+  # If a user-supplied oozie.ha.authentication.kerberos.keytab property exists in oozie-site,
+  # use it to replace the existing oozie.authentication.kerberos.keytab value. This is to ensure
+  # that any special keytab file needed for HA is used rather than the Ambari-generated value
+  if "oozie.ha.authentication.kerberos.keytab" in oozie_site:
+    oozie_site['oozie.authentication.kerberos.keytab'] = oozie_site['oozie.ha.authentication.kerberos.keytab']
+
+  if stack_version_formatted and check_stack_feature(StackFeature.OOZIE_HOST_KERBEROS, stack_version_formatted):
+    #older versions of oozie have problems when using _HOST in principal
+    oozie_site['oozie.service.HadoopAccessorService.kerberos.principal'] = oozie_principal_with_host
+    oozie_site['oozie.authentication.kerberos.principal'] = http_principal.replace('_HOST', hostname)
 
 smokeuser_keytab = config['configurations']['cluster-env']['smokeuser_keytab']
 oozie_keytab = default("/configurations/oozie-env/oozie_keytab", oozie_service_keytab)
@@ -160,7 +219,19 @@ oozie_env_sh_template = config['configurations']['oozie-env']['content']
 oracle_driver_jar_name = "ojdbc6.jar"
 
 oozie_metastore_user_name = config['configurations']['oozie-site']['oozie.service.JPAService.jdbc.username']
-oozie_metastore_user_passwd = default("/configurations/oozie-site/oozie.service.JPAService.jdbc.password","")
+
+if credential_store_enabled:
+  if 'hadoop.security.credential.provider.path' in config['configurations']['oozie-site']:
+    cs_lib_path = config['configurations']['oozie-site']['credentialStoreClassPath']
+    java_home = config['ambariLevelParams']['java_home']
+    alias = 'oozie.service.JPAService.jdbc.password'
+    provider_path = config['configurations']['oozie-site']['hadoop.security.credential.provider.path']
+    oozie_metastore_user_passwd = PasswordString(get_password_from_credential_store(alias, provider_path, cs_lib_path, java_home, jdk_location))
+  else:
+    raise Exception("hadoop.security.credential.provider.path property should be set")
+else:
+  oozie_metastore_user_passwd = default("/configurations/oozie-site/oozie.service.JPAService.jdbc.password","")
+
 oozie_jdbc_connection_url = default("/configurations/oozie-site/oozie.service.JPAService.jdbc.url", "")
 oozie_log_dir = config['configurations']['oozie-env']['oozie_log_dir']
 oozie_data_dir = config['configurations']['oozie-env']['oozie_data_dir']
@@ -183,6 +254,8 @@ if https_port is None and 'oozie.https.port' in config['configurations']['oozie-
 
 oozie_base_url = config['configurations']['oozie-site']['oozie.base.url']
 
+service_check_job_name = default("/configurations/oozie-env/service_check_job_name", "no-op")
+
 # construct proper url for https
 if https_port is not None:
   parsed_url = urlparse(oozie_base_url)
@@ -203,32 +276,47 @@ if stack_version_formatted and check_stack_feature(StackFeature.OOZIE_SETUP_SHAR
 else: 
   put_shared_lib_to_hdfs_cmd = format("hadoop --config {hadoop_conf_dir} dfs -put {oozie_shared_lib} {oozie_hdfs_user_dir}")
 
+default_connectors_map = { "com.microsoft.sqlserver.jdbc.SQLServerDriver":"sqljdbc4.jar",
+                           "com.mysql.jdbc.Driver":"mysql-connector-java.jar",
+                           "org.postgresql.Driver":"postgresql-jdbc.jar",
+                           "oracle.jdbc.driver.OracleDriver":"ojdbc.jar",
+                           "sap.jdbc4.sqlanywhere.IDriver":"sajdbc4.jar"}
+
 jdbc_driver_name = default("/configurations/oozie-site/oozie.service.JPAService.jdbc.driver", "")
 # NOT SURE THAT IT'S A GOOD IDEA TO USE PATH TO CLASS IN DRIVER, MAYBE IT WILL BE BETTER TO USE DB TYPE.
 # BECAUSE PATH TO CLASSES COULD BE CHANGED
 sqla_db_used = False
+previous_jdbc_jar_name = None
 if jdbc_driver_name == "com.microsoft.sqlserver.jdbc.SQLServerDriver":
-  jdbc_driver_jar = default("/hostLevelParams/custom_mssql_jdbc_name", None)
+  jdbc_driver_jar = default("/ambariLevelParams/custom_mssql_jdbc_name", None)
+  previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_mssql_jdbc_name", None)
 elif jdbc_driver_name == "com.mysql.jdbc.Driver":
-  jdbc_driver_jar = default("/hostLevelParams/custom_mysql_jdbc_name", None)
+  jdbc_driver_jar = default("/ambariLevelParams/custom_mysql_jdbc_name", None)
+  previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_mysql_jdbc_name", None)
 elif jdbc_driver_name == "org.postgresql.Driver":
   jdbc_driver_jar = format("{oozie_home}/libserver/postgresql-9.0-801.jdbc4.jar")  #oozie using it's own postgres jdbc
+  previous_jdbc_jar_name = None
 elif jdbc_driver_name == "oracle.jdbc.driver.OracleDriver":
-  jdbc_driver_jar = default("/hostLevelParams/custom_oracle_jdbc_name", None)
+  jdbc_driver_jar = default("/ambariLevelParams/custom_oracle_jdbc_name", None)
+  previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_oracle_jdbc_name", None)
 elif jdbc_driver_name == "sap.jdbc4.sqlanywhere.IDriver":
-  jdbc_driver_jar = default("/hostLevelParams/custom_sqlanywhere_jdbc_name", None)
+  jdbc_driver_jar = default("/ambariLevelParams/custom_sqlanywhere_jdbc_name", None)
+  previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_sqlanywhere_jdbc_name", None)
   sqla_db_used = True
 else:
   jdbc_driver_jar = ""
   jdbc_symlink_name = ""
+  previous_jdbc_jar_name = None
 
-default("/hostLevelParams/custom_sqlanywhere_jdbc_name", None)
+default("/ambariLevelParams/custom_sqlanywhere_jdbc_name", None)
 driver_curl_source = format("{jdk_location}/{jdbc_driver_jar}")
 downloaded_custom_connector = format("{tmp_dir}/{jdbc_driver_jar}")
 if jdbc_driver_name == "org.postgresql.Driver":
   target = jdbc_driver_jar
+  previous_jdbc_jar = None
 else:
   target = format("{oozie_libext_dir}/{jdbc_driver_jar}")
+  previous_jdbc_jar = format("{oozie_libext_dir}/{previous_jdbc_jar_name}")
 
 #constants for type2 jdbc
 jdbc_libs_dir = format("{oozie_libext_dir}/native/lib64")
@@ -237,12 +325,17 @@ lib_dir_available = os.path.exists(jdbc_libs_dir)
 if sqla_db_used:
   jars_path_in_archive = format("{tmp_dir}/sqla-client-jdbc/java/*")
   libs_path_in_archive = format("{tmp_dir}/sqla-client-jdbc/native/lib64/*")
-  downloaded_custom_connector = format("{tmp_dir}/sqla-client-jdbc.tar.gz")
+  downloaded_custom_connector = format("{tmp_dir}/{jdbc_driver_jar}")
 
 hdfs_share_dir = format("{oozie_hdfs_user_dir}/share")
-ambari_server_hostname = config['clusterHostInfo']['ambari_server_host'][0]
+ambari_server_hostname = config['ambariLevelParams']['ambari_server_host']
 falcon_host = default("/clusterHostInfo/falcon_server_hosts", [])
 has_falcon_host = not len(falcon_host)  == 0
+
+oozie_server_hostnames = default("/clusterHostInfo/oozie_server", [])
+oozie_server_hostnames = sorted(oozie_server_hostnames)
+
+oozie_log_maxhistory = default('configurations/oozie-log4j/oozie_log_maxhistory',720)
 
 #oozie-log4j.properties
 if (('oozie-log4j' in config['configurations']) and ('content' in config['configurations']['oozie-log4j'])):
@@ -259,6 +352,17 @@ hdfs_site = config['configurations']['hdfs-site']
 default_fs = config['configurations']['core-site']['fs.defaultFS']
 
 dfs_type = default("/commandParams/dfs_type", "")
+
+
+########################################################
+############# Atlas related params #####################
+########################################################
+#region Atlas Hooks needed by Hive on Oozie
+hive_atlas_application_properties = default('/configurations/hive-atlas-application.properties', {})
+
+if has_atlas_in_cluster():
+  atlas_hook_filename = default('/configurations/atlas-env/metadata_conf_file', 'atlas-application.properties')
+#endregion
 
 import functools
 #create partial functions with common arguments for every HdfsResource call
@@ -281,8 +385,4 @@ HdfsResource = functools.partial(
 
 is_webhdfs_enabled = config['configurations']['hdfs-site']['dfs.webhdfs.enabled']
 
-# The logic for LZO also exists in HDFS' params.py
-io_compression_codecs = default("/configurations/core-site/io.compression.codecs", None)
-lzo_enabled = io_compression_codecs is not None and "com.hadoop.compression.lzo" in io_compression_codecs.lower()
-
-all_lzo_packages = get_lzo_packages(stack_version_unformatted)
+lzo_enabled = should_install_lzo()

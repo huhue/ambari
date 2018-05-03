@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,12 +18,12 @@
 
 package org.apache.ambari.server.controller;
 
+import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.JDK_LOCATION;
+
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-
-import static org.apache.ambari.server.agent.ExecutionCommand.KeyNames.JDK_LOCATION;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.ObjectNotFoundException;
@@ -62,9 +62,9 @@ public class RootServiceResponseFactory extends
       serviceName = request.getServiceName();
 
     if (serviceName != null) {
-      Services service;
+      RootService service;
       try {
-        service = Services.valueOf(serviceName);
+        service = RootService.valueOf(serviceName);
       }
       catch (IllegalArgumentException ex) {
         throw new ObjectNotFoundException("Root service name: " + serviceName);
@@ -72,9 +72,9 @@ public class RootServiceResponseFactory extends
       
       response = Collections.singleton(new RootServiceResponse(service.toString()));
     } else {
-      response = new HashSet<RootServiceResponse>();
+      response = new HashSet<>();
       
-      for (Services service: Services.values())    
+      for (RootService service: RootService.values())
         response.add(new RootServiceResponse(service.toString()));
     }    
     return response;
@@ -83,14 +83,14 @@ public class RootServiceResponseFactory extends
   @Override
   public Set<RootServiceComponentResponse> getRootServiceComponents(
       RootServiceComponentRequest request) throws ObjectNotFoundException {
-    Set<RootServiceComponentResponse> response = new HashSet<RootServiceComponentResponse>();
-    
+    Set<RootServiceComponentResponse> response = new HashSet<>();
+
     String serviceName = request.getServiceName();
     String componentName = request.getComponentName();
-    Services service;
+    RootService service;
 
     try {
-      service = Services.valueOf(serviceName);
+      service = RootService.valueOf(serviceName);
     }
     catch (IllegalArgumentException ex) {
       throw new ObjectNotFoundException("Root service name: " + serviceName);
@@ -100,22 +100,22 @@ public class RootServiceResponseFactory extends
     }
     
     if (componentName != null) {
-      Components component;
+      RootComponent component;
       try {
-        component = Components.valueOf(componentName);
+        component = RootComponent.valueOf(componentName);
         if (!ArrayUtils.contains(service.getComponents(), component))
           throw new ObjectNotFoundException("No component name: " + componentName + "in service: " + serviceName);
       }
       catch (IllegalArgumentException ex) {
         throw new ObjectNotFoundException("Component name: " + componentName);
       }
-      response = Collections.singleton(new RootServiceComponentResponse(component.toString(),
+      response = Collections.singleton(new RootServiceComponentResponse(serviceName, component.toString(),
                                        getComponentVersion(componentName, null),
                                        getComponentProperties(componentName)));
     } else {
     
-      for (Components component: service.getComponents())    
-        response.add(new RootServiceComponentResponse(component.toString(),
+      for (RootComponent component: service.getComponents())
+        response.add(new RootServiceComponentResponse(serviceName, component.toString(),
                      getComponentVersion(component.name(), null),
                      getComponentProperties(component.name())));
       }
@@ -123,7 +123,7 @@ public class RootServiceResponseFactory extends
   }
 
   private String getComponentVersion(String componentName, HostResponse host) {
-    Components component = Components.valueOf(componentName);
+    RootComponent component = RootComponent.valueOf(componentName);
     String componentVersion;
       
     switch (component) {
@@ -149,16 +149,21 @@ public class RootServiceResponseFactory extends
   private Map<String, String> getComponentProperties(String componentName){
     
     Map<String, String> response;
-    Components component = null;
+    Set<String> propertiesToHideInResponse;
+    RootComponent component = null;
 
     if (componentName != null) {
-      component = Components.valueOf(componentName);
+      component = RootComponent.valueOf(componentName);
       
       switch (component) {
       case AMBARI_SERVER:
         response = configs.getAmbariProperties();
         response.put(JDK_LOCATION, managementController.getJdkResourceUrl());
         response.put("java.version", System.getProperty("java.specification.version"));
+        propertiesToHideInResponse = configs.getPropertiesToBlackList();
+        for(String key : propertiesToHideInResponse) {
+      	  response.remove(key);
+      	}
         break;
 
       default:
@@ -171,38 +176,21 @@ public class RootServiceResponseFactory extends
     return response;
   }
 
-  
-  public enum Services {
-    AMBARI(Components.values());
-    private Components[] components;
-
-    Services(Components[] components) {
-      this.components = components;
-    }
-
-    public Components[] getComponents() {
-      return components;
-    }
-  }
-  
-  public enum Components {
-    AMBARI_SERVER, AMBARI_AGENT
-  }
-
   @Override
   public Set<RootServiceHostComponentResponse> getRootServiceHostComponent(RootServiceHostComponentRequest request, Set<HostResponse> hosts) throws AmbariException {
-    Set<RootServiceHostComponentResponse> response = new HashSet<RootServiceHostComponentResponse>();
+    Set<RootServiceHostComponentResponse> response = new HashSet<>();
 
-    Set<RootServiceComponentResponse> rootServiceComponents = 
-        getRootServiceComponents(new RootServiceComponentRequest(request.getServiceName(), request.getComponentName()));
+    String serviceName = request.getServiceName();
+    Set<RootServiceComponentResponse> rootServiceComponents =
+        getRootServiceComponents(new RootServiceComponentRequest(serviceName, request.getComponentName()));
 
     //Cartesian product with hosts and components
     for (RootServiceComponentResponse component : rootServiceComponents) {
       
-      Set<HostResponse> filteredHosts = new HashSet<HostResponse>(hosts);      
+      Set<HostResponse> filteredHosts = new HashSet<>(hosts);
       
       //Make some filtering of hosts if need
-      if (component.getComponentName().equals(Components.AMBARI_SERVER.name()))
+      if (component.getComponentName().equals(RootComponent.AMBARI_SERVER.name())) {
         CollectionUtils.filter(filteredHosts, new Predicate() {
           @Override
           public boolean evaluate(Object arg0) {
@@ -210,15 +198,17 @@ public class RootServiceResponseFactory extends
             return hostResponse.getHostname().equals(StageUtils.getHostName());
           }
         });
+      }
       
       for (HostResponse host : filteredHosts) {
-        
-        if (component.getComponentName().equals(Components.AMBARI_SERVER.name()))
-          response.add(new RootServiceHostComponentResponse(host.getHostname(), component.getComponentName(),
-            RUNNING_STATE, getComponentVersion(component.getComponentName(), host), component.getProperties()));
-        else
-          response.add(new RootServiceHostComponentResponse(host.getHostname(), component.getComponentName(),
-            host.getHostState(), getComponentVersion(component.getComponentName(), host), component.getProperties()));
+        String state;
+        if (component.getComponentName().equals(RootComponent.AMBARI_SERVER.name())) {
+          state = RUNNING_STATE;
+        } else {
+          state = host.getHostState().toString();
+        }
+        String componentVersion = getComponentVersion(component.getComponentName(), host);
+        response.add(new RootServiceHostComponentResponse(serviceName, host.getHostname(), component.getComponentName(), state, componentVersion, component.getProperties()));
       }
     }
     

@@ -94,28 +94,6 @@ describe('App.MainDashboardServiceYARNView', function () {
     });
   });
 
-  describe("#memory", function() {
-
-    beforeEach(function() {
-      sinon.stub(numberUtils, 'bytesToSize', function(arg1) {
-        return arg1;
-      })
-    });
-    afterEach(function() {
-      numberUtils.bytesToSize.restore();
-    });
-
-    it("should return formatted memory", function() {
-      view.set('service', Em.Object.create({
-        allocatedMemory: 1,
-        reservedMemory: 2,
-        availableMemory: 3
-      }));
-      view.propertyDidChange('memory');
-      expect(view.get('memory')).to.be.equal(Em.I18n.t('dashboard.services.yarn.memory.msg').format(1,2,3));
-    });
-  });
-
   describe("#didInsertElement()", function() {
 
     beforeEach(function() {
@@ -127,7 +105,7 @@ describe('App.MainDashboardServiceYARNView', function () {
 
     it("App.tooltip should be called", function() {
       view.didInsertElement();
-      expect(App.tooltip.calledOnce).to.be.true;
+      expect(App.tooltip.calledTwice).to.be.true;
     });
   });
 

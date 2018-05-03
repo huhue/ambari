@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,10 +17,13 @@
  */
 package org.apache.ambari.server.testing;
 
-import com.google.inject.Guice;
-import com.google.inject.Inject;
-import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
+import java.util.Collection;
+import java.util.List;
+
+import javax.persistence.EntityManager;
+import javax.persistence.EntityTransaction;
+
+import org.apache.ambari.server.controller.internal.DeleteHostComponentStatusMetaData;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
 import org.apache.ambari.server.orm.OrmTestHelper;
@@ -46,14 +49,14 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.persistence.EntityManager;
-import javax.persistence.EntityTransaction;
-import java.util.Collection;
-import java.util.List;
+import com.google.inject.Guice;
+import com.google.inject.Inject;
+import com.google.inject.Injector;
+import com.google.inject.persist.PersistService;
 
 public class DBInconsistencyTests {
 
-  private static Logger LOG = LoggerFactory.getLogger(DBInconsistencyTests.class);
+  private static final Logger LOG = LoggerFactory.getLogger(DBInconsistencyTests.class);
 
   @Inject
   private Injector injector;
@@ -96,6 +99,8 @@ public class DBInconsistencyTests {
 
     helper.addHost(clusters, cluster, "h1");
 
+    helper.initializeClusterWithStack(cluster);
+
     helper.installHdfsService(cluster, serviceFactory,
       serviceComponentFactory, serviceComponentHostFactory, "h1");
 
@@ -106,7 +111,7 @@ public class DBInconsistencyTests {
     Collection<ServiceComponent> scList = cluster.getService("HDFS").getServiceComponents().values();
     Assert.assertNotNull(schList);
 
-    cluster.deleteService("HDFS");
+    cluster.deleteService("HDFS", new DeleteHostComponentStatusMetaData());
 
     List<HostComponentDesiredStateEntity> hostComponentDesiredStateEntities =
       hostComponentDesiredStateDAO.findAll();

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,8 +18,10 @@
 
 package org.apache.ambari.server.view;
 
-import com.google.inject.Guice;
-import com.google.inject.Injector;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.WeakHashMap;
+
 import org.apache.ambari.server.orm.entities.ViewEntity;
 import org.apache.ambari.server.orm.entities.ViewInstanceDataEntity;
 import org.apache.ambari.server.orm.entities.ViewInstanceEntity;
@@ -28,16 +30,17 @@ import org.apache.ambari.server.view.configuration.PersistenceConfig;
 import org.apache.ambari.server.view.persistence.DataStoreImpl;
 import org.apache.ambari.server.view.persistence.DataStoreModule;
 import org.apache.ambari.view.DataStore;
-import org.apache.ambari.view.migration.EntityConverter;
 import org.apache.ambari.view.PersistenceException;
+import org.apache.ambari.view.migration.EntityConverter;
 import org.apache.ambari.view.migration.ViewDataMigrationContext;
 import org.apache.ambari.view.migration.ViewDataMigrationException;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
 
-import java.util.HashMap;
-import java.util.Map;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
+import com.google.inject.persist.Transactional;
 
 /**
  * View data migration context implementation.
@@ -47,7 +50,7 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
   /**
    * Logger.
    */
-  private static final Log LOG = LogFactory.getLog(ViewDataMigrationContextImpl.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ViewDataMigrationContextImpl.class);
 
   /**
    * The data store of origin(source) view instance with source data.
@@ -81,6 +84,8 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
     this.currentInstanceDefinition = currentInstanceDefinition;
   }
 
+  private Map<ViewInstanceEntity, DataStoreModule> dataStoreModules = new WeakHashMap<>();
+
   /**
    * Instantiates the data store associated with the instance.
    *
@@ -88,8 +93,12 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
    * @return the data store object associated with view instance
    */
   protected DataStore getDataStore(ViewInstanceEntity instanceDefinition) {
-    Injector originInjector = Guice.createInjector(new DataStoreModule(instanceDefinition));
-    return originInjector.getInstance(DataStoreImpl.class);
+    if (!dataStoreModules.containsKey(instanceDefinition)) {
+      DataStoreModule module = new DataStoreModule(instanceDefinition,"ambari-view-migration");
+      dataStoreModules.put(instanceDefinition, module);
+    }
+    Injector injector = Guice.createInjector(dataStoreModules.get(instanceDefinition));
+    return injector.getInstance(DataStoreImpl.class);
   }
 
   @Override
@@ -119,6 +128,7 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
   }
 
   @Override
+  @Transactional
   public void putCurrentInstanceData(String user, String key, String value) {
     putInstanceData(currentInstanceDefinition, user, key, value);
   }
@@ -135,6 +145,7 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
   }
 
   @Override
+  @Transactional
   public void copyAllObjects(Class originEntityClass, Class currentEntityClass, EntityConverter entityConverter)
       throws ViewDataMigrationException {
     try{
@@ -187,12 +198,14 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
     PersistenceConfig persistence = viewDefinition.getConfiguration().getPersistence();
 
     HashMap<String, Class> classes = new HashMap<>();
-    for (EntityConfig c : persistence.getEntities()) {
-      try {
-        Class entity = viewDefinition.getClassLoader().loadClass(c.getClassName());
-        classes.put(c.getClassName(), entity);
-      } catch (ClassNotFoundException e) {
-        e.printStackTrace();
+    if (persistence != null) {
+      for (EntityConfig c : persistence.getEntities()) {
+        try {
+          Class entity = viewDefinition.getClassLoader().loadClass(c.getClassName());
+          classes.put(c.getClassName(), entity);
+        } catch (ClassNotFoundException e) {
+          e.printStackTrace();
+        }
       }
     }
     return classes;
@@ -209,6 +222,7 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
   }
 
   @Override
+  @Transactional
   public void putOriginInstanceData(String user, String key, String value) {
     putInstanceData(originInstanceDefinition, user, key, value);
   }
@@ -216,6 +230,15 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
   @Override
   public Map<String, Map<String, String>> getCurrentInstanceDataByUser() {
     return getInstanceDataByUser(currentInstanceDefinition);
+  }
+
+  public void closeMigration() {
+
+    for (DataStoreModule module : dataStoreModules.values()) {
+      module.close();
+    }
+
+    dataStoreModules.clear();
   }
 
   /**
@@ -227,15 +250,37 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
    * @param value               the value
    */
   private static void putInstanceData(ViewInstanceEntity instanceDefinition, String user, String name, String value) {
-    ViewInstanceDataEntity viewInstanceDataEntity = new ViewInstanceDataEntity();
-    viewInstanceDataEntity.setViewName(instanceDefinition.getViewName());
-    viewInstanceDataEntity.setViewInstanceName(instanceDefinition.getName());
-    viewInstanceDataEntity.setName(name);
-    viewInstanceDataEntity.setUser(user);
-    viewInstanceDataEntity.setValue(value);
-    viewInstanceDataEntity.setViewInstanceEntity(instanceDefinition);
+    ViewInstanceDataEntity oldInstanceDataEntity = getInstanceData(instanceDefinition, user, name);
+    if (oldInstanceDataEntity != null) {
+      instanceDefinition.getData().remove(oldInstanceDataEntity);
+    }
 
-    instanceDefinition.getData().add(viewInstanceDataEntity);
+    ViewInstanceDataEntity instanceDataEntity = new ViewInstanceDataEntity();
+    instanceDataEntity.setViewName(instanceDefinition.getViewName());
+    instanceDataEntity.setViewInstanceName(instanceDefinition.getName());
+    instanceDataEntity.setName(name);
+    instanceDataEntity.setUser(user);
+    instanceDataEntity.setValue(value);
+    instanceDataEntity.setViewInstanceEntity(instanceDefinition);
+
+    instanceDefinition.getData().add(instanceDataEntity);
+  }
+
+  /**
+   * Get the instance data entity for the given key and user.
+   *
+   * @param user owner of the data
+   * @param key the key
+   * @return the instance data entity associated with the given key and user
+   */
+  private static ViewInstanceDataEntity getInstanceData(ViewInstanceEntity instanceDefinition, String user, String key) {
+    for (ViewInstanceDataEntity viewInstanceDataEntity : instanceDefinition.getData()) {
+      if (viewInstanceDataEntity.getName().equals(key) &&
+          viewInstanceDataEntity.getUser().equals(user)) {
+        return viewInstanceDataEntity;
+      }
+    }
+    return null;
   }
 
   /**
@@ -249,7 +294,7 @@ public class ViewDataMigrationContextImpl implements ViewDataMigrationContext {
     for (ViewInstanceDataEntity entity : instanceDefinition.getData()) {
 
       if (!instanceDataByUser.containsKey(entity.getUser())) {
-        instanceDataByUser.put(entity.getUser(), new HashMap<String, String>());
+        instanceDataByUser.put(entity.getUser(), new HashMap<>());
       }
       instanceDataByUser.get(entity.getUser()).put(entity.getName(), entity.getValue());
     }

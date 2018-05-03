@@ -19,37 +19,42 @@
 
 package org.apache.ambari.logfeeder.output;
 
+import org.apache.ambari.logfeeder.conf.LogFeederProps;
+import org.apache.ambari.logfeeder.input.InputFileMarker;
+import org.apache.ambari.logfeeder.plugin.input.InputMarker;
+import org.apache.ambari.logfeeder.plugin.output.Output;
+import org.apache.ambari.logfeeder.util.LogFeederUtil;
+import org.apache.ambari.logsearch.config.api.model.outputconfig.OutputProperties;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.log4j.Logger;
+
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Map;
 
-import org.apache.ambari.logfeeder.LogFeederUtil;
-import org.apache.ambari.logfeeder.input.Input;
-import org.apache.ambari.logfeeder.input.InputMarker;
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVPrinter;
-import org.apache.log4j.Logger;
+public class OutputFile extends Output<LogFeederProps, InputFileMarker> {
+  private static final Logger LOG = Logger.getLogger(OutputFile.class);
 
-public class OutputFile extends Output {
-  static Logger logger = Logger.getLogger(OutputFile.class);
-
-  PrintWriter outWriter = null;
-  String filePath = null;
-  String codec;
+  private PrintWriter outWriter;
+  private String filePath = null;
+  private String codec;
+  private LogFeederProps logFeederProps;
 
   @Override
-  public void init() throws Exception {
-    super.init();
-
+  public void init(LogFeederProps logFeederProps) throws Exception {
+    this.logFeederProps = logFeederProps;
     filePath = getStringValue("path");
-    if (filePath == null || filePath.isEmpty()) {
-      logger.error("Filepath config property <path> is not set in config file.");
+    if (StringUtils.isEmpty(filePath)) {
+      LOG.error("Filepath config property <path> is not set in config file.");
       return;
     }
     codec = getStringValue("codec");
-    if (codec == null || codec.trim().isEmpty()) {
+    if (StringUtils.isBlank(codec)) {
       codec = "json";
     } else {
       if (codec.trim().equalsIgnoreCase("csv")) {
@@ -57,12 +62,11 @@ public class OutputFile extends Output {
       } else if (codec.trim().equalsIgnoreCase("json")) {
         codec = "csv";
       } else {
-        logger.error("Unsupported codec type. codec=" + codec
-          + ", will use json");
+        LOG.error("Unsupported codec type. codec=" + codec + ", will use json");
         codec = "json";
       }
     }
-    logger.info("Out filePath=" + filePath + ", codec=" + codec);
+    LOG.info("Out filePath=" + filePath + ", codec=" + codec);
     File outFile = new File(filePath);
     if (outFile.getParentFile() != null) {
       File parentDir = outFile.getParentFile();
@@ -71,16 +75,14 @@ public class OutputFile extends Output {
       }
     }
 
-    outWriter = new PrintWriter(new BufferedWriter(new FileWriter(outFile,
-      true)));
+    outWriter = new PrintWriter(new BufferedWriter(new FileWriter(outFile, true)));
 
-    logger.info("init() is successfull. filePath="
-      + outFile.getAbsolutePath());
+    LOG.info("init() is successfull. filePath=" + outFile.getAbsolutePath());
   }
 
   @Override
   public void close() {
-    logger.info("Closing file." + getShortDescription());
+    LOG.info("Closing file." + getShortDescription());
     if (outWriter != null) {
       try {
         outWriter.close();
@@ -88,51 +90,77 @@ public class OutputFile extends Output {
         // Ignore this exception
       }
     }
-    isClosed = true;
+    setClosed(true);
   }
 
   @Override
-  public void write(Map<String, Object> jsonObj, InputMarker inputMarker)
-    throws Exception {
+  public void write(Map<String, Object> jsonObj, InputFileMarker inputMarker) throws Exception {
     String outStr = null;
-    if (codec.equals("csv")) {
-      // Convert to CSV
-      CSVPrinter csvPrinter = new CSVPrinter(outWriter, CSVFormat.RFC4180);
-      //TODO:
-    } else {
-      outStr = LogFeederUtil.getGson().toJson(jsonObj);
-    }
-    if (outWriter != null && outStr != null) {
-      statMetric.count++;
+    CSVPrinter csvPrinter = null;
+    try {
+      if (codec.equals("csv")) {
+        csvPrinter = new CSVPrinter(outWriter, CSVFormat.RFC4180);
+        //TODO:
+      } else {
+        outStr = LogFeederUtil.getGson().toJson(jsonObj);
+      }
+      if (outWriter != null && outStr != null) {
+        statMetric.value++;
 
-      outWriter.println(outStr);
-      outWriter.flush();
+        outWriter.println(outStr);
+        outWriter.flush();
+      }
+    } finally {
+      if (csvPrinter != null) {
+        try {
+          csvPrinter.close();
+        } catch (IOException e) {
+        }
+      }
     }
   }
 
-  /*
-   * (non-Javadoc)
-   * 
-   * @see org.apache.ambari.logfeeder.output.Output#write()
-   */
   @Override
-  synchronized public void write(String block, InputMarker inputMarker) throws Exception {
+  synchronized public void write(String block, InputFileMarker inputMarker) throws Exception {
     if (outWriter != null && block != null) {
-      statMetric.count++;
+      statMetric.value++;
 
       outWriter.println(block);
       outWriter.flush();
     }
   }
 
-  /*
-   * (non-Javadoc)
-   * 
-   * @see org.apache.ambari.logfeeder.ConfigBlock#getShortDescription()
-   */
+  @Override
+  public Long getPendingCount() {
+    return null;
+  }
+
+  @Override
+  public String getWriteBytesMetricName() {
+    return "output.kafka.write_bytes";
+  }
+
   @Override
   public String getShortDescription() {
     return "output:destination=file,path=" + filePath;
   }
 
+  @Override
+  public String getStatMetricName() {
+    return "output.file.write_logs";
+  }
+
+  @Override
+  public String getOutputType() {
+    throw new IllegalStateException("This method should be overriden if the Output wants to monitor the configuration");
+  }
+
+  @Override
+  public void outputConfigChanged(OutputProperties outputProperties) {
+  }
+
+  @Override
+  public void copyFile(File inputFile, InputMarker inputMarker) throws UnsupportedOperationException {
+    throw new UnsupportedOperationException("copyFile method is not yet supported for output=file");
+  }
 }

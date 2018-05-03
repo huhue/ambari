@@ -34,6 +34,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -46,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 
 public class FlumeTimelineMetricsSink extends AbstractTimelineMetricsSink implements MonitorService {
   private String collectorUri;
+  private String protocol;
   // Key - component(instance_id)
   private Map<String, TimelineMetricsCache> metricsCaches;
   private int maxRowCacheSize;
@@ -53,9 +55,18 @@ public class FlumeTimelineMetricsSink extends AbstractTimelineMetricsSink implem
   private ScheduledExecutorService scheduledExecutorService;
   private long pollFrequency;
   private String hostname;
+  private String port;
+  private Collection<String> collectorHosts;
+  private String zookeeperQuorum;
   private final static String COUNTER_METRICS_PROPERTY = "counters";
   private final Set<String> counterMetrics = new HashSet<String>();
   private int timeoutSeconds = 10;
+  private boolean setInstanceId;
+  private String instanceId;
+  private boolean hostInMemoryAggregationEnabled;
+  private int hostInMemoryAggregationPort;
+  private String hostInMemoryAggregationProtocol;
+
 
   @Override
   public void start() {
@@ -83,6 +94,8 @@ public class FlumeTimelineMetricsSink extends AbstractTimelineMetricsSink implem
       if ((hostname == null) || (!hostname.contains("."))) {
         hostname = InetAddress.getLocalHost().getCanonicalHostName();
       }
+      hostname = hostname.toLowerCase();
+
     } catch (UnknownHostException e) {
       LOG.error("Could not identify hostname.");
       throw new FlumeException("Could not identify hostname.", e);
@@ -95,13 +108,27 @@ public class FlumeTimelineMetricsSink extends AbstractTimelineMetricsSink implem
     metricsSendInterval = Integer.parseInt(configuration.getProperty(METRICS_SEND_INTERVAL,
         String.valueOf(TimelineMetricsCache.MAX_EVICTION_TIME_MILLIS)));
     metricsCaches = new HashMap<String, TimelineMetricsCache>();
-    collectorUri = configuration.getProperty(COLLECTOR_PROPERTY) + WS_V1_TIMELINE_METRICS;
-    if (collectorUri.toLowerCase().startsWith("https://")) {
+    collectorHosts = parseHostsStringIntoCollection(configuration.getProperty(COLLECTOR_HOSTS_PROPERTY));
+    zookeeperQuorum = configuration.getProperty("zookeeper.quorum");
+    protocol = configuration.getProperty(COLLECTOR_PROTOCOL, "http");
+    port = configuration.getProperty(COLLECTOR_PORT, "6188");
+    setInstanceId = Boolean.valueOf(configuration.getProperty(SET_INSTANCE_ID_PROPERTY, "false"));
+    instanceId = configuration.getProperty(INSTANCE_ID_PROPERTY, "");
+
+    hostInMemoryAggregationEnabled = Boolean.getBoolean(configuration.getProperty(HOST_IN_MEMORY_AGGREGATION_ENABLED_PROPERTY, "false"));
+    hostInMemoryAggregationPort = Integer.valueOf(configuration.getProperty(HOST_IN_MEMORY_AGGREGATION_PORT_PROPERTY, "61888"));
+    hostInMemoryAggregationProtocol = configuration.getProperty(HOST_IN_MEMORY_AGGREGATION_PROTOCOL_PROPERTY, "http");
+    // Initialize the collector write strategy
+    super.init();
+
+    if (protocol.contains("https") || hostInMemoryAggregationProtocol.contains("https")) {
       String trustStorePath = configuration.getProperty(SSL_KEYSTORE_PATH_PROPERTY).trim();
       String trustStoreType = configuration.getProperty(SSL_KEYSTORE_TYPE_PROPERTY).trim();
       String trustStorePwd = configuration.getProperty(SSL_KEYSTORE_PASSWORD_PROPERTY).trim();
       loadTruststore(trustStorePath, trustStoreType, trustStorePwd);
     }
+    collectorUri = constructTimelineMetricUri(protocol, findPreferredCollectHost(), port);
+
     pollFrequency = Long.parseLong(configuration.getProperty("collectionFrequency"));
 
     String[] metrics = configuration.getProperty(COUNTER_METRICS_PROPERTY).trim().split(",");
@@ -109,13 +136,53 @@ public class FlumeTimelineMetricsSink extends AbstractTimelineMetricsSink implem
   }
 
   @Override
-  public String getCollectorUri() {
-    return collectorUri;
+  public String getCollectorUri(String host) {
+    return constructTimelineMetricUri(protocol, host, port);
+  }
+
+  @Override
+  protected String getCollectorProtocol() {
+    return protocol;
+  }
+
+  @Override
+  protected String getCollectorPort() {
+    return port;
   }
 
   @Override
   protected int getTimeoutSeconds() {
     return timeoutSeconds;
+  }
+
+  @Override
+  protected String getZookeeperQuorum() {
+    return zookeeperQuorum;
+  }
+
+  @Override
+  protected Collection<String> getConfiguredCollectorHosts() {
+    return collectorHosts;
+  }
+
+  @Override
+  protected String getHostname() {
+    return hostname;
+  }
+
+  @Override
+  protected boolean isHostInMemoryAggregationEnabled() {
+    return hostInMemoryAggregationEnabled;
+  }
+
+  @Override
+  protected int getHostInMemoryAggregationPort() {
+    return hostInMemoryAggregationPort;
+  }
+
+  @Override
+  protected String getHostInMemoryAggregationProtocol() {
+    return hostInMemoryAggregationProtocol;
   }
 
   public void setPollFrequency(long pollFrequency) {
@@ -187,7 +254,11 @@ public class FlumeTimelineMetricsSink extends AbstractTimelineMetricsSink implem
       TimelineMetric timelineMetric = new TimelineMetric();
       timelineMetric.setMetricName(attributeName);
       timelineMetric.setHostName(hostname);
-      timelineMetric.setInstanceId(component);
+      if (setInstanceId) {
+        timelineMetric.setInstanceId(instanceId + component);
+      } else {
+        timelineMetric.setInstanceId(component);
+      }
       timelineMetric.setAppId("FLUME_HANDLER");
       timelineMetric.setStartTime(currentTimeMillis);
       timelineMetric.getMetricValues().put(currentTimeMillis, Double.parseDouble(attributeValue));

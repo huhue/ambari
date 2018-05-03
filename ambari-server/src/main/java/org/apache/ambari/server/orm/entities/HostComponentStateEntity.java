@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -30,13 +30,13 @@ import javax.persistence.JoinColumns;
 import javax.persistence.ManyToOne;
 import javax.persistence.NamedQueries;
 import javax.persistence.NamedQuery;
-import javax.persistence.OneToOne;
 import javax.persistence.Table;
 import javax.persistence.TableGenerator;
 
-import org.apache.ambari.server.state.SecurityState;
 import org.apache.ambari.server.state.State;
 import org.apache.ambari.server.state.UpgradeState;
+
+import com.google.common.base.Objects;
 
 @Entity
 @Table(name = "hostcomponentstate")
@@ -65,7 +65,12 @@ import org.apache.ambari.server.state.UpgradeState;
         query = "SELECT hcs from HostComponentStateEntity hcs WHERE hcs.serviceName=:serviceName AND hcs.componentName=:componentName AND hcs.hostEntity.hostName=:hostName"),
     @NamedQuery(
         name = "HostComponentStateEntity.findByIndex",
-        query = "SELECT hcs from HostComponentStateEntity hcs WHERE hcs.clusterId=:clusterId AND hcs.serviceName=:serviceName AND hcs.componentName=:componentName AND hcs.hostId=:hostId") })
+        query = "SELECT hcs from HostComponentStateEntity hcs WHERE hcs.clusterId=:clusterId AND hcs.serviceName=:serviceName AND hcs.componentName=:componentName AND hcs.hostId=:hostId"),
+    @NamedQuery(
+        name = "HostComponentStateEntity.findByServiceAndComponentAndNotVersion",
+        query = "SELECT hcs from HostComponentStateEntity hcs WHERE hcs.serviceName=:serviceName AND hcs.componentName=:componentName AND hcs.version != :version")
+})
+
 public class HostComponentStateEntity {
 
   @Id
@@ -96,19 +101,12 @@ public class HostComponentStateEntity {
   private State currentState = State.INIT;
 
   @Enumerated(value = EnumType.STRING)
-  @Column(name = "upgrade_state", nullable = false, insertable = true, updatable = true)
-  private UpgradeState upgradeState = UpgradeState.NONE;
+  @Column(name = "last_live_state", nullable = true, insertable = true, updatable = true)
+  private State lastLiveState = State.INIT;
 
   @Enumerated(value = EnumType.STRING)
-  @Column(name = "security_state", nullable = false, insertable = true, updatable = true)
-  private SecurityState securityState = SecurityState.UNSECURED;
-
-  /**
-   * Unidirectional one-to-one association to {@link StackEntity}
-   */
-  @OneToOne
-  @JoinColumn(name = "current_stack_id", unique = false, nullable = false, insertable = true, updatable = true)
-  private StackEntity currentStack;
+  @Column(name = "upgrade_state", nullable = false, insertable = true, updatable = true)
+  private UpgradeState upgradeState = UpgradeState.NONE;
 
   @ManyToOne
   @JoinColumns({
@@ -165,12 +163,12 @@ public class HostComponentStateEntity {
     this.currentState = currentState;
   }
 
-  public SecurityState getSecurityState() {
-    return securityState;
+  public State getLastLiveState() {
+    return lastLiveState;
   }
 
-  public void setSecurityState(SecurityState securityState) {
-    this.securityState = securityState;
+  public void setLastLiveState(State lastLiveState) {
+    this.lastLiveState = lastLiveState;
   }
 
   public UpgradeState getUpgradeState() {
@@ -179,14 +177,6 @@ public class HostComponentStateEntity {
 
   public void setUpgradeState(UpgradeState upgradeState) {
     this.upgradeState = upgradeState;
-  }
-
-  public StackEntity getCurrentStack() {
-    return currentStack;
-  }
-
-  public void setCurrentStack(StackEntity currentStack) {
-    this.currentStack = currentStack;
   }
 
   public String getVersion() {
@@ -222,13 +212,13 @@ public class HostComponentStateEntity {
       return false;
     }
 
-    if (currentStack != null ? !currentStack.equals(that.currentStack)
-        : that.currentStack != null) {
+    if (currentState != null ? !currentState.equals(that.currentState)
+        : that.currentState != null) {
       return false;
     }
 
-    if (currentState != null ? !currentState.equals(that.currentState)
-        : that.currentState != null) {
+    if (lastLiveState != null ? !lastLiveState.equals(that.lastLiveState)
+        : that.lastLiveState != null) {
       return false;
     }
 
@@ -259,8 +249,8 @@ public class HostComponentStateEntity {
     result = 31 * result + (hostEntity != null ? hostEntity.hashCode() : 0);
     result = 31 * result + (componentName != null ? componentName.hashCode() : 0);
     result = 31 * result + (currentState != null ? currentState.hashCode() : 0);
+    result = 31 * result + (lastLiveState != null ? lastLiveState.hashCode() : 0);
     result = 31 * result + (upgradeState != null ? upgradeState.hashCode() : 0);
-    result = 31 * result + (currentStack != null ? currentStack.hashCode() : 0);
     result = 31 * result + (serviceName != null ? serviceName.hashCode() : 0);
     result = 31 * result + (version != null ? version.hashCode() : 0);
     return result;
@@ -281,6 +271,15 @@ public class HostComponentStateEntity {
 
   public void setHostEntity(HostEntity hostEntity) {
     this.hostEntity = hostEntity;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this).add("serviceName", serviceName).add("componentName",
+        componentName).add("hostId", hostId).add("state", currentState).toString();
   }
 
 }

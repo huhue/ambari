@@ -18,10 +18,19 @@ limitations under the License.
 
 """
 
-from resource_management import *
+# Python Imports
+import os
 import sys
+
+# Local Imports
+from resource_management.libraries.resources.xml_config import XmlConfig
+from resource_management.libraries.functions.format import format
+from resource_management.core.resources.system import Directory, File
+from resource_management.core.source import InlineTemplate
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
+from resource_management.libraries.functions.setup_atlas_hook import has_atlas_in_cluster, setup_atlas_hook
 from ambari_commons import OSConst
+from ambari_commons.constants import SERVICE
 
 
 @OsFamilyFuncImpl(os_family=OSConst.WINSRV_FAMILY)
@@ -32,7 +41,7 @@ def hcat():
             conf_dir = params.hive_conf_dir,
             configurations = params.config['configurations']['hive-site'],
             owner=params.hive_user,
-            configuration_attributes=params.config['configuration_attributes']['hive-site']
+            configuration_attributes=params.config['configurationAttributes']['hive-site']
   )
 
 
@@ -40,18 +49,16 @@ def hcat():
 def hcat():
   import params
 
-  from setup_atlas_hive import setup_atlas_hive
-
   Directory(params.hive_conf_dir,
             create_parents = True,
-            owner=params.hcat_user,
+            owner=params.hive_user,
             group=params.user_group,
   )
 
 
   Directory(params.hcat_conf_dir,
             create_parents = True,
-            owner=params.hcat_user,
+            owner=params.webhcat_user,
             group=params.user_group,
   )
 
@@ -63,15 +70,18 @@ def hcat():
   XmlConfig("hive-site.xml",
             conf_dir=params.hive_client_conf_dir,
             configurations=params.config['configurations']['hive-site'],
-            configuration_attributes=params.config['configuration_attributes']['hive-site'],
+            configuration_attributes=params.config['configurationAttributes']['hive-site'],
             owner=params.hive_user,
             group=params.user_group,
             mode=0644)
 
   File(format("{hcat_conf_dir}/hcat-env.sh"),
-       owner=params.hcat_user,
+       owner=params.webhcat_user,
        group=params.user_group,
        content=InlineTemplate(params.hcat_env_sh_template)
   )
 
-  setup_atlas_hive()
+  # Generate atlas-application.properties.xml file
+  if params.enable_atlas_hook:
+    atlas_hook_filepath = os.path.join(params.hive_config_dir, params.atlas_hook_filename)
+    setup_atlas_hook(SERVICE.HIVE, params.hive_atlas_application_properties, atlas_hook_filepath, params.hive_user, params.user_group)

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,13 +19,17 @@
 package org.apache.ambari.server.controller.internal;
 
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.ambari.server.controller.AmbariManagementController;
 import org.apache.ambari.server.controller.AmbariServer;
 import org.apache.ambari.server.controller.logging.LogQueryResponse;
 import org.apache.ambari.server.controller.logging.LoggingRequestHelper;
-import org.apache.ambari.server.controller.logging.LoggingRequestHelperFactory;
 import org.apache.ambari.server.controller.logging.LoggingRequestHelperFactoryImpl;
-import org.apache.ambari.server.controller.logging.LoggingRequestHelperImpl;
 import org.apache.ambari.server.controller.spi.NoSuchParentResourceException;
 import org.apache.ambari.server.controller.spi.NoSuchResourceException;
 import org.apache.ambari.server.controller.spi.Predicate;
@@ -34,14 +38,6 @@ import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.SystemException;
 import org.apache.ambari.server.controller.spi.UnsupportedPropertyException;
 import org.apache.ambari.server.controller.utilities.PropertyHelper;
-
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 public class LoggingResourceProvider extends AbstractControllerResourceProvider {
 
@@ -54,7 +50,7 @@ public class LoggingResourceProvider extends AbstractControllerResourceProvider 
   private static final Map<Resource.Type, String> KEY_PROPERTY_IDS;
 
   static {
-    Set<String> localSet = new HashSet<String>();
+    Set<String> localSet = new HashSet<>();
     localSet.add(LOGGING_SEARCH_SERVICE_PROPERTY_ID);
     localSet.add(LOGGING_SEARCH_TERM_PROPERTY_ID);
     localSet.add(LOGGING_COMPONENT_PROPERTY_ID);
@@ -62,7 +58,7 @@ public class LoggingResourceProvider extends AbstractControllerResourceProvider 
     PROPERTY_IDS = Collections.unmodifiableSet(localSet);
 
     Map<Resource.Type, String> localMap =
-      new HashMap<Resource.Type, String>();
+      new HashMap<>();
 
     localMap.put(Resource.Type.LoggingQuery, LOGGING_SEARCH_SERVICE_PROPERTY_ID);
     KEY_PROPERTY_IDS = Collections.unmodifiableMap(localMap);
@@ -70,13 +66,8 @@ public class LoggingResourceProvider extends AbstractControllerResourceProvider 
   }
 
 
-  public LoggingResourceProvider(Set<String> propertyIds,
-                                 Map<Resource.Type, String> keyPropertyIds,
-                                 AmbariManagementController controller) {
-
-
-
-    super(PROPERTY_IDS, KEY_PROPERTY_IDS, controller);
+  public LoggingResourceProvider(AmbariManagementController controller) {
+    super(Resource.Type.LoggingQuery, PROPERTY_IDS, KEY_PROPERTY_IDS, controller);
   }
 
   @Override
@@ -95,7 +86,7 @@ public class LoggingResourceProvider extends AbstractControllerResourceProvider 
       new LoggingRequestHelperFactoryImpl().getHelper(AmbariServer.getController(), "");
 
     Map<String, String> queryParameters =
-      new HashMap<String, String>();
+      new HashMap<>();
 
     queryParameters.put("level", "ERROR");
 
@@ -113,28 +104,6 @@ public class LoggingResourceProvider extends AbstractControllerResourceProvider 
     resource.setProperty("logList", response.getListOfResults());
 
     return Collections.singleton(resource);
-  }
-
-  private static List<Map<String, String>> createTestData(Resource resource) {
-    // just create some test data for verifying basic resource code, not an actual result
-    Map<String, String> levelCounts = new HashMap<String, String>();
-    levelCounts.put("INFO", "100");
-    levelCounts.put("WARN", "250");
-    levelCounts.put("DEBUG", "300");
-
-    resource.setProperty("logLevels", levelCounts);
-
-    List<Map <String, String>> listOfResults = new LinkedList<Map<String, String>>();
-    Map<String, String> resultOne = new HashMap<String, String>();
-    resultOne.put("data", "This is a test sentence.");
-    resultOne.put("score", "100");
-    resultOne.put("level", "INFO");
-    resultOne.put("type", "hdfs_namenode");
-    resultOne.put("host", "c6401.ambari.apache.org");
-    resultOne.put("LoggerName", "NameNodeLogger");
-
-    listOfResults.add(resultOne);
-    return listOfResults;
   }
 
   @Override

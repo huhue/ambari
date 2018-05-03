@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,11 +17,8 @@
  */
 package org.apache.ambari.server.state.stack.upgrade;
 
-import java.util.List;
-
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
-import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.bind.annotation.XmlTransient;
 import javax.xml.bind.annotation.XmlType;
@@ -45,9 +42,6 @@ public class ManualTask extends ServerSideActionTask {
 
   @XmlTransient
   public String structuredOut = null;
-
-  @XmlElement(name="message")
-  public List<String> messages;
 
   @Override
   public Task.Type getType() {

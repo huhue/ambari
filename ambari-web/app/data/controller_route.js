@@ -71,7 +71,7 @@ module.exports = [
   },
   {
     wizardControllerName: App.router.get('mainAdminStackAndUpgradeController.name'),
-    route: App.db.get('MainAdminStackAndUpgrade', 'upgradeState') == 'INIT' ? 'main.admin.stackAndUpgrade.index' : 'main.admin.stackAndUpgrade.versions'
+    route: App.db.get('MainAdminStackAndUpgrade', 'upgradeState') === 'NOT_REQUIRED' ? 'main.admin.stackAndUpgrade.index' : 'main.admin.stackAndUpgrade.versions'
   },
   {
     wizardControllerName: App.router.get('widgetWizardController.name'),
@@ -80,5 +80,9 @@ module.exports = [
   {
     wizardControllerName: App.router.get('widgetEditController.name'),
     route: 'main.editWidget'
+  },
+  {
+    wizardControllerName: App.router.get('nameNodeFederationWizardController.name'),
+    route: 'main.services.enableNameNodeFederation'
   }
 ];

@@ -18,12 +18,17 @@
 
 package org.apache.ambari.view.pig;
 
+import org.apache.ambari.view.ClusterType;
 import org.apache.ambari.view.ViewInstanceDefinition;
 import org.apache.ambari.view.utils.ambari.ValidatorUtils;
 import org.apache.ambari.view.validation.ValidationResult;
 import org.apache.ambari.view.validation.Validator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PropertyValidator implements Validator {
+  protected final static Logger LOG =
+    LoggerFactory.getLogger(PropertyValidator.class);
 
   public static final String WEBHDFS_URL = "webhdfs.url";
   public static final String WEBHCAT_PORT = "webhcat.port";
@@ -38,9 +43,9 @@ public class PropertyValidator implements Validator {
     // 1. Validate non cluster associated properties
     // no properties
 
-    // 2. if associated with cluster, no need to validate associated properties
-    String cluster = viewInstanceDefinition.getClusterHandle();
-    if (cluster != null) {
+    // if associated with cluster(local or remote), no need to validate associated properties
+    ClusterType clusterType = viewInstanceDefinition.getClusterType();
+    if (clusterType == ClusterType.LOCAL_AMBARI || clusterType == ClusterType.REMOTE_AMBARI) {
       return ValidationResult.SUCCESS;
     }
 
@@ -48,6 +53,7 @@ public class PropertyValidator implements Validator {
     if (property.equals(WEBHDFS_URL)) {
       String webhdfsUrl = viewInstanceDefinition.getPropertyMap().get(WEBHDFS_URL);
       if (!ValidatorUtils.validateHdfsURL(webhdfsUrl)) {
+        LOG.error("Illegal webhdfsUrl : {}", webhdfsUrl);
         return new InvalidPropertyValidationResult(false, "Must be valid URL");
       }
     }
@@ -58,9 +64,11 @@ public class PropertyValidator implements Validator {
         try {
           int port = Integer.valueOf(webhcatPort);
           if (port < 1 || port > 65535) {
+            LOG.error("Illegal port : {} ", port);
             return new InvalidPropertyValidationResult(false, "Must be from 1 to 65535");
           }
         } catch (NumberFormatException e) {
+          LOG.error("Port not numeric. webhcatPort = {}", webhcatPort);
           return new InvalidPropertyValidationResult(false, "Must be integer");
         }
       }

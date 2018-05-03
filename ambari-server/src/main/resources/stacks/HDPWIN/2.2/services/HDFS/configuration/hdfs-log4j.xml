@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 -->
-
 <configuration supports_final="false" supports_adding_forbidden="true">
-
   <property>
     <name>content</name>
     <description>Custom log4j.properties</description>
@@ -117,6 +115,7 @@ hadoop.security.log.maxfilesize=256MB
 hadoop.security.log.maxbackupindex=20
 log4j.category.SecurityLogger=${hadoop.security.logger}
 hadoop.security.log.file=SecurityAuth.audit
+log4j.additivity.SecurityLogger=false
 log4j.appender.DRFAS=org.apache.log4j.DailyRollingFileAppender
 log4j.appender.DRFAS.File=${hadoop.log.dir}/${hadoop.security.log.file}
 log4j.appender.DRFAS.layout=org.apache.log4j.PatternLayout
@@ -221,6 +220,6 @@ log4j.logger.org.apache.hadoop.conf.Configuration.deprecation=WARN
       <type>content</type>
       <show-property-name>false</show-property-name>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
 </configuration>

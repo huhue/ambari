@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -30,70 +30,56 @@ public interface Config {
 
   void setPropertiesTypes(Map<PropertyInfo.PropertyType, Set<String>> propertiesTypes);
 
-  void setStackId(StackId stackId);
-
   /**
    * @return Config Type
    */
-  public String getType();
+  String getType();
 
   /**
    * @return Version Tag this config instance is mapped to
    */
-  public String getTag();
+  String getTag();
 
   /**
    * Gets the stack that this configuration belongs to.
    *
    * @return the stack (not {@code null).
    */
-  public StackId getStackId();
+  StackId getStackId();
 
   /**
    *
    * @return version of config by type
    */
-  public Long getVersion();
+  Long getVersion();
 
   /**
    * @return Properties that define this config instance
    */
-  public Map<String, String> getProperties();
+  Map<String, String> getProperties();
 
   /**
    * @return Map of attributes in this config-type to value per property
    */
-  public Map<String, Map<String, String>> getPropertiesAttributes();
-
-  /**
-   * Change the version tag
-   * @param versionTag
-   */
-  public void setTag(String versionTag);
-
-  /**
-   * Set config version
-   * @param version
-   */
-  public void setVersion(Long version);
+  Map<String, Map<String, String>> getPropertiesAttributes();
 
   /**
    * Replace properties with new provided set
    * @param properties Property Map to replace existing one
    */
-  public void setProperties(Map<String, String> properties);
+  void setProperties(Map<String, String> properties);
 
   /**
    * Replace property attributes with new provided set
    * @param propertiesAttributes Property Attributes Map to replace existing one
    */
-  public void setPropertiesAttributes(Map<String, Map<String, String>> propertiesAttributes);
+  void setPropertiesAttributes(Map<String, Map<String, String>> propertiesAttributes);
 
   /**
    * Update provided properties' values.
    * @param properties Property Map with updated values
    */
-  public void updateProperties(Map<String, String> properties);
+  void updateProperties(Map<String, String> properties);
 
   /**
    * Ger service config versions containing this config
@@ -105,16 +91,10 @@ public interface Config {
    * Delete certain properties
    * @param properties Property keys to be deleted
    */
-  public void deleteProperties(List<String> properties);
+  void deleteProperties(List<String> properties);
 
   /**
    * Persist the configuration.
    */
-  public void persist();
-
-  /**
-   * Persist the configuration, optionally creating a new config entity.
-   */
-  public void persist(boolean newConfig);
-
+  void save();
 }

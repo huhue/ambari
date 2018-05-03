@@ -30,6 +30,8 @@ var App = require('app');
 var wrapperView = Em.View.extend({
   tagName: 'tr',
 
+  name: 'SortWrapperView',
+
   classNames: ['sort-wrapper'],
 
   willInsertElement: function () {
@@ -87,9 +89,10 @@ var wrapperView = Em.View.extend({
    * @param property {object}
    * @param order {Boolean} true - DESC, false - ASC
    * @param returnSorted {Boolean}
+   * @param content {Array}
    */
-  sort: function (property, order, returnSorted) {
-    var content = this.get('content').toArray();
+  sort: function (property, order, returnSorted, content) {
+    content = content || this.get('content').toArray();
     var sortFunc = this.getSortFunc(property, order);
     var status = order ? 'sorting_desc' : 'sorting_asc';
 
@@ -120,6 +123,25 @@ var wrapperView = Em.View.extend({
       }, this);
     }
   }.observes('controller.contentUpdater'),
+
+  /**
+   *
+   * @param {Em.Object[]} content
+   * @returns {Em.Object[]}
+   */
+  getSortedContent: function(content) {
+    if (!this.get('isSorting') && content.get('length')) {
+      var activeSortViews = this.get('childViews').rejectProperty('status', 'sorting');
+      if (activeSortViews[0]) {
+        var status = activeSortViews[0].get('status');
+        this.set('isSorting', true);
+        content = this.sort(activeSortViews[0], status === 'sorting_desc', true, content);
+        this.set('isSorting', false);
+        activeSortViews[0].set('status', status);
+      }
+    }
+    return content;
+  },
 
   /**
    * reset all sorts fields
@@ -330,15 +352,16 @@ var fieldView = Em.View.extend({
    */
   click: function (event) {
     var wrapperView = this.get('parentView');
-    var currentObserverProperty = this.get('controller.sortingColumn.name');
     wrapperView.sort(this, (this.get('status') !== 'sorting_desc'));
 
     // add observer for sorting property key to apply sorting if some value will be changed
-    if (currentObserverProperty) {
-      wrapperView.removeSortingObserver(currentObserverProperty);
+    if (wrapperView.addSortingObserver && wrapperView.removeSortingObserver) {
+      var currentObserverProperty = this.get('controller.sortingColumn.name');
+      if (currentObserverProperty) {
+        wrapperView.removeSortingObserver(currentObserverProperty);
+      }
+      wrapperView.addSortingObserver(this.get('name'));
     }
-
-    wrapperView.addSortingObserver(this.get('name'));
     this.get('controller').set('sortingColumn', this);
   }
 });

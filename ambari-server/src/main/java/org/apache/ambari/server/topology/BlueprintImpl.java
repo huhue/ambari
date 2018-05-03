@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,7 +19,16 @@
 
 package org.apache.ambari.server.topology;
 
-import com.google.gson.Gson;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.StackAccessException;
 import org.apache.ambari.server.controller.AmbariServer;
@@ -33,15 +42,11 @@ import org.apache.ambari.server.orm.entities.HostGroupConfigEntity;
 import org.apache.ambari.server.orm.entities.HostGroupEntity;
 import org.apache.ambari.server.orm.entities.StackEntity;
 import org.apache.ambari.server.stack.NoSuchStackException;
+import org.apache.ambari.server.state.ConfigHelper;
+import org.apache.ambari.server.state.ServiceInfo;
 import org.apache.commons.lang.StringUtils;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
+import com.google.gson.Gson;
 
 /**
  * Blueprint implementation.
@@ -49,12 +54,13 @@ import java.util.Set;
 public class BlueprintImpl implements Blueprint {
 
   private String name;
-  private Map<String, HostGroup> hostGroups = new HashMap<String, HostGroup>();
+  private Map<String, HostGroup> hostGroups = new HashMap<>();
   private Stack stack;
   private Configuration configuration;
   private BlueprintValidator validator;
   private SecurityConfiguration security;
   private Setting setting;
+  private List<RepositorySetting> repoSettings;
 
   public BlueprintImpl(BlueprintEntity entity) throws NoSuchStackException {
     this.name = entity.getBlueprintName();
@@ -71,6 +77,7 @@ public class BlueprintImpl implements Blueprint {
     configuration.setParentConfiguration(stack.getConfiguration(getServices()));
     validator = new BlueprintValidatorImpl(this);
     processSetting(entity.getSettings());
+    processRepoSettings();
   }
 
   public BlueprintImpl(String name, Collection<HostGroup> groups, Stack stack, Configuration configuration,
@@ -142,7 +149,7 @@ public class BlueprintImpl implements Blueprint {
    */
   @Override
   public Collection<String> getServices() {
-    Collection<String> services = new HashSet<String>();
+    Collection<String> services = new HashSet<>();
     for (HostGroup group : getHostGroups().values()) {
       services.addAll(group.getServices());
     }
@@ -150,8 +157,17 @@ public class BlueprintImpl implements Blueprint {
   }
 
   @Override
+  public Collection<ServiceInfo> getServiceInfos() {
+    return getServices().stream()
+      .map(stack::getServiceInfo)
+      .filter(Optional::isPresent)
+      .map(Optional::get)
+      .collect(Collectors.toList());
+  }
+
+  @Override
   public Collection<String> getComponents(String service) {
-    Collection<String> components = new HashSet<String>();
+    Collection<String> components = new HashSet<>();
     for (HostGroup group : getHostGroupsForService(service)) {
       components.addAll(group.getComponents(service));
     }
@@ -166,14 +182,14 @@ public class BlueprintImpl implements Blueprint {
    * @param serviceName - Service name.
    * @param componentName - Component name.
    *
-   * @return True or false.
+   * @return null if value is not specified; true or false if specified.
    */
   @Override
-  public boolean isRecoveryEnabled(String serviceName, String componentName) {
-    if (setting == null)
-      return false;
-
+  public String getRecoveryEnabled(String serviceName, String componentName) {
     Set<HashMap<String, String>> settingValue;
+
+    if (setting == null)
+      return null;
 
     // If component name was specified in the list of "component_settings",
     // determine if recovery_enabled is true or false and return it.
@@ -181,7 +197,9 @@ public class BlueprintImpl implements Blueprint {
     for (Map<String, String> setting : settingValue) {
       String name = setting.get(Setting.SETTING_NAME_NAME);
       if (StringUtils.equals(name, componentName)) {
-        return Boolean.parseBoolean(setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED));
+        if (!StringUtils.isEmpty(setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED))) {
+          return setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED);
+        }
       }
     }
 
@@ -190,16 +208,81 @@ public class BlueprintImpl implements Blueprint {
     for ( Map<String, String> setting : settingValue){
       String name = setting.get(Setting.SETTING_NAME_NAME);
       if (StringUtils.equals(name, serviceName)) {
-        return Boolean.parseBoolean(setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED));
+        if (!StringUtils.isEmpty(setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED))) {
+          return setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED);
+        }
       }
     }
 
     // If service name is not specified, look up the cluster setting.
     settingValue = setting.getSettingValue(Setting.SETTING_NAME_RECOVERY_SETTINGS);
     for (Map<String, String> setting : settingValue) {
-      return Boolean.parseBoolean(setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED));
+      if (!StringUtils.isEmpty(setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED))) {
+        return setting.get(Setting.SETTING_NAME_RECOVERY_ENABLED);
+      }
     }
 
+    return null;
+  }
+
+  /**
+   * Get whether the specified service is enabled for credential store use.
+   *
+   * <pre>
+   *     {@code
+   *       {
+   *         "service_settings" : [
+   *         { "name" : "RANGER",
+   *           "recovery_enabled" : "true",
+   *           "credential_store_enabled" : "true"
+   *         },
+   *         { "name" : "HIVE",
+   *           "recovery_enabled" : "true",
+   *           "credential_store_enabled" : "false"
+   *         },
+   *         { "name" : "TEZ",
+   *           "recovery_enabled" : "false"
+   *         }
+   *       ]
+   *     }
+   *   }
+   * </pre>
+   *
+   * @param serviceName - Service name.
+   *
+   * @return null if value is not specified; true or false if specified.
+   */
+  @Override
+  public String getCredentialStoreEnabled(String serviceName) {
+    if (setting == null)
+      return null;
+
+    // Look up the service and return the credential_store_enabled value.
+    Set<HashMap<String, String>> settingValue = setting.getSettingValue(Setting.SETTING_NAME_SERVICE_SETTINGS);
+    for (Map<String, String> setting : settingValue) {
+      String name = setting.get(Setting.SETTING_NAME_NAME);
+      if (StringUtils.equals(name, serviceName)) {
+        if (!StringUtils.isEmpty(setting.get(Setting.SETTING_NAME_CREDENTIAL_STORE_ENABLED))) {
+          return setting.get(Setting.SETTING_NAME_CREDENTIAL_STORE_ENABLED);
+        }
+        break;
+      }
+    }
+
+    return null;
+  }
+
+  @Override
+  public boolean shouldSkipFailure() {
+    if (setting == null) {
+      return false;
+    }
+    Set<HashMap<String, String>> settingValue = setting.getSettingValue(Setting.SETTING_NAME_DEPLOYMENT_SETTINGS);
+    for (Map<String, String> setting : settingValue) {
+      if (setting.containsKey(Setting.SETTING_NAME_SKIP_FAILURE)) {
+        return setting.get(Setting.SETTING_NAME_SKIP_FAILURE).equalsIgnoreCase("true");
+      }
+    }
     return false;
   }
 
@@ -217,7 +300,7 @@ public class BlueprintImpl implements Blueprint {
    */
   @Override
   public Collection<HostGroup> getHostGroupsForComponent(String component) {
-    Collection<HostGroup> resultGroups = new HashSet<HostGroup>();
+    Collection<HostGroup> resultGroups = new HashSet<>();
     for (HostGroup group : hostGroups.values() ) {
       if (group.getComponentNames().contains(component)) {
         resultGroups.add(group);
@@ -235,7 +318,7 @@ public class BlueprintImpl implements Blueprint {
    */
   @Override
   public Collection<HostGroup> getHostGroupsForService(String service) {
-    Collection<HostGroup> resultGroups = new HashSet<HostGroup>();
+    Collection<HostGroup> resultGroups = new HashSet<>();
     for (HostGroup group : hostGroups.values() ) {
       if (group.getServices().contains(service)) {
         resultGroups.add(group);
@@ -280,9 +363,10 @@ public class BlueprintImpl implements Blueprint {
    * Validate blueprint configuration.
    *
    * @throws InvalidTopologyException if the blueprint configuration is invalid
+   * @throws GPLLicenseNotAcceptedException ambari was configured to use gpl software, but gpl license is not accepted
    */
   @Override
-  public void validateRequiredProperties() throws InvalidTopologyException {
+  public void validateRequiredProperties() throws InvalidTopologyException, GPLLicenseNotAcceptedException {
     validator.validateRequiredProperties();
   }
 
@@ -293,7 +377,7 @@ public class BlueprintImpl implements Blueprint {
     } catch (StackAccessException e) {
       throw new NoSuchStackException(stackEntity.getStackName(), stackEntity.getStackVersion());
     } catch (AmbariException e) {
-    //todo:
+      //todo:
       throw new RuntimeException("An error occurred parsing the stack information.", e);
     }
   }
@@ -335,7 +419,7 @@ public class BlueprintImpl implements Blueprint {
    */
   private Map<String, Map<String, String>> parseConfigurations(Collection<BlueprintConfigEntity> configs) {
 
-    Map<String, Map<String, String>> properties = new HashMap<String, Map<String, String>>();
+    Map<String, Map<String, String>> properties = new HashMap<>();
     Gson gson = new Gson();
     for (BlueprintConfiguration config : configs) {
       String type = config.getType();
@@ -353,7 +437,7 @@ public class BlueprintImpl implements Blueprint {
    */
   private Map<String, Set<HashMap<String, String>>> parseSetting(Collection<BlueprintSettingEntity> blueprintSetting) {
 
-    Map<String, Set<HashMap<String, String>>> properties = new HashMap<String, Set<HashMap<String, String>>>();
+    Map<String, Set<HashMap<String, String>>> properties = new HashMap<>();
     Gson gson = new Gson();
     for (BlueprintSettingEntity setting : blueprintSetting) {
       String settingName = setting.getSettingName();
@@ -372,7 +456,7 @@ public class BlueprintImpl implements Blueprint {
   //todo: do inline with config processing
   private Map<String, Map<String, Map<String, String>>> parseAttributes(Collection<BlueprintConfigEntity> configs) {
     Map<String, Map<String, Map<String, String>>> mapAttributes =
-        new HashMap<String, Map<String, Map<String, String>>>();
+      new HashMap<>();
 
     if (configs != null) {
       Gson gson = new Gson();
@@ -392,7 +476,7 @@ public class BlueprintImpl implements Blueprint {
    */
   @SuppressWarnings("unchecked")
   private void createHostGroupEntities(BlueprintEntity blueprintEntity) {
-    Collection<HostGroupEntity> entities = new ArrayList<HostGroupEntity>();
+    Collection<HostGroupEntity> entities = new ArrayList<>();
     for (HostGroup group : getHostGroups().values()) {
       HostGroupEntity hostGroupEntity = new HostGroupEntity();
       entities.add(hostGroupEntity);
@@ -414,7 +498,7 @@ public class BlueprintImpl implements Blueprint {
    */
   private void createHostGroupConfigEntities(HostGroupEntity hostGroup, Configuration groupConfiguration) {
     Gson jsonSerializer = new Gson();
-    Map<String, HostGroupConfigEntity> configEntityMap = new HashMap<String, HostGroupConfigEntity>();
+    Map<String, HostGroupConfigEntity> configEntityMap = new HashMap<>();
     for (Map.Entry<String, Map<String, String>> propEntry : groupConfiguration.getProperties().entrySet()) {
       String type = propEntry.getKey();
       Map<String, String> properties = propEntry.getValue();
@@ -451,7 +535,7 @@ public class BlueprintImpl implements Blueprint {
     */
   @SuppressWarnings("unchecked")
   private void createComponentEntities(HostGroupEntity group, Collection<Component> components) {
-    Collection<HostGroupComponentEntity> componentEntities = new HashSet<HostGroupComponentEntity>();
+    Collection<HostGroupComponentEntity> componentEntities = new HashSet<>();
     group.setComponents(componentEntities);
 
     for (Component component : components) {
@@ -479,7 +563,7 @@ public class BlueprintImpl implements Blueprint {
   private void createBlueprintConfigEntities(BlueprintEntity blueprintEntity) {
     Gson jsonSerializer = new Gson();
     Configuration config = getConfiguration();
-    Map<String, BlueprintConfigEntity> configEntityMap = new HashMap<String, BlueprintConfigEntity>();
+    Map<String, BlueprintConfigEntity> configEntityMap = new HashMap<>();
     for (Map.Entry<String, Map<String, String>> propEntry : config.getProperties().entrySet()) {
       String type = propEntry.getKey();
       Map<String, String> properties = propEntry.getValue();
@@ -530,5 +614,43 @@ public class BlueprintImpl implements Blueprint {
       }
       blueprintEntity.setSettings(settingEntityMap.values());
     }
+  }
+
+  /**
+   * A config type is valid if there are services related to except cluster-env and global.
+   */
+  public boolean isValidConfigType(String configType) {
+    if (ConfigHelper.CLUSTER_ENV.equals(configType) || "global".equals(configType)) {
+      return true;
+    }
+    return getStack().getServicesForConfigType(configType).stream().anyMatch(getServices()::contains);
+  }
+
+  /**
+   * Parse stack repo info stored in the blueprint_settings table
+   * @return set of repositories
+   * */
+  private void processRepoSettings(){
+    repoSettings = new ArrayList<>();
+    if (setting != null){
+      Set<HashMap<String, String>> settingValue = setting.getSettingValue(Setting.SETTING_NAME_REPOSITORY_SETTINGS);
+      for (Map<String, String> setting : settingValue) {
+        RepositorySetting rs = parseRepositorySetting(setting);
+        repoSettings.add(rs);
+      }
+    }
+  }
+
+  private RepositorySetting parseRepositorySetting(Map<String, String> setting){
+    RepositorySetting result = new RepositorySetting();
+    result.setOperatingSystem(setting.get(RepositorySetting.OPERATING_SYSTEM));
+    result.setOverrideStrategy(setting.get(RepositorySetting.OVERRIDE_STRATEGY));
+    result.setRepoId(setting.get(RepositorySetting.REPO_ID));
+    result.setBaseUrl(setting.get(RepositorySetting.BASE_URL));
+    return result;
+  }
+
+  public List<RepositorySetting> getRepositorySettings(){
+    return repoSettings;
   }
 }

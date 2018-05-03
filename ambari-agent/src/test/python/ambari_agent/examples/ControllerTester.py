@@ -47,7 +47,7 @@ responces = [
   """
   {
     "responseId":"n",
-    "restartAgent": "False",
+    "restartAgent": false,
     "executionCommands":
       [{
         "commandId": "31-1",
@@ -89,7 +89,7 @@ responces = [
   """
   {
     "responseId":"n",
-    "restartAgent": "False",
+    "restartAgent": false,
     "executionCommands": [],
     "statusCommands":[]
   }
@@ -141,7 +141,7 @@ def run_simulation():
 
   controller = Controller.Controller(config)
   controller.sendRequest = sendRequest_method
-  controller.netutil.HEARTBEAT_IDDLE_INTERVAL_SEC = 0.1
+  controller.netutil.HEARTBEAT_IDLE_INTERVAL_DEFAULT_MAX_SEC = 0.1
   controller.netutil.HEARTBEAT_NOT_IDDLE_INTERVAL_SEC = 0.1
   controller.range = 1
 
@@ -183,7 +183,7 @@ if __name__ == '__main__':
 #  s =   """
 #  {
 #    "responseId":"n",
-#    "restartAgent": "False",
+#    "restartAgent": false,
 #    "executionCommands":
 #      [{
 #        "commandId": "31-1",

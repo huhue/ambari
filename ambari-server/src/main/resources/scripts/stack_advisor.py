@@ -18,7 +18,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 '''
 
-import json
+import ambari_simplejson as json
 import os
 import sys
 import traceback
@@ -26,21 +26,29 @@ import traceback
 RECOMMEND_COMPONENT_LAYOUT_ACTION = 'recommend-component-layout'
 VALIDATE_COMPONENT_LAYOUT_ACTION = 'validate-component-layout'
 RECOMMEND_CONFIGURATIONS = 'recommend-configurations'
+RECOMMEND_CONFIGURATIONS_FOR_SSO = 'recommend-configurations-for-sso'
 RECOMMEND_CONFIGURATION_DEPENDENCIES = 'recommend-configuration-dependencies'
 VALIDATE_CONFIGURATIONS = 'validate-configurations'
 
 ALL_ACTIONS = [RECOMMEND_COMPONENT_LAYOUT_ACTION,
                VALIDATE_COMPONENT_LAYOUT_ACTION,
                RECOMMEND_CONFIGURATIONS,
+               RECOMMEND_CONFIGURATIONS_FOR_SSO,
                RECOMMEND_CONFIGURATION_DEPENDENCIES,
                VALIDATE_CONFIGURATIONS]
 USAGE = "Usage: <action> <hosts_file> <services_file>\nPossible actions are: {0}\n".format( str(ALL_ACTIONS) )
 
 SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
-STACK_ADVISOR_PATH_TEMPLATE = os.path.join(SCRIPT_DIRECTORY, '../stacks/stack_advisor.py')
+STACKS_DIRECTORY = os.path.join(SCRIPT_DIRECTORY, '../stacks')
+STACK_ADVISOR_PATH = os.path.join(STACKS_DIRECTORY, 'stack_advisor.py')
+AMBARI_CONFIGURATION_PATH = os.path.join(STACKS_DIRECTORY, 'ambari_configuration.py')
 STACK_ADVISOR_DEFAULT_IMPL_CLASS = 'DefaultStackAdvisor'
-STACK_ADVISOR_IMPL_PATH_TEMPLATE = os.path.join(SCRIPT_DIRECTORY, './../stacks/{0}/{1}/services/stack_advisor.py')
+STACK_ADVISOR_IMPL_PATH_TEMPLATE = os.path.join(STACKS_DIRECTORY, '{0}/{1}/services/stack_advisor.py')
 STACK_ADVISOR_IMPL_CLASS_TEMPLATE = '{0}{1}StackAdvisor'
+
+ADVISOR_CONTEXT = "advisor_context"
+CALL_TYPE = "call_type"
+
 
 
 class StackAdvisorException(Exception):
@@ -70,13 +78,11 @@ def main(argv=None):
   if len(args) < 3:
     sys.stderr.write(USAGE)
     sys.exit(2)
-    pass
 
   action = args[0]
   if action not in ALL_ACTIONS:
     sys.stderr.write(USAGE)
     sys.exit(2)
-    pass
 
   hostsFile = args[1]
   servicesFile = args[2]
@@ -89,6 +95,7 @@ def main(argv=None):
   stackName = services["Versions"]["stack_name"]
   stackVersion = services["Versions"]["stack_version"]
   parentVersions = []
+
   if "stack_hierarchy" in services["Versions"]:
     parentVersions = services["Versions"]["stack_hierarchy"]["stack_versions"]
 
@@ -96,35 +103,47 @@ def main(argv=None):
 
   # Perform action
   actionDir = os.path.realpath(os.path.dirname(args[1]))
-  result = {}
-  result_file = "non_valid_result_file.json"
+
+  # filter
+  hosts = stackAdvisor.filterHostMounts(hosts, services)
 
   if action == RECOMMEND_COMPONENT_LAYOUT_ACTION:
+    services[ADVISOR_CONTEXT] = {CALL_TYPE : 'recommendComponentLayout'}
     result = stackAdvisor.recommendComponentLayout(services, hosts)
     result_file = os.path.join(actionDir, "component-layout.json")
   elif action == VALIDATE_COMPONENT_LAYOUT_ACTION:
+    services[ADVISOR_CONTEXT] = {CALL_TYPE : 'validateComponentLayout'}
     result = stackAdvisor.validateComponentLayout(services, hosts)
     result_file = os.path.join(actionDir, "component-layout-validation.json")
   elif action == RECOMMEND_CONFIGURATIONS:
+    services[ADVISOR_CONTEXT] = {CALL_TYPE : 'recommendConfigurations'}
     result = stackAdvisor.recommendConfigurations(services, hosts)
     result_file = os.path.join(actionDir, "configurations.json")
+  elif action == RECOMMEND_CONFIGURATIONS_FOR_SSO:
+    services[ADVISOR_CONTEXT] = {CALL_TYPE : 'recommendConfigurationsForSSO'}
+    result = stackAdvisor.recommendConfigurationsForSSO(services, hosts)
+    result_file = os.path.join(actionDir, "configurations.json")
   elif action == RECOMMEND_CONFIGURATION_DEPENDENCIES:
+    services[ADVISOR_CONTEXT] = {CALL_TYPE : 'recommendConfigurationDependencies'}
     result = stackAdvisor.recommendConfigurationDependencies(services, hosts)
     result_file = os.path.join(actionDir, "configurations.json")
-  else: # action == VALIDATE_CONFIGURATIONS
+  else:  # action == VALIDATE_CONFIGURATIONS
+    services[ADVISOR_CONTEXT] = {CALL_TYPE: 'validateConfigurations'}
     result = stackAdvisor.validateConfigurations(services, hosts)
     result_file = os.path.join(actionDir, "configurations-validation.json")
 
   dumpJson(result, result_file)
-  pass
 
 
 def instantiateStackAdvisor(stackName, stackVersion, parentVersions):
   """Instantiates StackAdvisor implementation for the specified Stack"""
   import imp
 
-  with open(STACK_ADVISOR_PATH_TEMPLATE, 'rb') as fp:
-    default_stack_advisor = imp.load_module('stack_advisor', fp, STACK_ADVISOR_PATH_TEMPLATE, ('.py', 'rb', imp.PY_SOURCE))
+  with open(AMBARI_CONFIGURATION_PATH, 'rb') as fp:
+    imp.load_module('ambari_configuration', fp, AMBARI_CONFIGURATION_PATH, ('.py', 'rb', imp.PY_SOURCE))
+
+  with open(STACK_ADVISOR_PATH, 'rb') as fp:
+    default_stack_advisor = imp.load_module('stack_advisor', fp, STACK_ADVISOR_PATH, ('.py', 'rb', imp.PY_SOURCE))
   className = STACK_ADVISOR_DEFAULT_IMPL_CLASS
   stack_advisor = default_stack_advisor
 
@@ -135,10 +154,11 @@ def instantiateStackAdvisor(stackName, stackVersion, parentVersions):
     try:
       path = STACK_ADVISOR_IMPL_PATH_TEMPLATE.format(stackName, version)
 
-      with open(path, 'rb') as fp:
-        stack_advisor = imp.load_module('stack_advisor_impl', fp, path, ('.py', 'rb', imp.PY_SOURCE))
-      className = STACK_ADVISOR_IMPL_CLASS_TEMPLATE.format(stackName, version.replace('.', ''))
-      print "StackAdvisor implementation for stack {0}, version {1} was loaded".format(stackName, version)
+      if os.path.isfile(path):
+        with open(path, 'rb') as fp:
+          stack_advisor = imp.load_module('stack_advisor_impl', fp, path, ('.py', 'rb', imp.PY_SOURCE))
+        className = STACK_ADVISOR_IMPL_CLASS_TEMPLATE.format(stackName, version.replace('.', ''))
+        print "StackAdvisor implementation for stack {0}, version {1} was loaded".format(stackName, version)
     except IOError: # file not found
       traceback.print_exc()
       print "StackAdvisor implementation for stack {0}, version {1} was not found".format(stackName, version)

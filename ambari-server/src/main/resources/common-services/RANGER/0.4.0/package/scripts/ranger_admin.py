@@ -17,48 +17,65 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+from resource_management.core.exceptions import Fail
+from resource_management.libraries.functions.check_process_status import check_process_status
 from resource_management.libraries.functions import stack_select
+from resource_management.libraries.functions import upgrade_summary
 from resource_management.libraries.script import Script
-from resource_management.core.resources.system import Execute
+from resource_management.core.resources.system import Execute, File
 from resource_management.core.exceptions import ComponentIsNotRunning
 from resource_management.libraries.functions.format import format
 from resource_management.core.logger import Logger
 from resource_management.core import shell
 from ranger_service import ranger_service
-import upgrade
+from resource_management.libraries.functions import solr_cloud_util
+from ambari_commons.constants import UPGRADE_TYPE_NON_ROLLING
+from resource_management.libraries.functions.constants import Direction
+
+import setup_ranger_xml
+
 import os, errno
 
 class RangerAdmin(Script):
-
-  def get_component_name(self):
-    return "ranger-admin"
 
   def install(self, env):
     self.install_packages(env)
     import params
     env.set_params(params)
-    if params.xml_configurations_supported:
-      from setup_ranger_xml import setup_ranger_db
-      setup_ranger_db()
 
-    self.configure(env)
+    # taking backup of install.properties file
+    Execute(('cp', '-f', format('{ranger_home}/install.properties'), format('{ranger_home}/install-backup.properties')),
+      not_if = format('ls {ranger_home}/install-backup.properties'),
+      only_if = format('ls {ranger_home}/install.properties'),
+      sudo = True
+    )
 
-    if params.xml_configurations_supported:
-      from setup_ranger_xml import setup_java_patch
-      setup_java_patch()
+    # call config and setup db only in case of HDP version < 2.6
+    if not params.stack_supports_ranger_setup_db_on_start:
+      self.configure(env, setup_db=True)
 
   def stop(self, env, upgrade_type=None):
     import params
-
     env.set_params(params)
-    Execute(format('{params.ranger_stop}'), environment={'JAVA_HOME': params.java_home}, user=params.unix_user)
 
+    if upgrade_type == UPGRADE_TYPE_NON_ROLLING and params.upgrade_direction == Direction.UPGRADE:
+      if params.stack_supports_rolling_upgrade and not params.stack_supports_config_versioning and os.path.isfile(format('{ranger_home}/ews/stop-ranger-admin.sh')):
+        File(format('{ranger_home}/ews/stop-ranger-admin.sh'),
+          owner=params.unix_user,
+          group = params.unix_group
+        )
+
+    Execute(format('{params.ranger_stop}'), environment={'JAVA_HOME': params.java_home}, user=params.unix_user)
+    if params.stack_supports_pid:
+      File(params.ranger_admin_pid_file,
+        action = "delete"
+      )
 
   def pre_upgrade_restart(self, env, upgrade_type=None):
     import params
     env.set_params(params)
 
-    upgrade.prestart(env, "ranger-admin")
+    stack_select.select_packages(params.version)
 
     self.set_ru_rangeradmin_in_progress(params.upgrade_marker_file)
 
@@ -72,7 +89,15 @@ class RangerAdmin(Script):
   def start(self, env, upgrade_type=None):
     import params
     env.set_params(params)
-    self.configure(env, upgrade_type=upgrade_type)
+
+    # setup db only if in case HDP version is > 2.6
+    self.configure(env, upgrade_type=upgrade_type, setup_db=params.stack_supports_ranger_setup_db_on_start)
+
+    if params.stack_supports_infra_client and params.audit_solr_enabled and params.is_solrCloud_enabled:
+      solr_cloud_util.setup_solr_client(params.config, custom_log4j = params.custom_log4j)
+      setup_ranger_xml.setup_ranger_audit_solr()
+
+    setup_ranger_xml.update_password_configs()
     ranger_service('ranger_admin')
 
 
@@ -80,6 +105,11 @@ class RangerAdmin(Script):
     import status_params
 
     env.set_params(status_params)
+
+    if status_params.stack_supports_pid:
+      check_process_status(status_params.ranger_admin_pid_file)
+      return
+
     cmd = 'ps -ef | grep proc_rangeradmin | grep -v grep'
     code, output = shell.call(cmd, timeout=20)
 
@@ -91,7 +121,7 @@ class RangerAdmin(Script):
         raise ComponentIsNotRunning()
     pass
 
-  def configure(self, env, upgrade_type=None):
+  def configure(self, env, upgrade_type=None, setup_db=False):
     import params
     env.set_params(params)
     if params.xml_configurations_supported:
@@ -99,7 +129,22 @@ class RangerAdmin(Script):
     else:
       from setup_ranger import ranger
 
+    # set up db if we are not upgrading and setup_db is true
+    if setup_db and upgrade_type is None:
+      if params.xml_configurations_supported:
+        from setup_ranger_xml import setup_ranger_db
+        setup_ranger_db()
+
     ranger('ranger_admin', upgrade_type=upgrade_type)
+
+    # set up java patches if we are not upgrading and setup_db is true
+    if setup_db and upgrade_type is None:
+      if params.xml_configurations_supported:
+        from setup_ranger_xml import setup_java_patch
+        setup_java_patch()
+
+      if params.stack_supports_ranger_admin_password_change:
+        setup_ranger_xml.setup_ranger_admin_passwd_change()
 
   def set_ru_rangeradmin_in_progress(self, upgrade_marker_file):
     config_dir = os.path.dirname(upgrade_marker_file)
@@ -129,11 +174,12 @@ class RangerAdmin(Script):
 
     stack_version = upgrade_stack[1]
 
-    if params.xml_configurations_supported:
-      Logger.info(format('Setting Ranger database schema, using version {stack_version}'))
+    if params.xml_configurations_supported and params.upgrade_direction == Direction.UPGRADE:
+      target_version = upgrade_summary.get_target_version("RANGER", default_version = stack_version)
+      Logger.info(format('Setting Ranger database schema, using version {target_version}'))
 
       from setup_ranger_xml import setup_ranger_db
-      setup_ranger_db(stack_version=stack_version)
+      setup_ranger_db(stack_version = target_version)
 
   def setup_ranger_java_patches(self, env):
     import params
@@ -145,11 +191,36 @@ class RangerAdmin(Script):
 
     stack_version = upgrade_stack[1]
 
-    if params.xml_configurations_supported:
-      Logger.info(format('Applying Ranger java patches, using version {stack_version}'))
+    if params.xml_configurations_supported and params.upgrade_direction == Direction.UPGRADE:
+      target_version = upgrade_summary.get_target_version("RANGER", default_version = stack_version)
+      Logger.info(format('Applying Ranger java patches, using version {target_version}'))
 
       from setup_ranger_xml import setup_java_patch
-      setup_java_patch(stack_version=stack_version)
+      setup_java_patch(stack_version = target_version)
+
+  def set_pre_start(self, env):
+    import params
+    env.set_params(params)
+
+    orchestration = stack_select.PACKAGE_SCOPE_STANDARD
+    summary = upgrade_summary.get_upgrade_summary()
+
+    if summary is not None:
+      orchestration = summary.orchestration
+      if orchestration is None:
+        raise Fail("The upgrade summary does not contain an orchestration type")
+
+      if orchestration.upper() in stack_select._PARTIAL_ORCHESTRATION_SCOPES:
+        orchestration = stack_select.PACKAGE_SCOPE_PATCH
+
+    stack_select_packages = stack_select.get_packages(orchestration, service_name = "RANGER", component_name = "RANGER_ADMIN")
+    if stack_select_packages is None:
+      raise Fail("Unable to get packages for stack-select")
+
+    Logger.info("RANGER_ADMIN component will be stack-selected to version {0} using a {1} orchestration".format(params.version, orchestration.upper()))
+
+    for stack_select_package_name in stack_select_packages:
+      stack_select.select(stack_select_package_name, params.version)
 
   def get_log_folder(self):
     import params

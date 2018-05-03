@@ -22,8 +22,9 @@ package org.apache.ambari.view.tez.utils;
 import com.google.inject.Inject;
 import org.apache.ambari.view.URLConnectionProvider;
 import org.apache.ambari.view.ViewContext;
-import org.apache.ambari.view.tez.exceptions.ProxyException;
+import org.apache.ambari.view.tez.exceptions.TezWebAppException;
 import org.apache.commons.io.IOUtils;
+import org.apache.http.client.utils.URIBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +33,7 @@ import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.Set;
 
@@ -47,12 +49,17 @@ public class ProxyHelper {
   }
 
 
-  public String getResponse(String url, Map<String, String> headers) {
+  public String getResponse(String url, Map<String, String> headers, String authType) {
     LOG.debug("Fetching the result from the URL: {} using proxy", url);
     InputStream inputStream = null;
     try {
+      HttpURLConnection connection;
       URLConnectionProvider provider = viewContext.getURLConnectionProvider();
-      HttpURLConnection connection = provider.getConnectionAsCurrent(url, "GET", (String) null, headers);
+      if(authType == null || authType.equalsIgnoreCase("simple")) {
+        connection = provider.getConnection(url, "GET", (String) null, headers);
+      } else {
+        connection = provider.getConnectionAsCurrent(url, "GET", (String) null, headers);
+      }
 
       if (!(connection.getResponseCode() >= 200 && connection.getResponseCode() < 300)) {
         LOG.error("Failure in fetching results for the URL: {}. Status: {}", url, connection.getResponseCode());
@@ -61,7 +68,7 @@ public class ProxyHelper {
         if (inputStream != null) {
           trace = IOUtils.toString(inputStream);
         }
-        throw new ProxyException("Failed to fetch results by the proxy from url: " + url, connection.getResponseCode(), trace);
+        throw new TezWebAppException("Failed to fetch results by the proxy from url: " + url, connection.getResponseCode(), trace);
       }
 
       inputStream = connection.getInputStream();
@@ -69,8 +76,7 @@ public class ProxyHelper {
 
     } catch (IOException e) {
       LOG.error("Cannot access the url: {}", url, e);
-      throw new ProxyException("Failed to fetch results by the proxy from url: " + url + ".Internal Error.",
-        Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(), e.getMessage());
+      throw new TezWebAppException("Failed to fetch results by the proxy from url: " + url + ". Internal Error.", e);
     } finally {
       if (inputStream != null) {
         try {
@@ -80,21 +86,21 @@ public class ProxyHelper {
     }
   }
 
-  public String getQueryParamsString(MultivaluedMap<String, String> queryParameters) {
+  public String getProxyUrl(String baseUrl, String endPoint, MultivaluedMap<String, String> queryParameters, String authType) {
     Set<String> keySet = queryParameters.keySet();
-    StringBuilder builder = new StringBuilder();
-    if(keySet.size() > 0)
-      builder.append("?");
-
-    int count = 0;
-    for(String key: keySet) {
-      builder.append(key);
-      builder.append("=");
-      builder.append(queryParameters.getFirst(key));
-      if(count < keySet.size() - 1) {
-        builder.append("&");
+    URIBuilder builder;
+    try {
+      builder = new URIBuilder(baseUrl + "/" + endPoint);
+      for(String key: keySet) {
+        builder.addParameter(key, queryParameters.getFirst(key));
       }
+      if(authType == null || authType.equalsIgnoreCase("simple")) {
+        builder.addParameter("user.name", viewContext.getUsername());
+      }
+      return builder.build().toString();
+    } catch (URISyntaxException e) {
+      LOG.error("Failed to build a URL from the baseUrl: {} and endPoint: {}. Exception: {}", baseUrl, endPoint, e);
+      throw new TezWebAppException("Failed to build a URL from the baseUrl:" + baseUrl + "and endPoint: " + endPoint, e);
     }
-    return builder.toString();
   }
 }

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,18 +18,18 @@
 
 package org.apache.ambari.server.orm.dao;
 
-import com.google.common.base.Optional;
+import java.util.List;
+
+import javax.persistence.EntityManager;
+import javax.persistence.TypedQuery;
+
+import org.apache.ambari.server.orm.RequiresSession;
+import org.apache.ambari.server.orm.entities.RemoteAmbariClusterEntity;
+
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
 import com.google.inject.persist.Transactional;
-import org.apache.ambari.server.orm.RequiresSession;
-import org.apache.ambari.server.orm.entities.RemoteAmbariClusterEntity;
-import org.apache.ambari.server.orm.entities.ViewURLEntity;
-
-import javax.persistence.EntityManager;
-import javax.persistence.TypedQuery;
-import java.util.List;
 
 /**
  * Remote Ambari Cluster Data Access Object.
@@ -68,6 +68,19 @@ public class RemoteAmbariClusterDAO {
     TypedQuery<RemoteAmbariClusterEntity> query = entityManagerProvider.get().
             createNamedQuery("remoteAmbariClusterByName", RemoteAmbariClusterEntity.class);
     query.setParameter("clusterName", clusterName);
+    return daoUtils.selectSingle(query);
+  }
+
+  /**
+   * Find Cluster by Id
+   * @param clusterId
+   * @return
+   */
+  @RequiresSession
+  public RemoteAmbariClusterEntity findById(Long clusterId) {
+    TypedQuery<RemoteAmbariClusterEntity> query = entityManagerProvider.get().
+      createNamedQuery("remoteAmbariClusterById", RemoteAmbariClusterEntity.class);
+    query.setParameter("clusterId", clusterId);
     return daoUtils.selectSingle(query);
   }
 

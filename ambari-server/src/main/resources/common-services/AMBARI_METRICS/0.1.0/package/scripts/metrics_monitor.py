@@ -18,7 +18,7 @@ limitations under the License.
 
 """
 
-from resource_management import *
+from resource_management.libraries.script.script import Script
 from ams import ams
 from ams_service import ams_service
 from status import check_service_status
@@ -35,14 +35,14 @@ class AmsMonitor(Script):
     env.set_params(params)
     ams(name='monitor')
 
-  def start(self, env):
+  def start(self, env, upgrade_type=None):
     self.configure(env) # for security
 
     ams_service( 'monitor',
                  action = 'start'
     )
 
-  def stop(self, env):
+  def stop(self, env, upgrade_type=None):
     import params
     env.set_params(params)
 
@@ -53,12 +53,16 @@ class AmsMonitor(Script):
   def status(self, env):
     import status_params
     env.set_params(status_params)
-    check_service_status(name='monitor')
+    check_service_status(env, name='monitor')
     
   def get_log_folder(self):
     import params
     return params.ams_monitor_log_dir
-  
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.monitor_pid_file]
+
   def get_user(self):
     import params
     return params.ams_user

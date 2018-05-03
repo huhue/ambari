@@ -19,8 +19,10 @@ limitations under the License.
 '''
 from mock.mock import MagicMock, call, patch
 from stacks.utils.RMFTestCase import *
+from resource_management.libraries.script.script import Script
 import json
 
+@patch.object(Script, 'format_package_name', new = MagicMock())
 @patch("platform.linux_distribution", new = MagicMock(return_value="Linux"))
 class TestOozieServiceCheck(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "OOZIE/4.0.0.2.0/package"
@@ -28,6 +30,7 @@ class TestOozieServiceCheck(RMFTestCase):
 
   @patch("resource_management.core.shell.call")
   @patch("glob.glob")
+  @patch("resource_management.libraries.functions.stack_select.get_hadoop_dir", new = MagicMock(return_value = "/usr/hdp/current/hadoop-client"))
   def test_service_check(self, glob_mock, call_mock):
     glob_mock.return_value = ["examples-dir", "b"]
 
@@ -37,7 +40,8 @@ class TestOozieServiceCheck(RMFTestCase):
     version = '2.3.0.0-1234'
     json_content['commandParams']['version'] = version
     json_content['hostLevelParams']['stack_name'] = 'HDP'
-    json_content['hostLevelParams']['stack_version'] = '2.2'
+    json_content['clusterLevelParams']['stack_version'] = '2.3'
+    json_content['configurations']['oozie-env']['service_check_job_name'] = 'map-reduce'
 
     mocks_dict = {}
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/service_check.py",
@@ -51,14 +55,6 @@ class TestOozieServiceCheck(RMFTestCase):
 
     self.maxDiff = None
 
-    self.assertResourceCalled('XmlConfig',
-      "yarn-site.xml",
-      owner = "hdfs",
-      group = "hadoop",
-      mode = 0644,
-      conf_dir="/usr/hdp/current/hadoop-client/conf",
-      configurations = json_content['configurations']['yarn-site'])
-
     self.assertResourceCalled('File',
       "/tmp/oozieSmoke2.sh",
       content = StaticFile("oozieSmoke2.sh"),
@@ -70,7 +66,7 @@ class TestOozieServiceCheck(RMFTestCase):
       mode = 0755)
 
     self.assertResourceCalled('Execute',
-      "/tmp/prepareOozieHdfsDirectories.sh /usr/hdp/current/oozie-client/conf examples-dir /usr/hdp/current/hadoop-client/conf ",
+      ('/tmp/prepareOozieHdfsDirectories.sh', '/usr/hdp/current/oozie-client/conf', 'examples-dir', '/usr/hdp/2.3.0.0-1234/hadoop/conf', 'c6402.ambari.apache.org:8050', 'hdfs://c6401.ambari.apache.org:8020', 'default', 'map-reduce'),
       tries = 3,
       try_sleep = 5,
       logoutput = True)

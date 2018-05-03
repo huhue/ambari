@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 var App = require('app');
-require('mixins/common/userPref');
 var LZString = require('utils/lz-string');
-App.clusterStatus = Em.Object.create(App.UserPref, {
+App.clusterStatus = Em.Object.create(App.Persist, {
 
   /**
    * Cluster name
@@ -86,6 +85,12 @@ App.clusterStatus = Em.Object.create(App.UserPref, {
   isInstalled: Em.computed.notExistsIn('clusterState', ['CLUSTER_NOT_CREATED_1', 'CLUSTER_DEPLOY_PREP_2', 'CLUSTER_INSTALLING_3', 'SERVICE_STARTING_3']),
 
   /**
+   * Stores instance of <code>App.ModalPopup</code> created by <code>postUserPrefErrorCallback</code>
+   * @property {App.ModalPopup|null}
+   */
+  persistErrorModal: null,
+
+  /**
    * General info about cluster
    * @type {{clusterName: string, clusterState: string, wizardControllerName: string, localdb: object}}
    */
@@ -140,7 +145,9 @@ App.clusterStatus = Em.Object.create(App.UserPref, {
         this.set('localdb', response.localdb);
         // restore HAWizard data if process was started
         var isHAWizardStarted = App.isAuthorized('SERVICE.ENABLE_HA') && !App.isEmptyObject(response.localdb.HighAvailabilityWizard);
-        if (params.data.overrideLocaldb || isHAWizardStarted) {
+        // restore Kerberos Wizard is started
+        var isKerberosWizardStarted = App.isAuthorized('CLUSTER.TOGGLE_KERBEROS') && !App.isEmptyObject(response.localdb.KerberosWizard);
+        if (params.data.overrideLocaldb || isHAWizardStarted || isKerberosWizardStarted) {
           var localdbTables = (App.db.data.app && App.db.data.app.tables) ? App.db.data.app.tables : {};
           var authenticated = Em.get(App, 'db.data.app.authenticated') || false;
           App.db.data = response.localdb;
@@ -277,7 +284,16 @@ App.clusterStatus = Em.Object.create(App.UserPref, {
       msg += JSON.parse(request.responseText).message;
     }
 
-    App.ModalPopup.show({
+    if (this.get('persistErrorModal')) {
+      if (this.get('persistErrorModal').get('state') === 'destroyed') {
+        this.set('persistErrorModal', null);
+      } else {
+        this.get('persistErrorModal').onPrimary();
+        this.set('persistErrorModal', null);
+      }
+    }
+
+    var modal = App.ModalPopup.show({
       header: Em.I18n.t('common.error'),
       secondary: false,
       response: msg,
@@ -285,6 +301,7 @@ App.clusterStatus = Em.Object.create(App.UserPref, {
         template: Em.Handlebars.compile('<p>{{t common.persist.error}} {{response}}</p>')
       })
     });
+    this.set('persistErrorModal', modal);
   }
 
 });

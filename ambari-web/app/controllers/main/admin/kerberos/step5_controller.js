@@ -15,10 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+var App = require('app');
 var stringUtils = require('utils/string_utils');
 var fileUtils = require('utils/file_utils');
 
-App.KerberosWizardStep5Controller = App.KerberosProgressPageController.extend({
+App.KerberosWizardStep5Controller = App.KerberosProgressPageController.extend(App.AddSecurityConfigs, {
   name: 'kerberosWizardStep5Controller',
 
   /**
@@ -48,6 +49,8 @@ App.KerberosWizardStep5Controller = App.KerberosProgressPageController.extend({
     }
   ],
 
+  isCSVRequestInProgress: false,
+
   submit: function() {
     App.router.send('next');
   },
@@ -56,6 +59,7 @@ App.KerberosWizardStep5Controller = App.KerberosProgressPageController.extend({
    * get CSV data from the server
    */
   getCSVData: function (skipDownload) {
+    this.set('isCSVRequestInProgress', true);
     return App.ajax.send({
       name: 'admin.kerberos.cluster.csv',
       sender: this,
@@ -75,6 +79,7 @@ App.KerberosWizardStep5Controller = App.KerberosProgressPageController.extend({
    */
   getCSVDataSuccessCallback: function (data, opt, params) {
     this.set('csvData', this.prepareCSVData(data.split('\n')));
+    this.set('isCSVRequestInProgress', false);
     if (!Em.get(params, 'skipDownload')) {
       fileUtils.downloadTextFile(stringUtils.arrayToCSV(this.get('csvData')), 'csv', 'kerberos.csv');
     }
@@ -88,43 +93,7 @@ App.KerberosWizardStep5Controller = App.KerberosProgressPageController.extend({
     return array;
   },
 
-  /**
-   * Send request to post kerberos descriptor
-   * @param kerberosDescriptor
-   * @returns {$.ajax|*}
-   */
-  postKerberosDescriptor: function (kerberosDescriptor) {
-    return App.ajax.send({
-      name: 'admin.kerberos.cluster.artifact.create',
-      sender: this,
-      data: {
-        artifactName: 'kerberos_descriptor',
-        data: {
-          artifact_data: kerberosDescriptor
-        }
-      }
-    });
-  },
 
-  /**
-   * Send request to update kerberos descriptor
-   * @param kerberosDescriptor
-   * @returns {$.ajax|*}
-   */
-  putKerberosDescriptor: function (kerberosDescriptor) {
-    return App.ajax.send({
-      name: 'admin.kerberos.cluster.artifact.update',
-      sender: this,
-      data: {
-        artifactName: 'kerberos_descriptor',
-        data: {
-          artifact_data: kerberosDescriptor
-        }
-      },
-      success: 'unkerberizeCluster',
-      error: 'unkerberizeCluster'
-    });
-  },
 
   /**
    * Send request to unkerberisze cluster

@@ -80,15 +80,25 @@ angular.module('ambariAdminConsole')
         return deferred.promise;
     }
 
-    RemoteCluster.all = function(params) {
+    RemoteCluster.all = function() {
       var deferred = $q.defer();
 
-      $http.get(Settings.baseUrl + "/remoteclusters?"
-          + 'ClusterInfo/name.matches(.*'+params.searchString+'.*)'
-          + '&fields=*'
-          + '&from='+ (params.currentPage-1)*params.groupsPerPage
-          + '&page_size=' + params.groupsPerPage
-          + (params.service === 'Any' ? '' : '&ClusterInfo/services.matches(.*'+params.service+'.*)')
+      $http.get(Settings.baseUrl + "/remoteclusters")
+        .success(function(response) {
+          deferred.resolve(response);
+        })
+        .error(function(data) {
+          deferred.reject(data);
+        });
+      return deferred.promise;
+    };
+
+    RemoteCluster.affectedViews = function(clustername) {
+      var deferred = $q.defer();
+
+      $http.get(Settings.baseUrl + '/views?'
+          + 'fields=versions%2Finstances/ViewInstanceInfo/cluster_handle,versions%2Finstances/ViewInstanceInfo/cluster_type&versions%2FViewVersionInfo%2Fsystem=false&versions%2Finstances/ViewInstanceInfo/cluster_type=REMOTE_AMBARI&versions%2Finstances/ViewInstanceInfo/cluster_handle=' + clustername
+
         )
         .success(function(response) {
           deferred.resolve(response);
@@ -103,7 +113,7 @@ angular.module('ambariAdminConsole')
       var deferred = $q.defer();
 
       /* TODO :: Add params like RemoteCluster.matches and &from , &page_size */
-      $http.get(Settings.baseUrl + "/remoteclusters?fields=ClusterInfo/services")
+      $http.get(Settings.baseUrl + "/remoteclusters?fields=ClusterInfo/services,ClusterInfo/cluster_id")
         .success(function(response) {
           deferred.resolve(response.items);
         })

@@ -6,7 +6,7 @@
         "not_managed_hdfs_path_list": "[\"/apps/hive/warehouse\",\"/apps/falcon\",\"/mr-history/done\",\"/app-logs\",\"/tmp\"]",
         "agent_stack_retry_count": "5",
         "agent_stack_retry_on_unavailability": "false",
-        "jdk_location": "http://c6401.ambari.apache.org:8080/resources/", 
+        "jdk_location": "http://c6401.ambari.apache.org:8080/resources",
         "ambari_db_rca_password": "mapred", 
         "ambari_db_rca_url": "jdbc:postgresql://c6401.ambari.apache.org/ambarirca", 
         "jce_name": "UnlimitedJCEPolicyJDK7.zip", 
@@ -385,7 +385,7 @@
             "yarn.nodemanager.address": "0.0.0.0:45454", 
             "yarn.nodemanager.container-monitor.interval-ms": "3000", 
             "yarn.nodemanager.log-aggregation.compression-type": "gz", 
-            "yarn.nodemanager.log.retain-second": "604800", 
+            "yarn.nodemanager.log.retain-seconds": "604800",
             "yarn.nodemanager.delete.debug-delay-sec": "0", 
             "yarn.nodemanager.log-dirs": "/hadoop/yarn/log", 
             "yarn.nodemanager.health-checker.interval-ms": "135000", 
@@ -547,7 +547,7 @@
             "content": "\n# Set Hadoop-specific environment variables here.\n\n#Set path to where bin/hadoop is available\n#Set path to where bin/hadoop is available\nexport HADOOP_HOME=${HADOOP_HOME:-/usr/lib/hadoop}\n\n#set the path to where bin/hbase is available\nexport HBASE_HOME=${HBASE_HOME:-/usr/lib/hbase}\n\n#Set the path to where bin/hive is available\nexport HIVE_HOME=${HIVE_HOME:-/usr/lib/hive}\n\n#Set the path for where zookeper config dir is\nexport ZOOCFGDIR=${ZOOCFGDIR:-/etc/zookeeper/conf}\n\n# add libthrift in hive to sqoop class path first so hive imports work\nexport SQOOP_USER_CLASSPATH=\"`ls ${HIVE_HOME}/lib/libthrift-*.jar 2> /dev/null`:${SQOOP_USER_CLASSPATH}\""
         }
     },
-    "configuration_attributes": {
+    "configurationAttributes": {
       "mapred-site": {
         "final": {
           "mapred.healthChecker.script.path": "true",
@@ -651,7 +651,7 @@
         "ganglia_server_host": [
             "c6402.ambari.apache.org"
         ], 
-        "hive_server_host": [
+        "hive_server_hosts": [
             "c6402.ambari.apache.org"
         ], 
         "logviewer_server_hosts": [
@@ -663,10 +663,10 @@
         "hbase_rs_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "webhcat_server_host": [
+        "webhcat_server_hosts": [
             "c6402.ambari.apache.org"
         ], 
-        "zookeeper_hosts": [
+        "zookeeper_server_hosts": [
             "c6401.ambari.apache.org", 
             "c6402.ambari.apache.org"
         ], 
@@ -682,7 +682,7 @@
             "8670", 
             "8670"
         ], 
-        "rm_host": [
+        "resourcemanager_hosts": [
             "c6402.ambari.apache.org"
         ], 
         "all_hosts": [

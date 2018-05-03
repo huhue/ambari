@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,8 +17,8 @@
  */
 package org.apache.ambari.server.controller.internal;
 
+import static org.apache.ambari.server.configuration.Configuration.JDBC_IN_MEMORY_DRIVER;
 import static org.apache.ambari.server.configuration.Configuration.JDBC_IN_MEMORY_URL;
-import static org.apache.ambari.server.configuration.Configuration.JDBC_IN_MEMROY_DRIVER;
 import static org.easymock.EasyMock.capture;
 import static org.easymock.EasyMock.createMock;
 import static org.easymock.EasyMock.expect;
@@ -566,7 +566,7 @@ public class AlertResourceProviderTest {
 
     SecurityContextHolder.getContext().setAuthentication(TestAuthenticationFactory.createAdministrator());
 
-    Set<String> requestProperties = new HashSet<String>();
+    Set<String> requestProperties = new HashSet<>();
     requestProperties.add(AlertResourceProvider.ALERT_ID);
     requestProperties.add(AlertResourceProvider.ALERT_DEFINITION_NAME);
 
@@ -653,7 +653,7 @@ public class AlertResourceProviderTest {
     int unknown = 3;
     int total = ok + warning + critical + unknown;
 
-    List<AlertCurrentEntity> currents = new ArrayList<AlertCurrentEntity>(total);
+    List<AlertCurrentEntity> currents = new ArrayList<>(total);
 
     for (int i = 0; i < total; i++) {
       AlertState state = AlertState.OK;
@@ -734,10 +734,12 @@ public class AlertResourceProviderTest {
       binder.bind(Configuration.class).toInstance(configuration);
 
       expect(configuration.getDatabaseUrl()).andReturn(JDBC_IN_MEMORY_URL).anyTimes();
-      expect(configuration.getDatabaseDriver()).andReturn(JDBC_IN_MEMROY_DRIVER).anyTimes();
-      expect(configuration.getDatabaseUser()).andReturn("test").anyTimes();
-      expect(configuration.getDatabasePassword()).andReturn("test").anyTimes();
-      expect(configuration.getAlertEventPublisherPoolSize()).andReturn(Integer.valueOf(Configuration.ALERTS_EXECUTION_SCHEDULER_THREADS_DEFAULT)).anyTimes();
+      expect(configuration.getDatabaseDriver()).andReturn(JDBC_IN_MEMORY_DRIVER).anyTimes();
+      expect(configuration.getDatabaseUser()).andReturn("sa").anyTimes();
+      expect(configuration.getDatabasePassword()).andReturn("").anyTimes();
+      expect(configuration.getAlertEventPublisherCorePoolSize()).andReturn(Integer.valueOf(Configuration.ALERTS_EXECUTION_SCHEDULER_THREADS_CORE_SIZE.getDefaultValue())).anyTimes();
+      expect(configuration.getAlertEventPublisherMaxPoolSize()).andReturn(Integer.valueOf(Configuration.ALERTS_EXECUTION_SCHEDULER_THREADS_MAX_SIZE.getDefaultValue())).anyTimes();
+      expect(configuration.getAlertEventPublisherWorkerQueueSize()).andReturn(Integer.valueOf(Configuration.ALERTS_EXECUTION_SCHEDULER_WORKER_QUEUE_SIZE.getDefaultValue())).anyTimes();
       expect(configuration.getMasterKeyLocation()).andReturn(new File("/test")).anyTimes();
       expect(configuration.getTemporaryKeyStoreRetentionMinutes()).andReturn(2l).anyTimes();
       expect(configuration.isActivelyPurgeTemporaryKeyStore()).andReturn(true).anyTimes();

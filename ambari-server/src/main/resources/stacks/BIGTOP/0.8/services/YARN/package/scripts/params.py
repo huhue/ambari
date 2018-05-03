@@ -72,7 +72,7 @@ rm_https_port = "8090"
 # TODO UPGRADE default, update site during upgrade
 rm_nodes_exclude_path = default("/configurations/yarn-site/yarn.resourcemanager.nodes.exclude-path","/etc/hadoop/conf/yarn.exclude")
 
-java64_home = config['hostLevelParams']['java_home']
+java64_home = config['ambariLevelParams']['java_home']
 hadoop_ssl_enabled = default("/configurations/core-site/hadoop.ssl.enabled", False)
 
 yarn_heapsize = config['configurations']['yarn-env']['yarn_heapsize']
@@ -118,6 +118,14 @@ user_group = config['configurations']['cluster-env']['user_group']
 exclude_hosts = default("/clusterHostInfo/decom_nm_hosts", [])
 exclude_file_path = default("/configurations/yarn-site/yarn.resourcemanager.nodes.exclude-path","/etc/hadoop/conf/yarn.exclude")
 
+nm_hosts = default("/clusterHostInfo/nm_hosts", [])
+#incude file
+include_file_path = default("/configurations/yarn-site/yarn.resourcemanager.nodes.include-path", None)
+include_hosts = None
+manage_include_files = default("/configurations/yarn-site/manage.include.files", False)
+if include_file_path and manage_include_files:
+  include_hosts = list(set(nm_hosts) - set(exclude_hosts))
+
 hostname = config['hostname']
 
 ats_host = set(default("/clusterHostInfo/app_timeline_server_hosts", []))
@@ -162,7 +170,7 @@ HdfsDirectory = functools.partial(
   kinit_path_local = kinit_path_local,
   bin_dir = hadoop_bin_dir
 )
-update_exclude_file_only = default("/commandParams/update_exclude_file_only",False)
+update_files_only = default("/commandParams/update_files_only",False)
 
 mapred_tt_group = default("/configurations/mapred-site/mapreduce.tasktracker.group", user_group)
 

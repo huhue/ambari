@@ -22,6 +22,7 @@ import org.apache.ambari.server.Role;
 public interface DummyHeartbeatConstants {
 
   String DummyCluster = "cluster1";
+  String DummyClusterId = "1";
   String DummyHostname1 = "host1";
   String DummyHostname2 = "host2";
   String DummyHostname3 = "host3";
@@ -36,6 +37,7 @@ public interface DummyHeartbeatConstants {
   String DummyHostStatus = "I am ok";
 
   String DummyStackId = "HDP-0.1";
+  String DummyRepositoryVersion = "0.1-1234";
 
   String HDFS = "HDFS";
   String HBASE = "HBASE";

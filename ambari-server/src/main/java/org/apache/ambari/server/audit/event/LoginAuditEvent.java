@@ -36,6 +36,7 @@ public class LoginAuditEvent extends AbstractUserAuditEvent {
     extends AbstractUserAuditEventBuilder<LoginAuditEvent, LoginAuditEventBuilder> {
 
     private LoginAuditEventBuilder() {
+      super(LoginAuditEventBuilder.class);
     }
 
     /**
@@ -48,6 +49,11 @@ public class LoginAuditEvent extends AbstractUserAuditEvent {
      * Reason of failure, if it is not null, then the request status is consider as failed
      */
     private String reasonOfFailure;
+
+    /**
+     * Number of consecutive failed authentication attempts since the last successful attempt
+     */
+    private Integer consecutiveFailures;
 
     /**
      * {@inheritDoc}
@@ -72,6 +78,9 @@ public class LoginAuditEvent extends AbstractUserAuditEvent {
       if (reasonOfFailure != null) {
         builder.append("), Reason(")
           .append(reasonOfFailure);
+
+        builder.append("), Consecutive failures(")
+            .append((consecutiveFailures == null) ? "UNKNOWN USER" : String.valueOf(consecutiveFailures));
       }
       builder.append(")");
     }
@@ -90,6 +99,18 @@ public class LoginAuditEvent extends AbstractUserAuditEvent {
 
     public LoginAuditEventBuilder withReasonOfFailure(String reasonOfFailure) {
       this.reasonOfFailure = reasonOfFailure;
+      return this;
+    }
+
+    /**
+     * Set the number of consecutive authentication failures since the last successful authentication
+     * attempt
+     *
+     * @param consecutiveFailures the number of consecutive authentication failures
+     * @return this builder
+     */
+    public LoginAuditEventBuilder withConsecutiveFailures(Integer consecutiveFailures) {
+      this.consecutiveFailures = consecutiveFailures;
       return this;
     }
 

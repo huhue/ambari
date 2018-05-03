@@ -371,7 +371,10 @@ describe('validator', function () {
       {m:'"-abc-" - valid',i:'-abc-',e:true},
       {m:'"abc 123" - invalid',i:'abc 123',e:false},
       {m:'"a"b" - invalid',i:'a"b',e:false},
-      {m:'"a\'b" - invalid',i:'a\'b',e:false}
+      {m:'"a\'b" - invalid',i:'a\'b',e:false},
+      {m:'" a " - valid', i: ' a ', e: true},
+      {m:'" a" - valid', i: ' a', e: true},
+      {m:'"a " - valid', i: 'a ', e: true}
     ];
     tests.forEach(function(test) {
       it(test.m + ' ', function () {
@@ -422,7 +425,8 @@ describe('validator', function () {
         { value: '[a1', expected: false },
         { value: 'a{1}', expected: true },
         { value: 'a{1,2}', expected: true },
-        { value: 'a{1,2}{', expected: false }
+        { value: 'a{1,2}{', expected: false },
+        { value: 'a(1)', expected: true }
       ];
     tests.forEach(function(test) {
       it(message.format(test.value, test.expected ? 'valid' : 'not valid'), function() {
@@ -465,7 +469,7 @@ describe('validator', function () {
 
   describe('#isValidBaseUrl()', function() {
     var tests = [
-      {m: '"" - invalid', i: '', e: false},
+      {m: '"" - valid', i: '', e: true},
       {m: '"http://" - valid', i: 'http://', e: true},
       {m: '"https://" - valid', i: 'https://', e: true},
       {m: '"ftp://" - valid', i: 'ftp://', e: true},
@@ -480,4 +484,88 @@ describe('validator', function () {
       })
     });
   });
+
+  describe('#isValidLdapsURL()', function() {
+    var tests = [
+      {m: '"" - invalid', i: '', e: false},
+      {m: '"http://example.com" - invalid', i: 'http://example.com', e: false},
+      {m: '"ldap://example.com" - invalid', i: 'ldap://example.com', e: false},
+      {m: '"ldaps://example.com" - valid', i: 'ldaps://example.com', e: true},
+      {m: '"ldaps://example.com:636" - valid', i: 'ldaps://example.com:636', e: true},
+      {m: '"ldaps://example.com:636/path" - valid', i: 'ldaps://example.com:636/path', e: true},
+      {m: '"ldaps://example.com:6eeee36/path" - valid', i: 'ldaps://example.com:6eee36/path', e: false}
+    ];
+    tests.forEach(function(test) {
+      it(test.m + ' ', function () {
+        expect(validator.isValidLdapsURL(test.i)).to.equal(test.e);
+      })
+    });
+  });
+
+  describe('#isValidRackId()', function () {
+
+    [
+      {v: '', e: false},
+      {v: 'a', e: false},
+      {v: '1', e: false},
+      {v: '/', e: false},
+      {v: '/a', e: true},
+      {v: '/1', e: true},
+      {v: '/-', e: true},
+      {v: '/' + (new Array(255)).join('a'), m: 'Value bigger than 255 symbols', e: false}
+    ].forEach(function (test) {
+
+      it(test.m || test.v, function () {
+        expect(validator.isValidRackId(test.v)).to.be.equal(test.e);
+      })
+
+    });
+
+  });
+
+  describe('#isValidAlertName', function () {
+
+    [
+      {v: '', e: false},
+      {v: 'a', e: true},
+      {v: 'a b', e: true},
+      {v: '/', e: false},
+      {v: '/>1', e: false},
+      {v: 'a 1%', e: true},
+      {v: 'a (b)', e: true}
+    ].forEach(function (test) {
+
+      it(test.m || test.v, function () {
+        expect(validator.isValidAlertName(test.v)).to.be.equal(test.e);
+      })
+
+    });
+
+
+  });
+
+  describe('#isValidAlertName', function () {
+
+    [
+      {v: '', e: false},
+      {v: 'test', e: true},
+      {v: 'Test', e: true},
+      {v: 'TEST', e: true},
+      {v: 'te-st', e: true},
+      {v: '-test', e: false},
+      {v: 'test-', e: false},
+      {v: '1', e: true},
+      {v: 'test1', e: true},
+      {v: '1-test', e: true}
+    ].forEach(function (test) {
+
+      it(test.m || test.v, function () {
+        expect(validator.isValidNameServiceId(test.v)).to.be.equal(test.e);
+      })
+
+    });
+
+
+  });
+
 });

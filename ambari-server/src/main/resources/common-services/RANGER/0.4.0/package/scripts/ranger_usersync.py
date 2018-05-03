@@ -17,14 +17,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+from resource_management.libraries.functions.check_process_status import check_process_status
 from resource_management.libraries.script import Script
 from resource_management.core.resources.system import Execute, File
 from resource_management.core.exceptions import ComponentIsNotRunning
 from resource_management.libraries.functions.format import format
+from resource_management.libraries.functions import stack_select
 from resource_management.core.logger import Logger
 from resource_management.core import shell
 from ranger_service import ranger_service
-import upgrade
+from ambari_commons.constants import UPGRADE_TYPE_NON_ROLLING, UPGRADE_TYPE_ROLLING
+from resource_management.libraries.functions.constants import Direction
+import os
 
 class RangerUsersync(Script):
   
@@ -66,10 +70,32 @@ class RangerUsersync(Script):
   def stop(self, env, upgrade_type=None):
     import params
     env.set_params(params)
-    
+
+    if upgrade_type == UPGRADE_TYPE_NON_ROLLING and params.upgrade_direction == Direction.UPGRADE:
+      if params.stack_supports_usersync_non_root and os.path.isfile(params.usersync_services_file):
+        File(params.usersync_services_file,
+          mode = 0755
+        )
+        Execute(('ln','-sf', format('{usersync_services_file}'),'/usr/bin/ranger-usersync'),
+          not_if=format("ls /usr/bin/ranger-usersync"),
+          only_if=format("ls {usersync_services_file}"),
+          sudo=True
+        )
+
     Execute((params.usersync_stop,), environment={'JAVA_HOME': params.java_home}, sudo=True)
+    if params.stack_supports_pid:
+      File(params.ranger_usersync_pid_file,
+        action = "delete"
+      )
     
   def status(self, env):
+    import status_params
+    env.set_params(status_params)
+
+    if status_params.stack_supports_pid:
+      check_process_status(status_params.ranger_usersync_pid_file)
+      return
+
     cmd = 'ps -ef | grep proc_rangerusersync | grep -v grep'
     code, output = shell.call(cmd, timeout=20)
 
@@ -81,10 +107,7 @@ class RangerUsersync(Script):
   def pre_upgrade_restart(self, env, upgrade_type=None):
     import params
     env.set_params(params)
-    upgrade.prestart(env, "ranger-usersync")
-
-  def get_component_name(self):
-    return "ranger-usersync"
+    stack_select.select_packages(params.version)
 
   def get_log_folder(self):
     import params

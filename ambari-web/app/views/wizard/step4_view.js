@@ -23,7 +23,9 @@ App.WizardStep4View = Em.View.extend({
 
   templateName: require('templates/wizard/step4'),
 
-  didInsertElement: function () {
+  toggleCheckBox: function(event) {
+    if (event.context.get('isDisabled')) { return; }
+    var isSelected = event.context.get('isSelected');
+    event.context.set('isSelected', !isSelected);
   }
-
 });

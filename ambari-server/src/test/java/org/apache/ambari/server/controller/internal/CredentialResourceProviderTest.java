@@ -18,10 +18,21 @@
 
 package org.apache.ambari.server.controller.internal;
 
-import com.google.inject.AbstractModule;
-import com.google.inject.Guice;
-import com.google.inject.Injector;
-import junit.framework.Assert;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.createMock;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.verify;
+
+import java.io.File;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+
 import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.controller.AmbariManagementController;
 import org.apache.ambari.server.controller.ResourceProviderFactory;
@@ -32,7 +43,6 @@ import org.apache.ambari.server.controller.spi.Request;
 import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.ResourceProvider;
 import org.apache.ambari.server.controller.utilities.PredicateBuilder;
-import org.apache.ambari.server.controller.utilities.PropertyHelper;
 import org.apache.ambari.server.security.SecurePasswordHelper;
 import org.apache.ambari.server.security.TestAuthenticationFactory;
 import org.apache.ambari.server.security.authorization.AuthorizationException;
@@ -49,15 +59,11 @@ import org.junit.rules.TemporaryFolder;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.io.File;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import com.google.inject.AbstractModule;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
 
-import static org.easymock.EasyMock.*;
+import junit.framework.Assert;
 
 
 /**
@@ -82,8 +88,8 @@ public class CredentialResourceProviderTest {
       protected void configure() {
         Properties properties = new Properties();
 
-        properties.setProperty(Configuration.MASTER_KEY_LOCATION, tmpFolder.getRoot().getAbsolutePath());
-        properties.setProperty(Configuration.MASTER_KEYSTORE_LOCATION, tmpFolder.getRoot().getAbsolutePath());
+        properties.setProperty(Configuration.MASTER_KEY_LOCATION.getKey(), tmpFolder.getRoot().getAbsolutePath());
+        properties.setProperty(Configuration.MASTER_KEYSTORE_LOCATION.getKey(), tmpFolder.getRoot().getAbsolutePath());
 
         bind(CredentialStoreService.class).to(CredentialStoreServiceImpl.class);
 
@@ -144,8 +150,6 @@ public class CredentialResourceProviderTest {
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     AbstractResourceProviderTest.TestObserver observer = new AbstractResourceProviderTest.TestObserver();
@@ -189,8 +193,6 @@ public class CredentialResourceProviderTest {
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     try {
@@ -229,8 +231,6 @@ public class CredentialResourceProviderTest {
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     try {
@@ -286,8 +286,6 @@ public class CredentialResourceProviderTest {
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
 
@@ -347,13 +345,11 @@ public class CredentialResourceProviderTest {
     // end expectations
 
     SecurityContextHolder.getContext().setAuthentication(authentication);
-    
+
     AbstractControllerResourceProvider.init(factory);
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     provider.createResources(request);
@@ -378,7 +374,7 @@ public class CredentialResourceProviderTest {
       } else if ("alias3".equals(alias)) {
         Assert.assertEquals(CredentialStoreType.TEMPORARY.name().toLowerCase(), type);
       } else {
-        Assert.fail("Unexpected alias in list: " + alias.toString());
+        Assert.fail("Unexpected alias in list: " + alias);
       }
     }
 
@@ -423,13 +419,11 @@ public class CredentialResourceProviderTest {
     // end expectations
 
     SecurityContextHolder.getContext().setAuthentication(authentication);
-    
+
     AbstractControllerResourceProvider.init(factory);
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     provider.createResources(request);
@@ -455,7 +449,7 @@ public class CredentialResourceProviderTest {
       if ("alias1".equals(alias)) {
         Assert.assertEquals(CredentialStoreType.TEMPORARY.name().toLowerCase(), type);
       } else {
-        Assert.fail("Unexpected alias in list: " + alias.toString());
+        Assert.fail("Unexpected alias in list: " + alias);
       }
     }
 
@@ -505,8 +499,6 @@ public class CredentialResourceProviderTest {
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     provider.createResources(request);
@@ -564,13 +556,11 @@ public class CredentialResourceProviderTest {
     // end expectations
 
     SecurityContextHolder.getContext().setAuthentication(authentication);
-    
+
     AbstractControllerResourceProvider.init(factory);
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
 
@@ -604,7 +594,7 @@ public class CredentialResourceProviderTest {
     injector.injectMembers(credentialResourceProvider);
 
     // Create resources requests
-    Set<Map<String, Object>> properties = new HashSet<Map<String, Object>>();
+    Set<Map<String, Object>> properties = new HashSet<>();
     properties.addAll(getCredentialTestProperties("c1", "alias1", "username1", "password1", CredentialStoreType.TEMPORARY));
     properties.addAll(getCredentialTestProperties("c1", "alias2", "username2", "password2", CredentialStoreType.TEMPORARY));
     properties.addAll(getCredentialTestProperties("c1", "alias3", "username3", "password3", CredentialStoreType.TEMPORARY));
@@ -620,15 +610,13 @@ public class CredentialResourceProviderTest {
 
     replay(request, factory, managementController);
     // end expectations
-    
+
     SecurityContextHolder.getContext().setAuthentication(authentication);
-    
+
     AbstractControllerResourceProvider.init(factory);
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     provider.createResources(request);
@@ -651,7 +639,7 @@ public class CredentialResourceProviderTest {
       if ("alias1".equals(alias)) {
         Assert.assertEquals(CredentialStoreType.TEMPORARY.name().toLowerCase(), type);
       } else {
-        Assert.fail("Unexpected alias in list: " + alias.toString());
+        Assert.fail("Unexpected alias in list: " + alias);
       }
     }
 
@@ -667,7 +655,7 @@ public class CredentialResourceProviderTest {
       if ("alias1".equals(alias)) {
         Assert.assertEquals(CredentialStoreType.PERSISTED.name().toLowerCase(), type);
       } else {
-        Assert.fail("Unexpected alias in list: " + alias.toString());
+        Assert.fail("Unexpected alias in list: " + alias);
       }
     }
 
@@ -698,7 +686,7 @@ public class CredentialResourceProviderTest {
     injector.injectMembers(credentialResourceProvider);
 
     // Create resources requests
-    Set<Map<String, Object>> properties = new HashSet<Map<String, Object>>();
+    Set<Map<String, Object>> properties = new HashSet<>();
     properties.addAll(getCredentialTestProperties("c1", "alias1", "username1", "password1", CredentialStoreType.TEMPORARY));
     properties.addAll(getCredentialTestProperties("c1", "alias2", "username2", "password2", CredentialStoreType.TEMPORARY));
     properties.addAll(getCredentialTestProperties("c1", "alias3", "username3", "password3", CredentialStoreType.TEMPORARY));
@@ -721,8 +709,6 @@ public class CredentialResourceProviderTest {
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     provider.createResources(request);
@@ -769,7 +755,7 @@ public class CredentialResourceProviderTest {
     injector.injectMembers(credentialResourceProvider);
 
     // Create resources requests
-    Set<Map<String, Object>> properties = new HashSet<Map<String, Object>>();
+    Set<Map<String, Object>> properties = new HashSet<>();
     properties.addAll(getCredentialTestProperties("c1", "alias1", "username1", "password1", CredentialStoreType.TEMPORARY));
     properties.addAll(getCredentialTestProperties("c1", "alias2", "username2", "password2", CredentialStoreType.TEMPORARY));
     properties.addAll(getCredentialTestProperties("c1", "alias3", "username3", "password3", CredentialStoreType.TEMPORARY));
@@ -790,8 +776,6 @@ public class CredentialResourceProviderTest {
 
     ResourceProvider provider = AbstractControllerResourceProvider.getResourceProvider(
         Resource.Type.Credential,
-        PropertyHelper.getPropertyIds(Resource.Type.Credential),
-        PropertyHelper.getKeyPropertyIds(Resource.Type.Credential),
         managementController);
 
     provider.createResources(request);
@@ -814,7 +798,7 @@ public class CredentialResourceProviderTest {
       if ("alias1".equals(alias)) {
         Assert.assertEquals(CredentialStoreType.TEMPORARY.name().toLowerCase(), type);
       } else {
-        Assert.fail("Unexpected alias in list: " + alias.toString());
+        Assert.fail("Unexpected alias in list: " + alias);
       }
     }
 
@@ -831,7 +815,7 @@ public class CredentialResourceProviderTest {
   }
 
   private Set<Map<String, Object>> getCredentialTestProperties(String clusterName, String alias, String principal, String password, CredentialStoreType credentialStoreType) {
-    Map<String, Object> mapProperties = new HashMap<String, Object>();
+    Map<String, Object> mapProperties = new HashMap<>();
 
     if (clusterName != null) {
       mapProperties.put(CredentialResourceProvider.CREDENTIAL_CLUSTER_NAME_PROPERTY_ID, clusterName);

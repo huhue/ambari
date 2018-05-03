@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -358,7 +358,7 @@ public class AlertsDAO implements Cleanable {
     }
 
     // sorting
-    JpaSortBuilder<AlertHistoryEntity> sortBuilder = new JpaSortBuilder<AlertHistoryEntity>();
+    JpaSortBuilder<AlertHistoryEntity> sortBuilder = new JpaSortBuilder<>();
     List<Order> sortOrders = sortBuilder.buildSortOrders(request.Sort, visitor);
     query.orderBy(sortOrders);
 
@@ -396,7 +396,7 @@ public class AlertsDAO implements Cleanable {
     }
 
     // sorting
-    JpaSortBuilder<AlertCurrentEntity> sortBuilder = new JpaSortBuilder<AlertCurrentEntity>();
+    JpaSortBuilder<AlertCurrentEntity> sortBuilder = new JpaSortBuilder<>();
     List<Order> sortOrders = sortBuilder.buildSortOrders(request.Sort, visitor);
     query.orderBy(sortOrders);
 
@@ -587,7 +587,7 @@ public class AlertsDAO implements Cleanable {
     query.setParameter("unknownState", AlertState.UNKNOWN);
     query.setParameter("maintenanceStateOff", MaintenanceState.OFF);
 
-    Map<String, AlertSummaryDTO> map = new HashMap<String, AlertSummaryDTO>();
+    Map<String, AlertSummaryDTO> map = new HashMap<>();
     List<HostAlertSummaryDTO> resultList = m_daoUtils.selectList(query);
     for (HostAlertSummaryDTO result : resultList) {
       map.put(result.getHostName(), result);
@@ -1492,7 +1492,7 @@ public class AlertsDAO implements Cleanable {
    * @return a long representing the number of affected (deleted) records
    */
   @Transactional
-  private int cleanAlertNoticesForClusterBeforeDate(Long clusterId, long beforeDateMillis) {
+  int cleanAlertNoticesForClusterBeforeDate(Long clusterId, long beforeDateMillis) {
     LOG.info("Deleting AlertNotice entities before date " + new Date(beforeDateMillis));
     EntityManager entityManager = m_entityManagerProvider.get();
     List<Integer> ids = findAllAlertHistoryIdsBeforeDate(clusterId, beforeDateMillis);
@@ -1523,7 +1523,7 @@ public class AlertsDAO implements Cleanable {
    * @return a long representing the number of affected (deleted) records
    */
   @Transactional
-  private int cleanAlertCurrentsForClusterBeforeDate(long clusterId, long beforeDateMillis) {
+  int cleanAlertCurrentsForClusterBeforeDate(long clusterId, long beforeDateMillis) {
     LOG.info("Deleting AlertCurrent entities before date " + new Date(beforeDateMillis));
     EntityManager entityManager = m_entityManagerProvider.get();
     List<Integer> ids = findAllAlertHistoryIdsBeforeDate(clusterId, beforeDateMillis);
@@ -1553,7 +1553,7 @@ public class AlertsDAO implements Cleanable {
    */
 
   @Transactional
-  private int cleanAlertHistoriesForClusterBeforeDate(Long clusterId, long beforeDateMillis) {
+  int cleanAlertHistoriesForClusterBeforeDate(Long clusterId, long beforeDateMillis) {
     return executeQuery("AlertHistoryEntity.removeInClusterBeforeDate", AlertHistoryEntity.class, clusterId, beforeDateMillis);
   }
 

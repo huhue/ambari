@@ -26,6 +26,7 @@ describe('App.SliderConfigWidgetView', function () {
     viewInt = App.SliderConfigWidgetView.create({
       initSlider: Em.K,
       initPopover: Em.K,
+      movePopover: Em.K,
       slider: {
         enable: Em.K,
         disable: Em.K,
@@ -136,7 +137,15 @@ describe('App.SliderConfigWidgetView', function () {
     });
   });
 
-  describe('#mirrorValueObs', function () {
+  describe('#mirrorValueObsOnce', function () {
+
+    beforeEach(function () {
+      sinon.stub(Em.run, 'once', Em.tryInvoke);
+    });
+
+    afterEach(function () {
+      Em.run.once.restore();
+    });
 
     describe('check int', function () {
 
@@ -305,6 +314,19 @@ describe('App.SliderConfigWidgetView', function () {
     it('returns max value for group1', function() {
       viewInt.set('config.group', {name: 'group1'});
       expect(viewInt.getValueAttributeByGroup('maximum')).to.equal('3072');
+    });
+
+    it('minimum is missing', function () {
+      viewInt.set('config.stackConfigProperty.valueAttributes.minimum', undefined);
+      expect(viewInt.getValueAttributeByGroup('minimum')).to.equal('486');
+    });
+
+    it('minimum is missing, value is invalid', function () {
+      viewInt.get('config').setProperties({
+        'value': 3072,
+        'stackConfigProperty.valueAttributes.minimum': undefined
+      });
+      expect(viewInt.getValueAttributeByGroup('minimum')).to.equal('2096');
     });
   });
 
@@ -581,7 +603,7 @@ describe('App.SliderConfigWidgetView', function () {
     var stackConfigProperty = null;
 
     beforeEach(function() {
-      viewInt.set('config', {});
+      viewInt.set('config', App.ServiceConfigProperty.create({}));
       stackConfigProperty = {name: 'p1', widget: { units: [ { 'unit-name': "int"}]}, valueAttributes: {minimum: 1, maximum: 10, increment_step: 4, type: 'int'}};
       viewInt.set('config.stackConfigProperty', stackConfigProperty);
       viewInt.set('config.isValid', true);
@@ -634,6 +656,7 @@ describe('App.SliderConfigWidgetView', function () {
       expect(viewInt.get('warnMessage')).to.equal('');
       expect(viewInt.get('issueMessage')).to.equal('');
     });
+
   });
 
   describe('#formatTickLabel', function () {

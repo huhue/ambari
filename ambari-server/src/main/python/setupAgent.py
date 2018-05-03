@@ -23,7 +23,7 @@ import time
 import sys
 import logging
 import os
-import subprocess
+from ambari_commons import subprocess32
 
 from ambari_commons import OSCheck, OSConst
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
@@ -109,7 +109,7 @@ def execOsCommand(osCommand, tries=1, try_sleep=0, ret=None, cwd=None):
     if i>0:
       time.sleep(try_sleep)
 
-    osStat = subprocess.Popen(osCommand, stdout=subprocess.PIPE, cwd=cwd)
+    osStat = subprocess32.Popen(osCommand, stdout=subprocess32.PIPE, cwd=cwd)
     log = osStat.communicate(0)
     ret = {"exitstatus": osStat.returncode, "log": log}
 
@@ -169,7 +169,7 @@ def runAgent(passPhrase, expected_hostname, user_run_as, verbose, ret=None):
     vo = " -v"
   cmd = ['su', user_run_as, '-l', '-c', '/usr/sbin/ambari-agent restart --expected-hostname=%1s %2s' % (expected_hostname, vo)]
   log = ""
-  p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+  p = subprocess32.Popen(cmd, stdout=subprocess32.PIPE)
   p.communicate()
   agent_retcode = p.returncode
   for i in range(3):
@@ -238,7 +238,7 @@ def findNearestAgentPackageVersion(projectVersion):
   if projectVersion == "":
     projectVersion = "  "
   if OSCheck.is_suse_family():
-    Command = ["bash", "-c", "zypper --no-gpg-checks -q search -s --match-exact ambari-agent | grep '" + projectVersion +
+    Command = ["bash", "-c", "zypper --no-gpg-checks --non-interactive -q search -s --match-exact ambari-agent | grep '" + projectVersion +
                                  "' | cut -d '|' -f 4 | head -n1 | sed -e 's/-\w[^:]*//1' "]
   elif OSCheck.is_windows_family():
     listPackagesCommand = ["cmd", "/c", "choco list ambari-agent --pre --all | findstr " + projectVersion + " > agentPackages.list"]
@@ -271,7 +271,7 @@ def isAgentPackageAlreadyInstalled(projectVersion):
 def getAvailableAgentPackageVersions():
   if OSCheck.is_suse_family():
     Command = ["bash", "-c",
-        "zypper --no-gpg-checks -q search -s --match-exact ambari-agent | grep ambari-agent | sed -re 's/\s+/ /g' | cut -d '|' -f 4 | tr '\\n' ', ' | sed -s 's/[-|~][A-Za-z0-9]*//g'"]
+        "zypper --no-gpg-checks --non-interactive -q search -s --match-exact ambari-agent | grep ambari-agent | sed -re 's/\s+/ /g' | cut -d '|' -f 4 | tr '\\n' ', ' | sed -s 's/[-|~][A-Za-z0-9]*//g'"]
   elif OSCheck.is_windows_family():
     Command = ["cmd", "/c", "choco list ambari-agent --pre --all | findstr ambari-agent"]
   elif OSCheck.is_ubuntu_family():

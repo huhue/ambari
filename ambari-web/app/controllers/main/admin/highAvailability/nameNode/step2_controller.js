@@ -34,7 +34,36 @@ App.HighAvailabilityWizardStep2Controller = Em.Controller.extend(App.BlueprintMi
 
   showAdditionalPrefix: ['NAMENODE'],
 
-  showInstalledMastersFirst: true
+  showInstalledMastersFirst: true,
+
+  JOURNALNODES_COUNT_MINIMUM: 3, // TODO get this from stack
+  
+  renderComponents: function(masterComponents) {
+    this._super(masterComponents);
+    this.showHideJournalNodesAddRemoveControl();
+  },
+
+  addComponent: function(componentName) {
+    this._super(componentName);
+    this.showHideJournalNodesAddRemoveControl();
+  },
+
+  removeComponent: function(componentName, serviceComponentId) {
+    this._super(componentName, serviceComponentId);
+    this.showHideJournalNodesAddRemoveControl()
+  },
+
+  showHideJournalNodesAddRemoveControl: function() {
+    var jns = this.get('selectedServicesMasters').filterProperty('component_name', 'JOURNALNODE');
+    var maxNumMasters = this.getMaxNumberOfMasters('JOURNALNODE');
+    var showRemoveControl = jns.get('length') > this.get('JOURNALNODES_COUNT_MINIMUM');
+    var showAddControl = jns.get('length') < maxNumMasters;
+    jns.forEach(function(item) {
+      item.set('showAddControl', false);
+      item.set('showRemoveControl', showRemoveControl);
+    });
+    jns.set('lastObject.showAddControl', showAddControl);
+  }
 
 });
 

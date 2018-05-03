@@ -19,11 +19,11 @@ package org.apache.ambari.server.checks;
 
 import java.text.MessageFormat;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.controller.PrereqCheckRequest;
@@ -38,6 +38,7 @@ import org.apache.ambari.server.state.StackId;
 import org.apache.ambari.server.state.State;
 import org.apache.ambari.server.state.stack.PrereqCheckStatus;
 import org.apache.ambari.server.state.stack.PrerequisiteCheck;
+import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
 import org.apache.commons.lang.StringUtils;
 
 import com.google.inject.Singleton;
@@ -63,7 +64,10 @@ import com.google.inject.Singleton;
  * want hosts to be scehdule for upgrade of their other components.
  */
 @Singleton
-@UpgradeCheck(group = UpgradeCheckGroup.LIVELINESS, order = 2.0f, required = true)
+@UpgradeCheck(
+    group = UpgradeCheckGroup.LIVELINESS,
+    order = 2.0f,
+    required = { UpgradeType.ROLLING, UpgradeType.NON_ROLLING, UpgradeType.HOST_ORDERED })
 public class ServicesUpCheck extends AbstractCheckDescriptor {
 
   private static final float SLAVE_THRESHOLD = 0.5f;
@@ -84,13 +88,12 @@ public class ServicesUpCheck extends AbstractCheckDescriptor {
 
     final String clusterName = request.getClusterName();
     final Cluster cluster = clustersProvider.get().getCluster(clusterName);
-    List<String> errorMessages = new ArrayList<String>();
-    Set<String> failedServiceNames = new HashSet<String>();
+    List<String> errorMessages = new ArrayList<>();
+    LinkedHashSet<ServiceDetail> failedServices = new LinkedHashSet<>();
 
-    StackId stackId = cluster.getCurrentStackVersion();
-
-    for (Map.Entry<String, Service> serviceEntry : cluster.getServices().entrySet()) {
-      final Service service = serviceEntry.getValue();
+    Set<String> servicesInUpgrade = getServicesInUpgrade(request);
+    for (String serviceName : servicesInUpgrade) {
+      final Service service = cluster.getService(serviceName);
 
       // Ignore services like Tez that are clientOnly.
       if (service.isClientOnlyService()) {
@@ -128,6 +131,7 @@ public class ServicesUpCheck extends AbstractCheckDescriptor {
         // non-master, "true" slaves with cardinality 1+
         boolean checkThreshold = false;
         if (!serviceComponent.isMasterComponent()) {
+          StackId stackId = service.getDesiredStackId();
           ComponentInfo componentInfo = ambariMetaInfo.get().getComponent(stackId.getStackName(),
               stackId.getStackVersion(), serviceComponent.getServiceName(),
               serviceComponent.getName());
@@ -156,7 +160,8 @@ public class ServicesUpCheck extends AbstractCheckDescriptor {
           }
 
           if ((float) down / total > SLAVE_THRESHOLD) { // arbitrary
-            failedServiceNames.add(service.getName());
+            failedServices.add(new ServiceDetail(serviceName));
+
             String message = MessageFormat.format(
                 "{0}: {1} out of {2} {3} are started; there should be {4,number,percent} started before upgrading.",
                 service.getName(), up, total, serviceComponent.getName(), SLAVE_THRESHOLD);
@@ -165,7 +170,8 @@ public class ServicesUpCheck extends AbstractCheckDescriptor {
         } else {
           for (HostComponentSummary summary : hostComponentSummaries) {
             if (isConsideredDown(cluster, serviceComponent, summary)) {
-              failedServiceNames.add(service.getName());
+              failedServices.add(new ServiceDetail(serviceName));
+
               String message = MessageFormat.format("{0}: {1} (in {2} on host {3})",
                   service.getName(), serviceComponent.getName(), summary.getCurrentState(),
                   summary.getHostName());
@@ -178,7 +184,11 @@ public class ServicesUpCheck extends AbstractCheckDescriptor {
     }
 
     if (!errorMessages.isEmpty()) {
-      prerequisiteCheck.setFailedOn(new LinkedHashSet<String>(failedServiceNames));
+      prerequisiteCheck.setFailedOn(
+          failedServices.stream().map(failedService -> failedService.serviceName).collect(
+              Collectors.toCollection(LinkedHashSet::new)));
+
+      prerequisiteCheck.getFailedDetail().addAll(failedServices);
       prerequisiteCheck.setStatus(PrereqCheckStatus.FAIL);
       prerequisiteCheck.setFailReason(
           "The following Service Components should be in a started state.  Please invoke a service Stop and full Start and try again. "
@@ -191,8 +201,6 @@ public class ServicesUpCheck extends AbstractCheckDescriptor {
    * purposes of this check. Component type, maintenance mode, and state are
    * taken into account.
    *
-   * @param clusters
-   *          the clusters instance
    * @param cluster
    *          the cluster
    * @param serviceComponent

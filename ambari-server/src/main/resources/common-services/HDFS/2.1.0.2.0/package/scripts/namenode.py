@@ -19,20 +19,19 @@ limitations under the License.
 
 import sys
 import os
-import time
 import json
 import tempfile
+import hashlib
 from datetime import datetime
 import ambari_simplejson as json # simplejson is much faster comparing to Python 2.6 json module and has the same functions set.
 
-from resource_management import Script
+from ambari_commons import constants
+
+from resource_management.libraries.script.script import Script
 from resource_management.core.resources.system import Execute, File
 from resource_management.core import shell
-from resource_management.libraries.functions import conf_select
 from resource_management.libraries.functions import stack_select
-from resource_management.libraries.functions import Direction
-from resource_management.libraries.functions import StackFeature
-from resource_management.libraries.functions.stack_features import check_stack_feature
+from resource_management.libraries.functions.constants import Direction
 from resource_management.libraries.functions.format import format
 from resource_management.libraries.functions.security_commons import build_expectations, \
   cached_kinit_executor, get_params_from_filesystem, validate_security_config_properties, \
@@ -48,35 +47,22 @@ from ambari_commons import OSConst
 
 
 import namenode_upgrade
-from hdfs_namenode import namenode, wait_for_safemode_off
-from hdfs import hdfs
+from hdfs_namenode import namenode, wait_for_safemode_off, refreshProxyUsers, format_namenode
+from hdfs import hdfs, reconfig
 import hdfs_rebalance
 from utils import initiate_safe_zkfc_failover, get_hdfs_binary, get_dfsadmin_base_command
+from resource_management.libraries.functions.namenode_ha_utils import get_hdfs_cluster_id_from_jmx
 
-
-
-# hashlib is supplied as of Python 2.5 as the replacement interface for md5
-# and other secure hashes.  In 2.6, md5 is deprecated.  Import hashlib if
-# available, avoiding a deprecation warning under 2.6.  Import md5 otherwise,
-# preserving 2.4 compatibility.
-try:
-  import hashlib
-  _md5 = hashlib.md5
-except ImportError:
-  import md5
-  _md5 = md5.new
+# The hash algorithm to use to generate digests/hashes
+HASH_ALGORITHM = hashlib.sha224
 
 class NameNode(Script):
-
-  def get_component_name(self):
-    return "hadoop-hdfs-namenode"
 
   def get_hdfs_binary(self):
     """
     Get the name or path to the hdfs binary depending on the component name.
     """
-    component_name = self.get_component_name()
-    return get_hdfs_binary(component_name)
+    return get_hdfs_binary("hadoop-hdfs-namenode")
 
   def install(self, env):
     import params
@@ -92,16 +78,70 @@ class NameNode(Script):
     hdfs_binary = self.get_hdfs_binary()
     namenode(action="configure", hdfs_binary=hdfs_binary, env=env)
 
+  def save_configs(self, env):
+    import params
+    env.set_params(params)
+    hdfs()
+
+  def reload_configs(self, env):
+    import params
+    env.set_params(params)
+    Logger.info("RELOAD CONFIGS")
+    reconfig("namenode", params.namenode_address)
+
+  def reloadproxyusers(self, env):
+    import params
+    env.set_params(params)
+    Logger.info("RELOAD HDFS PROXY USERS")
+    refreshProxyUsers()
+
+  def format(self, env):
+    import params
+    env.set_params(params)
+
+    if params.security_enabled:
+        Execute(params.nn_kinit_cmd,
+                user=params.hdfs_user
+        )
+
+    hdfs_cluster_id = get_hdfs_cluster_id_from_jmx(params.hdfs_site, params.security_enabled, params.hdfs_user)
+
+    # this is run on a new namenode, format needs to be forced
+    Execute(format("hdfs --config {hadoop_conf_dir} namenode -format -nonInteractive -clusterId {hdfs_cluster_id}"),
+            user = params.hdfs_user,
+            path = [params.hadoop_bin_dir],
+            logoutput=True
+    )
+
+  def bootstrap_standby(self, env):
+    import params
+    env.set_params(params)
+
+    if params.security_enabled:
+        Execute(params.nn_kinit_cmd,
+                user=params.hdfs_user
+        )
+
+    Execute("hdfs namenode -bootstrapStandby -nonInteractive",
+            user=params.hdfs_user,
+            logoutput=True
+    )
+
   def start(self, env, upgrade_type=None):
     import params
     env.set_params(params)
     self.configure(env)
     hdfs_binary = self.get_hdfs_binary()
+
+    if not params.hdfs_tmp_dir or params.hdfs_tmp_dir == None or params.hdfs_tmp_dir.lower() == 'null':
+      Logger.error("WARNING: HDFS tmp dir property (hdfs_tmp_dir) is empty or invalid. Ambari will change permissions for the folder on regular basis.")
+
     namenode(action="start", hdfs_binary=hdfs_binary, upgrade_type=upgrade_type,
       upgrade_suspended=params.upgrade_suspended, env=env)
 
-    # after starting NN in an upgrade, touch the marker file
-    if upgrade_type is not None:
+    # after starting NN in an upgrade, touch the marker file - but only do this for certain
+    # upgrade types - not all upgrades actually tell NN about the upgrade (like HOU)
+    if upgrade_type in (constants.UPGRADE_TYPE_ROLLING, constants.UPGRADE_TYPE_NON_ROLLING):
       # place a file on the system indicating that we've submitting the command that
       # instructs NN that it is now part of an upgrade
       namenode_upgrade.create_upgrade_marker()
@@ -110,7 +150,7 @@ class NameNode(Script):
     import params
     env.set_params(params)
     hdfs_binary = self.get_hdfs_binary()
-    if upgrade_type == "rolling" and params.dfs_ha_enabled:
+    if upgrade_type == constants.UPGRADE_TYPE_ROLLING and params.dfs_ha_enabled:
       if params.dfs_ha_automatic_failover_enabled:
         initiate_safe_zkfc_failover()
       else:
@@ -168,8 +208,10 @@ class NameNodeDefault(NameNode):
     hdfs_binary = self.get_hdfs_binary()
     namenode_upgrade.prepare_upgrade_check_for_previous_dir()
     namenode_upgrade.prepare_upgrade_enter_safe_mode(hdfs_binary)
-    namenode_upgrade.prepare_upgrade_save_namespace(hdfs_binary)
-    namenode_upgrade.prepare_upgrade_backup_namenode_dir()
+    if not params.skip_namenode_save_namespace_express:
+      namenode_upgrade.prepare_upgrade_save_namespace(hdfs_binary)
+    if not params.skip_namenode_namedir_backup_express:
+      namenode_upgrade.prepare_upgrade_backup_namenode_dir()
     namenode_upgrade.prepare_upgrade_finalize_previous_upgrades(hdfs_binary)
 
     # Call -rollingUpgrade prepare
@@ -180,29 +222,22 @@ class NameNodeDefault(NameNode):
     namenode_upgrade.prepare_rolling_upgrade(hfds_binary)
 
   def wait_for_safemode_off(self, env):
-    wait_for_safemode_off(self.get_hdfs_binary(), 30, True)
+    wait_for_safemode_off(self.get_hdfs_binary(), afterwait_sleep=30, execute_kinit=True)
 
   def finalize_non_rolling_upgrade(self, env):
     hfds_binary = self.get_hdfs_binary()
-    namenode_upgrade.finalize_upgrade("nonrolling", hfds_binary)
+    namenode_upgrade.finalize_upgrade(constants.UPGRADE_TYPE_NON_ROLLING, hfds_binary)
 
   def finalize_rolling_upgrade(self, env):
     hfds_binary = self.get_hdfs_binary()
-    namenode_upgrade.finalize_upgrade("rolling", hfds_binary)
+    namenode_upgrade.finalize_upgrade(constants.UPGRADE_TYPE_ROLLING, hfds_binary)
 
   def pre_upgrade_restart(self, env, upgrade_type=None):
     Logger.info("Executing Stack Upgrade pre-restart")
     import params
     env.set_params(params)
 
-    if params.version and check_stack_feature(StackFeature.ROLLING_UPGRADE, params.version):
-      # When downgrading an Express Upgrade, the first thing we do is to revert the symlinks.
-      # Therefore, we cannot call this code in that scenario.
-      call_if = [("rolling", "upgrade"), ("rolling", "downgrade"), ("nonrolling", "upgrade")]
-      for e in call_if:
-        if (upgrade_type, params.upgrade_direction) == e:
-          conf_select.select(params.stack_name, "hadoop", params.version)
-      stack_select.select("hadoop-hdfs-namenode", params.version)
+    stack_select.select_packages(params.version)
 
   def post_upgrade_restart(self, env, upgrade_type=None):
     Logger.info("Executing Stack Upgrade post-restart")
@@ -218,63 +253,6 @@ class NameNodeDefault(NameNode):
             try_sleep=10
     )
 
-  def security_status(self, env):
-    import status_params
-
-    env.set_params(status_params)
-    props_value_check = {"hadoop.security.authentication": "kerberos",
-                         "hadoop.security.authorization": "true"}
-    props_empty_check = ["hadoop.security.auth_to_local"]
-    props_read_check = None
-    core_site_expectations = build_expectations('core-site', props_value_check, props_empty_check,
-                                                props_read_check)
-    props_value_check = None
-    props_empty_check = ['dfs.namenode.kerberos.internal.spnego.principal',
-                         'dfs.namenode.keytab.file',
-                         'dfs.namenode.kerberos.principal']
-    props_read_check = ['dfs.namenode.keytab.file']
-    hdfs_site_expectations = build_expectations('hdfs-site', props_value_check, props_empty_check,
-                                                props_read_check)
-
-    hdfs_expectations = {}
-    hdfs_expectations.update(core_site_expectations)
-    hdfs_expectations.update(hdfs_site_expectations)
-
-    security_params = get_params_from_filesystem(status_params.hadoop_conf_dir,
-                                                 {'core-site.xml': FILE_TYPE_XML,
-                                                  'hdfs-site.xml': FILE_TYPE_XML})
-    if 'core-site' in security_params and 'hadoop.security.authentication' in security_params['core-site'] and \
-        security_params['core-site']['hadoop.security.authentication'].lower() == 'kerberos':
-      result_issues = validate_security_config_properties(security_params, hdfs_expectations)
-      if not result_issues:  # If all validations passed successfully
-        try:
-          # Double check the dict before calling execute
-          if ( 'hdfs-site' not in security_params
-               or 'dfs.namenode.keytab.file' not in security_params['hdfs-site']
-               or 'dfs.namenode.kerberos.principal' not in security_params['hdfs-site']):
-            self.put_structured_out({"securityState": "UNSECURED"})
-            self.put_structured_out(
-              {"securityIssuesFound": "Keytab file or principal are not set property."})
-            return
-          cached_kinit_executor(status_params.kinit_path_local,
-                                status_params.hdfs_user,
-                                security_params['hdfs-site']['dfs.namenode.keytab.file'],
-                                security_params['hdfs-site']['dfs.namenode.kerberos.principal'],
-                                status_params.hostname,
-                                status_params.tmp_dir)
-          self.put_structured_out({"securityState": "SECURED_KERBEROS"})
-        except Exception as e:
-          self.put_structured_out({"securityState": "ERROR"})
-          self.put_structured_out({"securityStateErrorInfo": str(e)})
-      else:
-        issues = []
-        for cf in result_issues:
-          issues.append("Configuration file %s did not pass the validation. Reason: %s" % (cf, result_issues[cf]))
-        self.put_structured_out({"securityIssuesFound": ". ".join(issues)})
-        self.put_structured_out({"securityState": "UNSECURED"})
-    else:
-      self.put_structured_out({"securityState": "UNSECURED"})
-
   def rebalancehdfs(self, env):
     import params
     env.set_params(params)
@@ -287,11 +265,11 @@ class NameNodeDefault(NameNode):
 
     if params.security_enabled:
       # Create the kerberos credentials cache (ccache) file and set it in the environment to use
-      # when executing HDFS rebalance command. Use the md5 hash of the combination of the principal and keytab file
+      # when executing HDFS rebalance command. Use the sha224 hash of the combination of the principal and keytab file
       # to generate a (relatively) unique cache filename so that we can use it as needed.
       # TODO: params.tmp_dir=/var/lib/ambari-agent/tmp. However hdfs user doesn't have access to this path.
       # TODO: Hence using /tmp
-      ccache_file_name = "hdfs_rebalance_cc_" + _md5(format("{hdfs_principal_name}|{hdfs_user_keytab}")).hexdigest()
+      ccache_file_name = "hdfs_rebalance_cc_" + HASH_ALGORITHM(format("{hdfs_principal_name}|{hdfs_user_keytab}")).hexdigest()
       ccache_file_path = os.path.join(tempfile.gettempdir(), ccache_file_name)
       rebalance_env['KRB5CCNAME'] = ccache_file_path
 
@@ -303,7 +281,13 @@ class NameNodeDefault(NameNode):
         Execute(kinit_cmd, user=params.hdfs_user)
 
     def calculateCompletePercent(first, current):
-      return 1.0 - current.bytesLeftToMove/first.bytesLeftToMove
+      # avoid division by zero
+      try:
+        division_result = current.bytesLeftToMove/first.bytesLeftToMove
+      except ZeroDivisionError:
+        Logger.warning("Division by zero. Bytes Left To Move = {0}. Return 1.0".format(first.bytesLeftToMove))
+        return 1.0
+      return 1.0 - division_result
 
 
     def startRebalancingProcess(threshold, rebalance_env):
@@ -324,7 +308,7 @@ class NameNodeDefault(NameNode):
     def handle_new_line(line, is_stderr):
       if is_stderr:
         return
-      
+
       _print('[balancer] %s' % (line))
       pl = parser.parseLine(line)
       if pl:
@@ -337,17 +321,17 @@ class NameNodeDefault(NameNode):
         self.put_structured_out({'completePercent' : 1})
         return
 
-    Execute(command,
-            on_new_line = handle_new_line,
-            logoutput = False,
-    )
+    if (not hdfs_rebalance.is_balancer_running()):
+      # As the rebalance may take a long time (haours, days) the process is triggered only
+      # Tracking the progress based on the command output is no longer supported due to this
+      Execute(command, wait_for_finish=False)
 
-    if params.security_enabled:
-      # Delete the kerberos credentials cache (ccache) file
-      File(ccache_file_path,
-           action = "delete",
-      )
-      
+      _print("The rebalance process has been triggered")
+    else:
+      _print("There is another balancer running. This means you or another Ambari user may have triggered the "
+             "operation earlier. The process may take a long time to finish (hours, even days). If the problem persists "
+             "please consult with the HDFS administrators if they have triggred or killed the operation.")
+
   def get_log_folder(self):
     import params
     return params.hdfs_log_dir
@@ -355,6 +339,10 @@ class NameNodeDefault(NameNode):
   def get_user(self):
     import params
     return params.hdfs_user
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.namenode_pid_file]
 
 @OsFamilyImpl(os_family=OSConst.WINSRV_FAMILY)
 class NameNodeWindows(NameNode):

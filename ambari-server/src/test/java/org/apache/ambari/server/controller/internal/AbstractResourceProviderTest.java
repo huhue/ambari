@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -53,6 +53,7 @@ import org.apache.ambari.server.controller.spi.ResourceAlreadyExistsException;
 import org.apache.ambari.server.controller.spi.SystemException;
 import org.apache.ambari.server.controller.spi.UnsupportedPropertyException;
 import org.apache.ambari.server.controller.utilities.PredicateBuilder;
+import org.apache.ambari.server.orm.dao.RepositoryVersionDAO;
 import org.apache.ambari.server.state.SecurityType;
 import org.easymock.EasyMock;
 import org.easymock.IArgumentMatcher;
@@ -66,7 +67,7 @@ public class AbstractResourceProviderTest {
 
   @Test
   public void testCheckPropertyIds() {
-    Set<String> propertyIds = new HashSet<String>();
+    Set<String> propertyIds = new HashSet<>();
     propertyIds.add("foo");
     propertyIds.add("cat1/foo");
     propertyIds.add("cat2/bar");
@@ -75,55 +76,45 @@ public class AbstractResourceProviderTest {
     propertyIds.add("cat4/sub2/sub3/bat");
     propertyIds.add("cat5/subcat5/map");
 
-    Map<Resource.Type, String> keyPropertyIds = new HashMap<Resource.Type, String>();
+    Map<Resource.Type, String> keyPropertyIds = new HashMap<>();
 
     AmbariManagementController managementController = createMock(AmbariManagementController.class);
-    MaintenanceStateHelper maintenanceStateHelper = createNiceMock(MaintenanceStateHelper.class);
-    replay(maintenanceStateHelper);
-    AbstractResourceProvider provider = new ServiceResourceProvider(
-            propertyIds,
-            keyPropertyIds,
-            managementController, maintenanceStateHelper);
 
-    Set<String> unsupported = provider.checkPropertyIds(Collections.singleton("foo"));
+    AbstractResourceProvider provider = new HostComponentProcessResourceProvider(managementController);
+
+    Set<String> unsupported = provider.checkPropertyIds(Collections.singleton("HostComponentProcess/host_name"));
     Assert.assertTrue(unsupported.isEmpty());
 
     // note that key is not in the set of known property ids.  We allow it if its parent is a known property.
     // this allows for Map type properties where we want to treat the entries as individual properties
-    Assert.assertTrue(provider.checkPropertyIds(Collections.singleton("cat5/subcat5/map/key")).isEmpty());
+    Assert.assertTrue(provider.checkPropertyIds(Collections.singleton("HostComponentProcess/host_name/foo")).isEmpty());
 
     unsupported = provider.checkPropertyIds(Collections.singleton("bar"));
     Assert.assertEquals(1, unsupported.size());
     Assert.assertTrue(unsupported.contains("bar"));
 
-    unsupported = provider.checkPropertyIds(Collections.singleton("cat1/foo"));
+    unsupported = provider.checkPropertyIds(Collections.singleton("HostComponentProcess/status"));
     Assert.assertTrue(unsupported.isEmpty());
 
-    unsupported = provider.checkPropertyIds(Collections.singleton("cat1"));
+    unsupported = provider.checkPropertyIds(Collections.singleton("HostComponentProcess"));
     Assert.assertTrue(unsupported.isEmpty());
   }
 
   @Test
   public void testGetPropertyIds() {
-    Set<String> propertyIds = new HashSet<String>();
-    propertyIds.add("p1");
-    propertyIds.add("foo");
-    propertyIds.add("cat1/foo");
-    propertyIds.add("cat2/bar");
-    propertyIds.add("cat2/baz");
-    propertyIds.add("cat3/sub1/bam");
-    propertyIds.add("cat4/sub2/sub3/bat");
-
-    Map<Resource.Type, String> keyPropertyIds = new HashMap<Resource.Type, String>();
+    Set<String> propertyIds = new HashSet<>();
+    propertyIds.add("HostComponentProcess/name");
+    propertyIds.add("HostComponentProcess/status");
+    propertyIds.add("HostComponentProcess/cluster_name");
+    propertyIds.add("HostComponentProcess/host_name");
+    propertyIds.add("HostComponentProcess/component_name");
 
     AmbariManagementController managementController = createMock(AmbariManagementController.class);
     MaintenanceStateHelper maintenanceStateHelper = createNiceMock(MaintenanceStateHelper.class);
-    replay(maintenanceStateHelper);
+    RepositoryVersionDAO repositoryVersionDAO = createNiceMock(RepositoryVersionDAO.class);
+    replay(maintenanceStateHelper, repositoryVersionDAO);
 
-    AbstractResourceProvider provider = new ServiceResourceProvider(
-            propertyIds,
-            keyPropertyIds,
-            managementController, maintenanceStateHelper);
+    AbstractResourceProvider provider = new HostComponentProcessResourceProvider(managementController);
 
     Set<String> supportedPropertyIds = provider.getPropertyIds();
     Assert.assertTrue(supportedPropertyIds.containsAll(propertyIds));
@@ -131,16 +122,13 @@ public class AbstractResourceProviderTest {
 
   @Test
   public void testGetRequestStatus() {
-    Set<String> propertyIds = new HashSet<String>();
-    Map<Resource.Type, String> keyPropertyIds = new HashMap<Resource.Type, String>();
     AmbariManagementController managementController = createMock(AmbariManagementController.class);
     MaintenanceStateHelper maintenanceStateHelper = createNiceMock(MaintenanceStateHelper.class);
-    replay(maintenanceStateHelper);
+    RepositoryVersionDAO repositoryVersionDAO = createNiceMock(RepositoryVersionDAO.class);
+    replay(maintenanceStateHelper, repositoryVersionDAO);
 
-    AbstractResourceProvider provider = new ServiceResourceProvider(
-            propertyIds,
-            keyPropertyIds,
-            managementController, maintenanceStateHelper);
+    AbstractResourceProvider provider = new ServiceResourceProvider(managementController,
+        maintenanceStateHelper, repositoryVersionDAO);
 
     RequestStatus status = provider.getRequestStatus(null);
 
@@ -177,7 +165,7 @@ public class AbstractResourceProviderTest {
   public void testGetPropertyMaps() throws Exception {
     AbstractResourceProvider provider = new TestResourceProvider();
 
-    Map<String, Object> updatePropertyMap = new HashMap<String, Object>();
+    Map<String, Object> updatePropertyMap = new HashMap<>();
     updatePropertyMap.put("SomeProperty", "SomeUpdateValue");
     updatePropertyMap.put("SomeOtherProperty", 99);
 
@@ -358,7 +346,7 @@ public class AbstractResourceProviderTest {
       EasyMock.reportMatcher(new StackConfigurationRequestSetMatcher(stackName, stackVersion, serviceName, propertyName));
       return null;
     }
-    
+
     public static Set<StackConfigurationDependencyRequest> getStackConfigurationDependencyRequestSet(String stackName, String stackVersion,
         String serviceName, String propertyName, String dependencyName)
     {
@@ -468,7 +456,7 @@ public class AbstractResourceProviderTest {
     private final HostRequest hostRequest;
 
     public HostRequestSetMatcher(String hostname, String clusterName, Map<String, String> hostAttributes) {
-      hostRequest = new HostRequest(hostname, clusterName, hostAttributes);
+      hostRequest = new HostRequest(hostname, clusterName);
       add(hostRequest);
     }
 
@@ -488,8 +476,7 @@ public class AbstractResourceProviderTest {
 
       return request instanceof HostRequest &&
           eq(((HostRequest) request).getClusterName(), hostRequest.getClusterName()) &&
-          eq(((HostRequest) request).getHostname(), hostRequest.getHostname()) &&
-          eq(((HostRequest) request).getHostAttributes(), hostRequest.getHostAttributes());
+          eq(((HostRequest) request).getHostname(), hostRequest.getHostname());
     }
 
     @Override
@@ -797,26 +784,26 @@ public class AbstractResourceProviderTest {
   private static Resource.Type testResourceType = new Resource.Type("testResource");
 
   private static Set<String> pkPropertyIds =
-      new HashSet<String>(Arrays.asList(new String[]{
-          "ClusterName",
-          "ResourceName"}));
+    new HashSet<>(Arrays.asList(new String[]{
+      "ClusterName",
+      "ResourceName"}));
 
   private static Set<String> propertyIds =
-      new HashSet<String>(Arrays.asList(new String[]{
-          "ClusterName",
-          "ResourceName",
-          "SomeProperty",
-          "SomeOtherProperty"}));
+    new HashSet<>(Arrays.asList(new String[]{
+      "ClusterName",
+      "ResourceName",
+      "SomeProperty",
+      "SomeOtherProperty"}));
 
   private static Map<Resource.Type, String> keyPropertyIds =
-      new HashMap<Resource.Type, String>();
+    new HashMap<>();
 
   static {
     keyPropertyIds.put(Resource.Type.Cluster, "ClusterName");
     keyPropertyIds.put(testResourceType, "ResourceName" );
   }
 
-  private static Set<Resource> allResources = new HashSet<Resource>();
+  private static Set<Resource> allResources = new HashSet<>();
 
   static {
     Resource resource = new ResourceImpl(testResourceType);
@@ -870,7 +857,7 @@ public class AbstractResourceProviderTest {
     public Set<Resource> getResources(Request request, Predicate predicate)
         throws SystemException, UnsupportedPropertyException, NoSuchResourceException, NoSuchParentResourceException {
 
-      Set<Resource> resources = new HashSet<Resource>();
+      Set<Resource> resources = new HashSet<>();
 
       for(Resource resource : allResources) {
         if (predicate.evaluate(resource)) {

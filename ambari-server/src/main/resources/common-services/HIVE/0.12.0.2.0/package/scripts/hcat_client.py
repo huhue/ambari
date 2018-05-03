@@ -24,7 +24,7 @@ from ambari_commons.os_family_impl import OsFamilyImpl
 from resource_management.core.logger import Logger
 from resource_management.core.exceptions import ClientComponentHasNoStatus
 from resource_management.libraries.functions import stack_select
-from resource_management.libraries.functions import StackFeature
+from resource_management.libraries.functions.constants import StackFeature
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.script.script import Script
 
@@ -51,12 +51,6 @@ class HCatClientWindows(HCatClient):
 
 @OsFamilyImpl(os_family=OsFamilyImpl.DEFAULT)
 class HCatClientDefault(HCatClient):
-  def get_component_name(self):
-    # HCat client doesn't have a first-class entry in <stack-selector-tool>. Since clients always
-    # update after daemons, this ensures that the hcat directories are correct on hosts
-    # which do not include the WebHCat daemon
-    return "hive-webhcat"
-
 
   def pre_upgrade_restart(self, env, upgrade_type=None):
     """
@@ -78,7 +72,7 @@ class HCatClientDefault(HCatClient):
     # HCat client doesn't have a first-class entry in <stack-selector-tool>. Since clients always
     # update after daemons, this ensures that the hcat directories are correct on hosts
     # which do not include the WebHCat daemon
-    stack_select.select("hive-webhcat", params.version)
+    stack_select.select_packages(params.version)
 
 
 if __name__ == "__main__":

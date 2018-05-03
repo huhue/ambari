@@ -40,7 +40,7 @@ class Heartbeat:
     self.reports = []
     self.collector = alert_collector
 
-  def build(self, id='-1', state_interval=-1, componentsMapped=False):
+  def build(self, id='-1', add_state=False, componentsMapped=False):
     global clusterId, clusterDefinitionRevision, firstContact
     timestamp = int(time.time()*1000)
     queueResult = self.actionQueue.result()
@@ -75,32 +75,33 @@ class Heartbeat:
     if int(id) == 0:
       componentsMapped = False
 
-    logger.info("Building Heartbeat: {responseId = %s, timestamp = %s, "
-                "commandsInProgress = %s, componentsMapped = %s,"
-                "recoveryTimestamp = %s}",
-        str(id), str(timestamp), repr(commandsInProgress), repr(componentsMapped), str(recovery_timestamp))
-
     if logger.isEnabledFor(logging.DEBUG):
+      logger.debug("Building Heartbeat: {responseId = %s, timestamp = %s, "
+                   "commandsInProgress = %s, componentsMapped = %s, "
+                   "recoveryTimestamp = %s}",
+                   id, timestamp, commandsInProgress, componentsMapped, recovery_timestamp)
       logger.debug("Heartbeat: %s", pformat(heartbeat))
 
     hostInfo = HostInfo(self.config)
-    if (int(id) >= 0) and state_interval > 0 and (int(id) % state_interval) == 0:
+    if add_state:
+      logger.info("Adding host info/state to heartbeat message.")
       nodeInfo = { }
       # for now, just do the same work as registration
       # this must be the last step before returning heartbeat
       hostInfo.register(nodeInfo, componentsMapped, commandsInProgress)
       heartbeat['agentEnv'] = nodeInfo
-      mounts = Hardware.osdisks(self.config)
+      mounts = Hardware(config=self.config, cache_info=False).osdisks()
       heartbeat['mounts'] = mounts
 
       if logger.isEnabledFor(logging.DEBUG):
-        logger.debug("agentEnv: %s", str(nodeInfo))
-        logger.debug("mounts: %s", str(mounts))
+        logger.debug("agentEnv: %s", nodeInfo)
+        logger.debug("mounts: %s", mounts)
 
     if self.collector is not None:
       heartbeat['alerts'] = self.collector.alerts()
     
     return heartbeat
+
 
 def main(argv=None):
   from ambari_agent.ActionQueue import ActionQueue
@@ -108,8 +109,9 @@ def main(argv=None):
   from ambari_agent.Controller import Controller
 
   cfg = AmbariConfig()
-  if os.path.exists(AmbariConfig.getConfigFile()):
-    cfg.read(AmbariConfig.getConfigFile())
+  config_file_path = AmbariConfig.getConfigFile(home_dir="")
+  if os.path.exists(config_file_path):
+    cfg.read(config_file_path)
   else:
     raise Exception("No config found, use default")
 
@@ -117,6 +119,7 @@ def main(argv=None):
   actionQueue = ActionQueue(cfg, ctl)
   heartbeat = Heartbeat(actionQueue)
   print json.dumps(heartbeat.build('3',3))
+
 
 if __name__ == '__main__':
   main()

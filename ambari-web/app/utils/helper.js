@@ -363,6 +363,67 @@ Em.Handlebars.registerHelper('highlight', function (property, words, fn) {
 /**
  * Usage:
  *
+ * <div {{QAAttr "someText"}}></div>
+ * <div {{QAAttr "{someProperty}"}}></div>
+ * <div {{QAAttr "someText-and-{someProperty}"}}></div>
+ * <div {{QAAttr "{someProperty:some-text}"}}></div>
+ * <div {{QAAttr "someText-and-{someProperty:some-text}"}}></div>
+ * <div {{QAAttr "{someProperty:some-text:another-text}"}}></div>
+ * <div {{QAAttr "someText-and-{someProperty:some-text:another-text}"}}></div>
+ * <div {{QAAttr "{someProperty::another-text}"}}></div>
+ * <div {{QAAttr "someText-and-{someProperty::another-text}"}}></div>
+ *
+ */
+Em.Handlebars.registerHelper('QAAttr', function (text, options) {
+  const textToReplace = text.match(/\{(.*?)\}/g);
+  let attributes;
+  if (textToReplace) {
+    const id = ++Em.$.uuid,
+      expressions = textToReplace.map((str) => {
+        const parsed = Em.View._parsePropertyPath(str.slice(1, str.length - 1)),
+          normalized = Ember.Handlebars.normalizePath(this, parsed.path, options.data),
+          {classNames, className, falsyClassName} = parsed,
+          {root, path} = normalized;
+        return {src: str, classNames, className, falsyClassName, root, path};
+      }),
+      observer = () => {
+        let dataQA = text;
+        for (let i = expressions.length; i--;) {
+          const el = Em.tryInvoke(options.data.view, '$', [`[${attributes}]`]);
+          let e = expressions[i];
+          if (!el || el.length === 0) {
+            Em.removeObserver(e.root, e.path, invoker);
+            break;
+          }
+          let value,
+            sourceValue = Em.Handlebars.getPath(e.root, e.path, options.data);
+          if (e.classNames) {
+            value = sourceValue ? e.className : e.falsyClassName;
+          } else {
+            value = sourceValue;
+          }
+          if (Em.isNone(value)) {
+            value = '';
+          }
+          dataQA = dataQA.replace(e.src, value);
+          el.attr('data-qa', dataQA);
+        }
+      },
+      invoker = () => Em.run.once(observer);
+    attributes = `data-qa-bind-id="${id}"`;
+    expressions.forEach((e) => {
+      Em.addObserver(e.root, e.path, invoker);
+    });
+    Em.run.next(observer);
+  } else {
+    attributes = `data-qa="${text}"`;
+  }
+  return new Em.Handlebars.SafeString(attributes);
+});
+
+/**
+ * Usage:
+ *
  * <pre>
  *   {{#isAuthorized "SERVICE.TOGGLE_ALERTS"}}
  *     {{! some truly code }}
@@ -381,6 +442,29 @@ Em.Handlebars.registerHelper('isAuthorized', function (property, options) {
   // wipe out contexts so boundIf uses `this` (the permission) as the context
   options.contexts = null;
   return Ember.Handlebars.helpers.boundIf.call(permission, "isAuthorized", options);
+});
+
+/**
+ * Usage:
+ *
+ * <pre>
+ *   {{#havePermissions "SERVICE.TOGGLE_ALERTS"}}
+ *     {{! some truly code }}
+ *   {{else}}
+ *     {{! some falsy code }}
+ *   {{/havePermissions}}
+ * </pre>
+ */
+Em.Handlebars.registerHelper('havePermissions', function (property, options) {
+  var permission = Ember.Object.create({
+    havePermissions: function() {
+      return App.havePermissions(property);
+    }.property()
+  });
+
+  // wipe out contexts so boundIf uses `this` (the permission) as the context
+  options.contexts = null;
+  return Ember.Handlebars.helpers.boundIf.call(permission, "havePermissions", options);
 });
 
 /**
@@ -518,6 +602,7 @@ App.format = {
     'UPGRADE': 'Upgrade',
     'RESTART': 'Restart',
     'SERVICE_CHECK': 'Check',
+    'SET_KEYTAB': 'Set Keytab:',
     'Excluded:': 'Decommission:',
     'Included:': 'Recommission:'
   },
@@ -591,6 +676,7 @@ App.format = {
         name = name.split(separator).map(function(singleName) {
           return this.normalizeName(singleName.toUpperCase());
         }, this).join(' ');
+        break;
       }
     }
     return name.capitalize();
@@ -631,27 +717,37 @@ App.format = {
    * @param {string} request_inputs
    * @return {string}
    */
-  commandDetail: function (command_detail, request_inputs) {
+  commandDetail: function (command_detail, request_inputs, ops_display_name) {
     var detailArr = command_detail.split(' ');
     var self = this;
     var result = '';
+    var isIncludeExcludeFiles = false;
+    //if an optional operation display name has been specified in the service metainfo.xml
+    if (ops_display_name != null && ops_display_name.length > 0) {
+      result = result + ' ' + ops_display_name;
+    } else {
     detailArr.forEach( function(item) {
       // if the item has the pattern SERVICE/COMPONENT, drop the SERVICE part
-      if (item.contains('/')) {
+      if (item.contains('/') && !isIncludeExcludeFiles) {
         item = item.split('/')[1];
       }
-      if (item == 'DECOMMISSION,') {
+      if (item === 'DECOMMISSION,') {
         // ignore text 'DECOMMISSION,'( command came from 'excluded/included'), here get the component name from request_inputs
-        item = (jQuery.parseJSON(request_inputs)) ? jQuery.parseJSON(request_inputs).slave_type : '';
+        var parsedInputs = jQuery.parseJSON(request_inputs);
+        item = (parsedInputs) ? (parsedInputs.slave_type || '') : '';
+        isIncludeExcludeFiles = (parsedInputs) ? parsedInputs.is_add_or_delete_slave_request === 'true' : false;
       }
       if (self.components[item]) {
         result = result + ' ' + self.components[item];
       } else if (self.command[item]) {
         result = result + ' ' + self.command[item];
+      } else if (isIncludeExcludeFiles) {
+        result = result + ' ' + item;
       } else {
         result = result + ' ' + self.role(item, false);
       }
     });
+    }
 
     if (result.indexOf('Decommission:') > -1 || result.indexOf('Recommission:') > -1) {
       // for Decommission command, make sure the hostname is in lower case
@@ -757,11 +853,16 @@ App.format = {
  * @param {object} options
  */
 App.popover = function (self, options) {
+  var opts = $.extend(true, {
+    container: 'body',
+    html: true
+  }, options || {});
   if (!self) return;
-  self.popover(options);
+  self.popover(opts);
   self.on("remove", function () {
-    $(this).trigger('mouseleave').off().removeData('popover');
+    $(this).trigger('mouseleave').off().removeData('bs.popover');
   });
+  self = null;
 };
 
 /**
@@ -773,12 +874,16 @@ App.popover = function (self, options) {
  * @param {object} options
  */
 App.tooltip = function (self, options) {
+  var opts = $.extend(true, {
+    container: 'body'
+  }, options || {});
   if (!self || !self.tooltip) return;
-  self.tooltip(options);
+  self.tooltip(opts);
   /* istanbul ignore next */
   self.on("remove", function () {
-    $(this).trigger('mouseleave').off().removeData('tooltip');
+    $(this).trigger('mouseleave').off().removeData('bs.tooltip');
   });
+  self = null
 };
 
 /**
@@ -917,7 +1022,7 @@ App.resetDsStoreTypeMap = function(type) {
   if (typeMap) {
     var idToClientIdMap = typeMap.idToCid;
     for (var id in idToClientIdMap) {
-      if (idToClientIdMap.hasOwnProperty(id) && idToClientIdMap[id]) {
+      if (idToClientIdMap.hasOwnProperty(id) && idToClientIdMap[id] && allRecords[idToClientIdMap[id]] !== undefined) {
         delete allRecords[idToClientIdMap[id]];  // deletes the cached copy of the record from the store
       }
     }
@@ -929,3 +1034,31 @@ App.resetDsStoreTypeMap = function(type) {
     };
   }
 };
+
+App.logger = function() {
+
+  var timers = {};
+
+  return {
+
+    maxAllowedLoadingTime: 1000,
+
+    setTimer: function(name) {
+      if (!App.get('enableLogger')) return;
+      timers[name] = window.performance.now();
+    },
+
+    logTimerIfMoreThan: function(name, loadingTime) {
+      if (!App.get('enableLogger')) return;
+      this.maxAllowedLoadingTime = loadingTime || this.maxAllowedLoadingTime;
+      if (timers[name]) {
+        var diff = window.performance.now() - timers[name];
+        if (diff > this.maxAllowedLoadingTime) {
+          console.debug(name + ': ' + diff.toFixed(3) + 'ms');
+        }
+        delete timers[name];
+      }
+    }
+  };
+
+}();

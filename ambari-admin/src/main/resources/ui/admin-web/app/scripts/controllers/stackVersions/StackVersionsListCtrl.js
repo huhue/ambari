@@ -18,66 +18,152 @@
 'use strict';
 
 angular.module('ambariAdminConsole')
-.controller('StackVersionsListCtrl', ['$scope', 'Cluster', 'Stack', '$routeParams', '$translate', function ($scope, Cluster, Stack, $routeParams, $translate) {
-  var $t = $translate.instant;
-  $scope.getConstant = function (key) {
-    return $t('common.' + key).toLowerCase();
-  }
-  $scope.clusterName = $routeParams.clusterName;
+  .controller('StackVersionsListCtrl',
+  ['$scope', 'Cluster', 'Stack', '$routeParams', '$translate', 'Settings', 'Pagination', '$q', 'Filters',
+  function ($scope, Cluster, Stack, $routeParams, $translate, Settings, Pagination, $q, Filters) {
+    var $t = $translate.instant;
+    $scope.getConstant = function (key) {
+      return $t(key).toLowerCase();
+    };
+    $scope.minInstanceForPagination = Settings.minRowsToShowPagination;
+    $scope.isLoading = false;
+    $scope.clusterName = $routeParams.clusterName;
+    $scope.tableInfo = {
+      total: 0,
+      showed: 0,
+      filtered: 0
+    };
+    $scope.repos = [];
+    $scope.dropDownClusters = [];
+    $scope.selectedCluster = $scope.dropDownClusters[0];
+    $scope.filters = [
+      {
+        key: 'stack',
+        label: $t('common.stack'),
+        customValueConverter: function(item) {
+          return item.stack_name + '-' + item.stack_version;
+        },
+        options: []
+      },
+      {
+        key: 'display_name',
+        label: $t('common.name'),
+        options: []
+      },
+      {
+        key: 'type',
+        label: $t('common.type'),
+        options: []
+      },
+      {
+        key: 'repository_version',
+        label: $t('common.version'),
+        options: []
+      },
+      {
+        key: 'cluster',
+        label: $t('common.cluster'),
+        options: []
+      }
+    ];
+    $scope.pagination = Pagination.create();
 
-  $scope.filter = {
-    version: '',
-    cluster: {
-      options: [],
-      current: null
-    }
-  };
+    $scope.resetPagination = function() {
+      $scope.pagination.resetPagination($scope.repos, $scope.tableInfo);
+    };
 
-  $scope.pagination = {
-    totalRepos: 100,
-    maxVisiblePages: 1,
-    itemsPerPage: 100,
-    currentPage: 1
-  };
-  $scope.allRepos = [];
-  $scope.stackVersions = [];
+    $scope.pageChanged = function() {
+      $scope.pagination.pageChanged($scope.repos, $scope.tableInfo);
+    };
 
-  /**
-   *  Formatted object to display all repos:
-   *
-   *  [{ 'name': 'HDP-2.3',
-   *     'repos': ['2.3.6.0-2343', '2.3.4.1', '2.3.4.0-56']
-   *   },
-   *   { 'name': 'HDP-2.2',
-   *     'repos': ['2.2.6.0', '2.2.4.5', '2.2.4.0']
-   *   }
-   *  ]
-   *
-   */
-  $scope.fetchRepos = function () {
-    return Stack.allRepos($scope.filter, $scope.pagination).then(function (repos) {
-      $scope.allRepos = repos.items.sort(function(a, b){return a.repository_version < b.repository_version});
-      var existingStackHash = {};
-      var stackVersions = [];
-      angular.forEach($scope.allRepos, function (repo) {
-        var stackVersionName = repo.stack_name + '-' + repo.stack_version;
-        if (!existingStackHash[stackVersionName]) {
-          existingStackHash[stackVersionName] = true;
-          stackVersions.push({
-            'name': stackVersionName,
-            'isOpened': true,
-            'repos': [repo]
+    $scope.filterRepos = function (appliedFilters) {
+      $scope.tableInfo.filtered = Filters.filterItems(appliedFilters, $scope.repos, $scope.filters);
+      $scope.pagination.resetPagination($scope.repos, $scope.tableInfo);
+    };
+
+    $scope.toggleSearchBox = function() {
+      $('.search-box-button .popup-arrow-up, .search-box-row').toggleClass('hide');
+    };
+
+    $scope.goToCluster = function() {
+      window.location.replace(Settings.siteRoot + '#/main/admin/stack/versions');
+    };
+
+    $scope.fetchRepoClusterStatus = function (allRepos) {
+      var calls = [];
+      if (allRepos && allRepos.length) {
+        // only support one cluster at the moment
+        var clusterName = $scope.cluster && $scope.cluster.Clusters.cluster_name;
+        if (clusterName) {
+          $scope.repos = allRepos;
+          $scope.tableInfo.total = allRepos.length;
+          angular.forEach($scope.repos, function (repo) {
+            calls.push(Cluster.getRepoVersionStatus(clusterName, repo.id).then(function (response) {
+              repo.cluster = (response.status === 'CURRENT' || response.status === 'INSTALLED') ? clusterName : '';
+              if (repo.cluster) {
+                repo.status = response.status;
+                repo.totalHosts = response.totalHosts;
+                repo.currentHosts = response.currentHosts;
+                repo.installedHosts = response.installedHosts;
+                repo.stackVersionId = response.stackVersionId;
+              }
+            }));
           });
-        } else {
-          if (stackVersions[stackVersions.length -1].repos) {
-            stackVersions[stackVersions.length -1].repos.push(repo);
-          }
+        }
+      } else {
+        $scope.repos = [];
+        $scope.tableInfo.total = 0;
+        $scope.pagination.totalRepos = 0;
+        $scope.tableInfo.showed = 0;
+      }
+      $scope.tableInfo.total = $scope.repos.length;
+      return $q.all(calls);
+    };
+
+    $scope.fetchRepos = function () {
+      return Stack.allRepos().then(function (repos) {
+        $scope.isLoading = false;
+        return repos.items;
+      });
+    };
+
+    $scope.fetchClusters = function () {
+      return Cluster.getAllClusters().then(function (clusters) {
+        if (clusters && clusters.length > 0) {
+          $scope.dropDownClusters = clusters;
         }
       });
-      $scope.stackVersions = stackVersions;
-    });
-  };
+    };
 
-  $scope.fetchRepos();
+    $scope.loadAllData = function () {
+      $scope.isLoading = true;
+      $scope.fetchRepos()
+        .then(function (repos) {
+          $scope.fetchClusters();
+          $scope.fetchRepoClusterStatus(repos).then(function() {
+            Filters.initFilterOptions($scope.filters, $scope.repos);
+          });
+          $scope.filterRepos();
+        });
+    };
 
-}]);
+    $scope.loadAllData();
+
+    $scope.toggleVisibility = function (repo) {
+      repo.isProccessing = true;
+      var payload = {
+        RepositoryVersions: {
+          hidden: repo.hidden
+        }
+      };
+      Stack.updateRepo(repo.stack_name, repo.stack_version, repo.id, payload).then(null, function () {
+        repo.hidden = !repo.hidden;
+      }).finally(function () {
+        delete repo.isProccessing;
+      });
+    };
+
+    $scope.isHideCheckBoxEnabled = function ( repo ) {
+      return !repo.isProccessing && ( (!repo.cluster && repo.status !== 'OUT_OF_SYNC') || repo.isPatch && ( repo.status === 'INSTALLED' || repo.status === 'INSTALL_FAILED') );
+    }
+  }]);

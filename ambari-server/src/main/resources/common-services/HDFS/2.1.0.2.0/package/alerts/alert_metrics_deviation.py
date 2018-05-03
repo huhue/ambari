@@ -24,6 +24,8 @@ import logging
 import urllib
 import time
 import urllib2
+import os
+import ambari_commons.network as network
 
 from resource_management import Environment
 from ambari_commons.aggregate_functions import sample_standard_deviation, mean
@@ -31,7 +33,9 @@ from ambari_commons.aggregate_functions import sample_standard_deviation, mean
 from resource_management.libraries.functions.curl_krb_request import curl_krb_request
 from resource_management.libraries.functions.curl_krb_request import DEFAULT_KERBEROS_KINIT_TIMER_MS
 from resource_management.libraries.functions.curl_krb_request import KERBEROS_KINIT_TIMER_PARAMETER
-
+from resource_management.libraries.functions.namenode_ha_utils import get_name_service_by_hostname
+from ambari_commons.ambari_metrics_helper import select_metric_collector_for_sink
+from ambari_agent.AmbariConfig import AmbariConfig
 
 RESULT_STATE_OK = 'OK'
 RESULT_STATE_CRITICAL = 'CRITICAL'
@@ -54,7 +58,10 @@ SECURITY_ENABLED_KEY = '{{cluster-env/security_enabled}}'
 SMOKEUSER_KEY = '{{cluster-env/smokeuser}}'
 EXECUTABLE_SEARCH_PATHS = '{{kerberos-env/executable_search_paths}}'
 
+AMS_HTTP_POLICY = '{{ams-site/timeline.metrics.service.http.policy}}'
 METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY = '{{ams-site/timeline.metrics.service.webapp.address}}'
+METRICS_COLLECTOR_VIP_HOST_KEY = '{{cluster-env/metrics_collector_vip_host}}'
+METRICS_COLLECTOR_VIP_PORT_KEY = '{{cluster-env/metrics_collector_vip_port}}'
 
 CONNECTION_TIMEOUT_KEY = 'connection.timeout'
 CONNECTION_TIMEOUT_DEFAULT = 5.0
@@ -101,7 +108,8 @@ def get_tokens():
   return (HDFS_SITE_KEY, NAMESERVICE_KEY, NN_HTTP_ADDRESS_KEY, DFS_POLICY_KEY,
           EXECUTABLE_SEARCH_PATHS, NN_HTTPS_ADDRESS_KEY, SMOKEUSER_KEY,
           KERBEROS_KEYTAB, KERBEROS_PRINCIPAL, SECURITY_ENABLED_KEY,
-          METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY)
+          METRICS_COLLECTOR_VIP_HOST_KEY, METRICS_COLLECTOR_VIP_PORT_KEY,
+          METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY, AMS_HTTP_POLICY)
 
 def execute(configurations={}, parameters={}, host_name=None):
   """
@@ -164,17 +172,21 @@ def execute(configurations={}, parameters={}, host_name=None):
   if not HDFS_SITE_KEY in configurations:
     return (RESULT_STATE_UNKNOWN, ['{0} is a required parameter for the script'.format(HDFS_SITE_KEY)])
 
-  # ams-site/timeline.metrics.service.webapp.address is required
-  if not METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY in configurations:
-    return (RESULT_STATE_UNKNOWN, ['{0} is a required parameter for the script'.format(METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY)])
+  if METRICS_COLLECTOR_VIP_HOST_KEY in configurations and METRICS_COLLECTOR_VIP_PORT_KEY in configurations:
+    collector_host = configurations[METRICS_COLLECTOR_VIP_HOST_KEY]
+    collector_port = int(configurations[METRICS_COLLECTOR_VIP_PORT_KEY])
   else:
-    collector_webapp_address = configurations[METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY].split(":")
-    if valid_collector_webapp_address(collector_webapp_address):
-      collector_host = collector_webapp_address[0]
-      collector_port = int(collector_webapp_address[1])
+    # ams-site/timeline.metrics.service.webapp.address is required
+    if not METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY in configurations:
+      return (RESULT_STATE_UNKNOWN, ['{0} is a required parameter for the script'.format(METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY)])
     else:
-      return (RESULT_STATE_UNKNOWN, ['{0} value should be set as "fqdn_hostname:port", but set to {1}'.format(
-        METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY, configurations[METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY])])
+      collector_webapp_address = configurations[METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY].split(":")
+      if valid_collector_webapp_address(collector_webapp_address):
+        collector_host = select_metric_collector_for_sink(app_id.lower())
+        collector_port = int(collector_webapp_address[1])
+      else:
+        return (RESULT_STATE_UNKNOWN, ['{0} value should be set as "fqdn_hostname:port", but set to {1}'.format(
+          METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY, configurations[METRICS_COLLECTOR_WEBAPP_ADDRESS_KEY])])
 
   namenode_service_rpc_address = None
   # hdfs-site is required
@@ -222,7 +234,7 @@ def execute(configurations={}, parameters={}, host_name=None):
 
     kinit_timer_ms = parameters.get(KERBEROS_KINIT_TIMER_PARAMETER, DEFAULT_KERBEROS_KINIT_TIMER_MS)
 
-    name_service = configurations[NAMESERVICE_KEY]
+    name_service = get_name_service_by_hostname(hdfs_site, host_name)
 
     # look for dfs.ha.namenodes.foo
     nn_unique_ids_key = 'dfs.ha.namenodes.' + name_service
@@ -265,8 +277,7 @@ def execute(configurations={}, parameters={}, host_name=None):
 
             state = _get_ha_state_from_json(state_response)
           else:
-            state_response = get_jmx(jmx_uri, connection_timeout)
-            state = _get_ha_state_from_json(state_response)
+            state = _get_state_from_jmx(jmx_uri, connection_timeout)
 
           if state == HDFS_NN_STATE_ACTIVE:
             active_namenodes.append(namenode)
@@ -302,17 +313,31 @@ def execute(configurations={}, parameters={}, host_name=None):
 
   encoded_get_metrics_parameters = urllib.urlencode(get_metrics_parameters)
 
+  ams_monitor_conf_dir = "/etc/ambari-metrics-monitor/conf"
+  metric_truststore_ca_certs='ca.pem'
+  ca_certs = os.path.join(ams_monitor_conf_dir,
+                          metric_truststore_ca_certs)
+  metric_collector_https_enabled = str(configurations[AMS_HTTP_POLICY]) == "HTTPS_ONLY"
+
+  _ssl_version = _get_ssl_version()
   try:
-    conn = httplib.HTTPConnection(collector_host, int(collector_port),
-                                  timeout=connection_timeout)
+    conn = network.get_http_connection(
+      collector_host,
+      int(collector_port),
+      metric_collector_https_enabled,
+      ca_certs,
+      ssl_version=_ssl_version
+    )
     conn.request("GET", AMS_METRICS_GET_URL % encoded_get_metrics_parameters)
     response = conn.getresponse()
     data = response.read()
     conn.close()
-  except Exception:
+  except Exception, e:
+    logger.info(str(e))
     return (RESULT_STATE_UNKNOWN, ["Unable to retrieve metrics from the Ambari Metrics service."])
 
   if response.status != 200:
+    logger.info(str(data))
     return (RESULT_STATE_UNKNOWN, ["Unable to retrieve metrics from the Ambari Metrics service."])
 
   data_json = json.loads(data)
@@ -397,11 +422,20 @@ def execute(configurations={}, parameters={}, host_name=None):
 def valid_collector_webapp_address(webapp_address):
   if len(webapp_address) == 2 \
     and webapp_address[0] != '127.0.0.1' \
-    and webapp_address[0] != '0.0.0.0' \
     and webapp_address[1].isdigit():
     return True
 
   return False
+
+
+def _get_state_from_jmx(jmx_uri, connection_timeout):
+  state_response = get_jmx(jmx_uri, connection_timeout)
+  state = _get_ha_state_from_json(state_response)
+  return state
+
+
+def _get_ssl_version():
+  return AmbariConfig.get_resolved_config().get_force_https_protocol_value()
 
 
 def get_jmx(query, connection_timeout):
@@ -461,3 +495,4 @@ def _coerce_to_integer(value):
     return int(value)
   except ValueError:
     return int(float(value))
+

@@ -202,7 +202,7 @@ App.QueuesController = Ember.ArrayController.extend({
   },
 
   saveConfigError:function (operation, error) {
-    var response = error.responseJSON;
+    var response = error.responseJSON || {};
     response.simpleMessage = operation.capitalize() + ' failed!';
     this.set('alertMessage',response);
   },
@@ -247,6 +247,7 @@ App.QueuesController = Ember.ArrayController.extend({
           return +queue.get('capacity') + prev;
         },0);
 
+      total = parseFloat(total.toFixed(3));
       leaf.setEach('overCapacity',total != 100);
     }.bind(this));
   }.observes('content.length','content.@each.capacity'),

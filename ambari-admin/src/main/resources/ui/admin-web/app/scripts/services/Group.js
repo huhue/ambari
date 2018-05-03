@@ -18,33 +18,29 @@
 'use strict';
 
 angular.module('ambariAdminConsole')
-.factory('Group', ['$http', '$q', 'Settings', function($http, $q, Settings) {
-  function Group(item){
-    if(typeof item === 'string'){
+.factory('Group', ['$http', '$q', 'Settings', '$translate', 'Cluster', function($http, $q, Settings, $translate, Cluster) {
+  var $t = $translate.instant;
+  var types = {
+    LOCAL: {
+      VALUE: 'LOCAL',
+      LABEL_KEY: 'common.local'
+    },
+    PAM: {
+      VALUE: 'PAM',
+      LABEL_KEY: 'common.pam'
+    },
+    LDAP: {
+      VALUE: 'LDAP',
+      LABEL_KEY: 'common.ldap'
+    }
+  };
+
+  function Group(item) {
+    if (typeof item === 'string') {
       this.group_name = item;
-    } else if(typeof item === 'object'){
+    } else if (typeof item === 'object') {
       angular.extend(this, item.Groups);
-      this.getMembers();
     }
-  }
-
-  Group.prototype.isLDAP = function() {
-    var deferred = $q.defer();
-    var self = this;
-    if( typeof this.ldap_group === 'boolean' ){
-      deferred.resolve(this.ldap_group)
-    } else {
-      $http({
-        method: 'GET',
-        url: Settings.baseUrl + '/groups/'+this.group_name
-      }).
-      success(function(data) {
-        self.ldap_group = data.Groups.ldap_group;
-        deferred.resolve(self.ldap_group);
-      });
-    }
-
-    return deferred.promise;
   }
 
   Group.prototype.save = function() {
@@ -62,28 +58,6 @@ angular.module('ambariAdminConsole')
     $http.delete(Settings.baseUrl + '/groups/' +this.group_name)
     .success(function() {
       deferred.resolve();
-    })
-    .error(function(data) {
-      deferred.reject(data);
-    });
-
-    return deferred.promise;
-  };
-
-  Group.prototype.getMembers = function() {
-    var deferred = $q.defer();
-    var self = this;
-
-    $http({
-      method: 'GET',
-      url: Settings.baseUrl + '/groups/' + this.group_name + '/members'
-    })
-    .success(function(data) {
-      self.members = [];
-      angular.forEach(data.items, function(member) {
-        self.members.push(member.MemberInfo.user_name);
-      });
-      deferred.resolve(self.members);
     })
     .error(function(data) {
       deferred.reject(data);
@@ -116,27 +90,6 @@ angular.module('ambariAdminConsole')
       deferred.reject(data);
     });
     return deferred.promise;
-  }
-
-  Group.prototype.addMember = function(memberName) {
-    var deferred = $q.defer();
-
-    $http({
-      method: 'POST',
-      url: Settings.baseUrl + '/groups/' + this.group_name + '/members' + '/'+ encodeURIComponent(member.user_name)
-    })
-    .success(function(data) {
-      deferred.resolve(data)
-    })
-    .error(function(data) {
-      deferred.reject(data);
-    });
-
-    return deferred.promise;
-  };
-
-  Group.prototype.removeMember = function(memberId) {
-    return $http.delete(Settings.baseUrl + '/groups/'+this.group_name+'/members/'+memberId);
   };
 
   Group.removeMemberFromGroup = function(groupName, memberName) {
@@ -147,25 +100,12 @@ angular.module('ambariAdminConsole')
     return $http.post(Settings.baseUrl + '/groups/' + groupName + '/members/'+memberName);
   };
 
-  Group.all = function(params) {
+  Group.all = function() {
     var deferred = $q.defer();
 
-    $http.get(Settings.baseUrl + '/groups?'
-      + 'Groups/group_name.matches(.*'+params.searchString+'.*)'
-      + '&fields=*'
-      + '&from='+ (params.currentPage-1)*params.groupsPerPage
-      + '&page_size=' + params.groupsPerPage
-      + (params.ldap_group === '*' ? '' : '&Groups/ldap_group='+params.ldap_group)
-    )
+    $http.get(Settings.baseUrl + '/groups?fields=*')
     .success(function(data) {
-      var groups = [];
-      if(Array.isArray(data.items)){
-        angular.forEach(data.items, function(item) {
-          groups.push(new Group(item));
-        });
-      }
-      groups.itemTotal = data.itemTotal;
-      deferred.resolve(groups);
+      deferred.resolve(data.items);
     })
     .error(function(data) {
       deferred.reject(data);
@@ -186,6 +126,46 @@ angular.module('ambariAdminConsole')
         'fields': '*'
       }
     });
+  };
+
+  Group.get = function (group_name) {
+    var deferred = $q.defer();
+    $http({
+      method: 'GET',
+      url: Settings.baseUrl + '/groups/' + group_name +
+      '?fields=Groups,privileges/PrivilegeInfo/*,members/MemberInfo'
+    }).success(function (data) {
+      deferred.resolve(Group.makeGroup(data));
+    });
+
+    return deferred.promise;
+  };
+
+  Group.getTypes = function () {
+    return types;
+  };
+
+  /**
+     * Generate group info to display by response data from API.
+     * Generally this is a single point to manage all required and useful data
+     * needed to use as context for views/controllers.
+     *
+     * @param {Object} group - object from API response
+     * @returns {Object}
+     */
+  Group.makeGroup = function(data) {
+    var group = new Group(data.Groups.group_name);
+    group.groupTypeName = $t(types[data.Groups.group_type].LABEL_KEY);
+    group.group_type = data.Groups.group_type;
+    group.ldap_group = data.Groups.ldap_group;
+    group.privileges = data.privileges;
+    group.members = data.members;
+    group.roles = Cluster.sortRoles(data.privileges.filter(function(item) {
+      return item.PrivilegeInfo.type === 'CLUSTER' || item.PrivilegeInfo.type === 'AMBARI';
+    }).map(function(item) {
+      return item.PrivilegeInfo;
+    }));
+    return group;
   };
 
   return Group;

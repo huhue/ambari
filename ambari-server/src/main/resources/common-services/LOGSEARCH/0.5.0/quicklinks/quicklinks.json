@@ -3,7 +3,14 @@
   "description": "default quick links configuration",
   "configuration": {
     "protocol": {
-      "type": "http"
+      "type":"https",
+      "checks":[
+        {
+          "property":"logsearch.protocol",
+          "desired":"https",
+          "site":"logsearch-properties"
+        }
+      ]
     },
     "links": [
       {
@@ -12,13 +19,14 @@
         "component_name": "LOGSEARCH_SERVER",
         "url": "%@://%@:%@",
         "requires_user_name": "false",
+        "attributes": ["authenticated", "sso"],
         "port": {
-          "http_property": "logsearch_ui_port",
+          "http_property": "logsearch.http.port",
           "http_default_port": "8888",
-          "https_property": "logsearch_ui_port",
+          "https_property": "logsearch.https.port",
           "https_default_port": "8888",
           "regex": "^(\\d+)$",
-          "site": "logsearch-env"
+          "site": "logsearch-properties"
         }
       }
     ]

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,54 +19,42 @@
 package org.apache.ambari.server.controller;
 
 
+import java.util.Map;
+
+import org.apache.ambari.server.state.RepositoryVersionState;
+import org.apache.ambari.server.state.StackId;
+
 public class ServiceComponentResponse {
 
   private Long clusterId; // REF
-
   private String clusterName; // REF
-
   private String serviceName;
-
   private String componentName;
-
   private String displayName;
-
-  private String desiredStackVersion;
-
+  private String desiredStackId;
   private String desiredState;
-
   private String category;
-
-  private int totalCount;
-
-  private int startedCount;
-
-  private int installedCount;
-
+  private Map<String, Integer> serviceComponentStateCount;
   private boolean recoveryEnabled;
+  private String desiredVersion;
+  private RepositoryVersionState repoState;
 
-  public ServiceComponentResponse(Long clusterId, String clusterName,
-                                  String serviceName,
-                                  String componentName,
-                                  String desiredStackVersion,
-                                  String desiredState,
-                                  int totalCount,
-                                  int startedCount,
-                                  int installedCount,
-                                  boolean recoveryEnabled,
-                                  String displayName) {
-    super();
+  public ServiceComponentResponse(Long clusterId, String clusterName, String serviceName,
+      String componentName, StackId desiredStackId, String desiredState,
+      Map<String, Integer> serviceComponentStateCount, boolean recoveryEnabled, String displayName,
+      String desiredVersion, RepositoryVersionState repoState) {
+
     this.clusterId = clusterId;
     this.clusterName = clusterName;
     this.serviceName = serviceName;
     this.componentName = componentName;
     this.displayName = displayName;
-    this.desiredStackVersion = desiredStackVersion;
+    this.desiredStackId = desiredStackId.getStackId();
     this.desiredState = desiredState;
-    this.totalCount = totalCount;
-    this.startedCount = startedCount;
-    this.installedCount = installedCount;
+    this.serviceComponentStateCount = serviceComponentStateCount;
     this.recoveryEnabled = recoveryEnabled;
+    this.desiredVersion = desiredVersion;
+    this.repoState = repoState;
   }
 
   /**
@@ -147,17 +135,12 @@ public class ServiceComponentResponse {
   }
 
   /**
+   * Gets the desired stack ID.
+   *
    * @return the desiredStackVersion
    */
-  public String getDesiredStackVersion() {
-    return desiredStackVersion;
-  }
-
-  /**
-   * @param desiredStackVersion the desiredStackVersion to set
-   */
-  public void setDesiredStackVersion(String desiredStackVersion) {
-    this.desiredStackVersion = desiredStackVersion;
+  public String getDesiredStackId() {
+    return desiredStackId;
   }
 
   /**
@@ -179,51 +162,11 @@ public class ServiceComponentResponse {
   }
 
   /**
-   * Get the number of started SCH's
-   * @return number of started SCH's
+   * Get the count of service component for each state
+   * @return number of service component for each state
    */
-  public int getStartedCount() {
-    return startedCount;
-  }
-
-  /**
-   * Set the number of started SCH's
-   * @param startedCount
-   */
-  public void setStartedCount(int startedCount) {
-    this.startedCount = startedCount;
-  }
-
-  /**
-   * Get the number of installed SCH's
-   * @return number of installed SCH's
-   */
-  public int getInstalledCount() {
-    return installedCount;
-  }
-
-  /**
-   * Set the number of installed SCH's
-   * @param installedCount
-   */
-  public void setInstalledCount(int installedCount) {
-    this.installedCount = installedCount;
-  }
-
-  /**
-   * Get the total number of SCH's
-   * @return
-   */
-  public int getTotalCount() {
-    return totalCount;
-  }
-
-  /**
-   * Set the total number of SCH's
-   * @param totalCount
-   */
-  public void setTotalCount(int totalCount) {
-    this.totalCount = totalCount;
+  public Map<String, Integer> getServiceComponentStateCount() {
+    return serviceComponentStateCount;
   }
 
   /**
@@ -242,10 +185,29 @@ public class ServiceComponentResponse {
     this.recoveryEnabled = recoveryEnabled;
   }
 
+  /**
+   * @return the desired version of the component
+   */
+  public String getDesiredVersion() {
+    return desiredVersion;
+  }
+
+  /**
+   * @return the state of the repository against the desired version
+   */
+  public RepositoryVersionState getRepositoryState() {
+    return repoState;
+  }
+
+
   @Override
   public boolean equals(Object o) {
-    if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
 
     ServiceComponentResponse that =
         (ServiceComponentResponse) o;

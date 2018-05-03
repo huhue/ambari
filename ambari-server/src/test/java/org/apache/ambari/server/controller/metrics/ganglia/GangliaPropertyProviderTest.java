@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -16,6 +16,25 @@
  * limitations under the License.
  */
 package org.apache.ambari.server.controller.metrics.ganglia;
+
+import static org.apache.ambari.server.controller.metrics.MetricsServiceProvider.MetricsService;
+import static org.apache.ambari.server.controller.metrics.MetricsServiceProvider.MetricsService.GANGLIA;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.eq;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.configuration.ComponentSSLConfiguration;
@@ -51,25 +70,6 @@ import org.powermock.api.easymock.PowerMock;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static org.apache.ambari.server.controller.metrics.MetricsServiceProvider.MetricsService;
-import static org.apache.ambari.server.controller.metrics.MetricsServiceProvider.MetricsService.GANGLIA;
-import static org.easymock.EasyMock.anyObject;
-import static org.easymock.EasyMock.createNiceMock;
-import static org.easymock.EasyMock.eq;
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.replay;
-
 /**
  * Test the Ganglia property provider.
  */
@@ -77,7 +77,7 @@ import static org.easymock.EasyMock.replay;
 @PrepareForTest({ MetricHostProvider.class })
 public class GangliaPropertyProviderTest {
 
-  private static final String PROPERTY_ID = PropertyHelper.getPropertyId("metrics/jvm", "gcCount");
+  private static final String PROPERTY_ID = PropertyHelper.getPropertyId("metrics/process", "proc_total");
   private static final String PROPERTY_ID2 = PropertyHelper.getPropertyId("metrics/cpu", "cpu_wio");
   private static final String FLUME_CHANNEL_CAPACITY_PROPERTY = "metrics/flume/flume/CHANNEL/c1/ChannelCapacity";
   private static final String FLUME_CATEGORY = "metrics/flume";
@@ -215,7 +215,7 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "DATANODE");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(PROPERTY_ID, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(PROPERTY_ID), temporalInfoMap);
 
@@ -223,7 +223,7 @@ public class GangliaPropertyProviderTest {
 
 
     String expected = (configuration.isHttpsEnabled() ? "https" : "http") +
-        "://domU-12-31-39-0E-34-E1.compute-1.internal/cgi-bin/rrd.py?c=HDPDataNode%2CHDPSlaves&h=domU-12-31-39-0E-34-E1.compute-1.internal&m=jvm.metrics.gcCount&s=10&e=20&r=1";
+        "://domU-12-31-39-0E-34-E1.compute-1.internal/cgi-bin/rrd.py?c=HDPDataNode%2CHDPSlaves&h=domU-12-31-39-0E-34-E1.compute-1.internal&m=proc_total&s=10&e=20&r=1";
     Assert.assertEquals(expected, streamProvider.getLastSpec());
 
     Assert.assertEquals(4, PropertyHelper.getProperties(resource).size());
@@ -237,9 +237,9 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "TASKTRACKER");
 
     // only ask for one property
-    temporalInfoMap = new HashMap<String, TemporalInfo>();
+    temporalInfoMap = new HashMap<>();
 
-    Set<String> properties = new HashSet<String>();
+    Set<String> properties = new HashSet<>();
     String shuffle_exceptions_caught = PropertyHelper.getPropertyId("metrics/mapred/shuffleOutput", "shuffle_exceptions_caught");
     String shuffle_failed_outputs    = PropertyHelper.getPropertyId("metrics/mapred/shuffleOutput", "shuffle_failed_outputs");
     String shuffle_output_bytes      = PropertyHelper.getPropertyId("metrics/mapred/shuffleOutput", "shuffle_output_bytes");
@@ -259,7 +259,7 @@ public class GangliaPropertyProviderTest {
     Assert.assertEquals(1, propertyProvider.populateResources(Collections.singleton(resource), request, null).size());
 
     
-    List<String> metricsRegexes = new ArrayList<String>();
+    List<String> metricsRegexes = new ArrayList<>();
     
     metricsRegexes.add("metrics/mapred/shuffleOutput/shuffle_exceptions_caught");
     metricsRegexes.add("metrics/mapred/shuffleOutput/shuffle_failed_outputs");
@@ -328,7 +328,7 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "DATANODE");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(PROPERTY_ID, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(PROPERTY_ID), temporalInfoMap);
     
@@ -366,7 +366,7 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(HOST_NAME_PROPERTY_ID, "corp-hadoopda05.client.ext");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put("metrics/process/proc_total", new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton("metrics/process/proc_total"), temporalInfoMap);
 
@@ -393,7 +393,7 @@ public class GangliaPropertyProviderTest {
         HOST_NAME_PROPERTY_ID
     );
 
-    Set<Resource> resources = new HashSet<Resource>();
+    Set<Resource> resources = new HashSet<>();
 
     // host
     Resource resource = new ResourceImpl(Resource.Type.Host);
@@ -412,7 +412,7 @@ public class GangliaPropertyProviderTest {
     resources.add(resource);
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(PROPERTY_ID, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(PROPERTY_ID), temporalInfoMap);
 
@@ -425,7 +425,7 @@ public class GangliaPropertyProviderTest {
     uriBuilder.setPath("/cgi-bin/rrd.py");
     uriBuilder.setParameter("c", "HDPJobTracker,HDPHBaseMaster,HDPResourceManager,HDPFlumeServer,HDPSlaves,HDPHistoryServer,HDPJournalNode,HDPTaskTracker,HDPHBaseRegionServer,HDPNameNode");
     uriBuilder.setParameter("h", "domU-12-31-39-0E-34-E3.compute-1.internal,domU-12-31-39-0E-34-E1.compute-1.internal,domU-12-31-39-0E-34-E2.compute-1.internal");
-    uriBuilder.setParameter("m", "jvm.metrics.gcCount");
+    uriBuilder.setParameter("m", "proc_total");
     uriBuilder.setParameter("s", "10");
     uriBuilder.setParameter("e", "20");
     uriBuilder.setParameter("r", "1");
@@ -463,7 +463,7 @@ public class GangliaPropertyProviderTest {
         HOST_NAME_PROPERTY_ID
     );
 
-    Set<Resource> resources = new HashSet<Resource>();
+    Set<Resource> resources = new HashSet<>();
 
     StringBuilder hostsList = new StringBuilder();
     
@@ -474,13 +474,13 @@ public class GangliaPropertyProviderTest {
       resources.add(resource);
       
       if (hostsList.length() != 0)
-        hostsList.append("," + "host" + i );
+        hostsList.append(",host").append(i);
       else
-        hostsList.append("host" + i); 
+        hostsList.append("host").append(i);
     }
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(PROPERTY_ID, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(PROPERTY_ID), temporalInfoMap);
 
@@ -495,7 +495,7 @@ public class GangliaPropertyProviderTest {
     expectedUri.setParameter("c", "HDPJobTracker,HDPHBaseMaster,HDPResourceManager,HDPFlumeServer,HDPSlaves,HDPHistoryServer,HDPJournalNode,HDPTaskTracker,HDPHBaseRegionServer,HDPNameNode");
    
     expectedUri.setParameter("h", hostsList.toString());
-    expectedUri.setParameter("m", "jvm.metrics.gcCount");
+    expectedUri.setParameter("m", "proc_total");
     expectedUri.setParameter("s", "10");
     expectedUri.setParameter("e", "20");
     expectedUri.setParameter("r", "1");
@@ -531,13 +531,13 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "FLUME_HANDLER");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(FLUME_CHANNEL_CAPACITY_PROPERTY, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(FLUME_CHANNEL_CAPACITY_PROPERTY), temporalInfoMap);
 
     Assert.assertEquals(1, propertyProvider.populateResources(Collections.singleton(resource), request, null).size());
 
-    List<String> metricsRegexes = new ArrayList<String>();
+    List<String> metricsRegexes = new ArrayList<>();
     
     metricsRegexes.add(FLUME_CHANNEL_CAPACITY_PROPERTY);
 
@@ -589,9 +589,9 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "FLUME_HANDLER");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
 
-    Set<String> ids = new HashSet<String>();
+    Set<String> ids = new HashSet<>();
     ids.add(FLUME_CATEGORY2);
     ids.add(PROPERTY_ID2);
 
@@ -599,7 +599,7 @@ public class GangliaPropertyProviderTest {
 
     Assert.assertEquals(1, propertyProvider.populateResources(Collections.singleton(resource), request, null).size());
 
-    List<String> metricsRegexes = new ArrayList<String>();
+    List<String> metricsRegexes = new ArrayList<>();
     
     metricsRegexes.add("metrics/flume");
     metricsRegexes.add("metrics/cpu/cpu_wio");
@@ -650,8 +650,8 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(HOST_NAME_PROPERTY_ID, "ip-10-39-113-33.ec2.internal");
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "FLUME_HANDLER");
 
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
-    Request  request = PropertyHelper.getReadRequest(Collections.<String>emptySet(), temporalInfoMap);
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
+    Request  request = PropertyHelper.getReadRequest(Collections.emptySet(), temporalInfoMap);
 
     Assert.assertEquals(1, propertyProvider.populateResources(Collections.singleton(resource), request, null).size());
 
@@ -692,13 +692,13 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "FLUME_HANDLER");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(FLUME_CATEGORY, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(FLUME_CATEGORY), temporalInfoMap);
 
     Assert.assertEquals(1, propertyProvider.populateResources(Collections.singleton(resource), request, null).size());
 
-    List<String> metricsRegexes = new ArrayList<String>();
+    List<String> metricsRegexes = new ArrayList<>();
     
     metricsRegexes.add("metrics/flume");
     
@@ -750,13 +750,13 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "FLUME_HANDLER");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(FLUME_CATEGORY2, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(FLUME_CATEGORY2), temporalInfoMap);
 
     Assert.assertEquals(1, propertyProvider.populateResources(Collections.singleton(resource), request, null).size());
 
-    List<String> metricsRegexes = new ArrayList<String>();
+    List<String> metricsRegexes = new ArrayList<>();
     
     metricsRegexes.add("metrics/flume/");
     
@@ -808,13 +808,13 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "FLUME_HANDLER");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(FLUME_CATEGORY3, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(FLUME_CATEGORY3), temporalInfoMap);
 
     Assert.assertEquals(1, propertyProvider.populateResources(Collections.singleton(resource), request, null).size());
     
-    List<String> metricsRegexes = new ArrayList<String>();
+    List<String> metricsRegexes = new ArrayList<>();
     
     metricsRegexes.add("metrics/flume/$1/CHANNEL/$2/");
     metricsRegexes.add(FLUME_CHANNEL_CAPACITY_PROPERTY);
@@ -867,13 +867,13 @@ public class GangliaPropertyProviderTest {
     resource.setProperty(COMPONENT_NAME_PROPERTY_ID, "FLUME_HANDLER");
 
     // only ask for one property
-    Map<String, TemporalInfo> temporalInfoMap = new HashMap<String, TemporalInfo>();
+    Map<String, TemporalInfo> temporalInfoMap = new HashMap<>();
     temporalInfoMap.put(FLUME_CATEGORY4, new TemporalInfoImpl(10L, 20L, 1L));
     Request  request = PropertyHelper.getReadRequest(Collections.singleton(FLUME_CATEGORY4), temporalInfoMap);
 
     Assert.assertEquals(1, propertyProvider.populateResources(Collections.singleton(resource), request, null).size());
     
-    List<String> metricsRegexes = new ArrayList<String>();
+    List<String> metricsRegexes = new ArrayList<>();
     
     metricsRegexes.add("metrics/flume/$1/CHANNEL/$2");
     metricsRegexes.add(FLUME_CHANNEL_CAPACITY_PROPERTY);
@@ -921,8 +921,8 @@ public class GangliaPropertyProviderTest {
       if (actualParam == null) {
         return false;
       }
-      List<String> actualParamList = new ArrayList<String>(Arrays.asList(actualParam.getValue().split(",")));
-      List<String> expectedParamList = new ArrayList<String>(Arrays.asList(expectedParam.getValue().split(",")));
+      List<String> actualParamList = new ArrayList<>(Arrays.asList(actualParam.getValue().split(",")));
+      List<String> expectedParamList = new ArrayList<>(Arrays.asList(expectedParam.getValue().split(",")));
       
       Collections.sort(actualParamList);
       Collections.sort(expectedParamList);
@@ -945,7 +945,7 @@ public class GangliaPropertyProviderTest {
       for (String metricRegex: metricsRegexes)
       {
         if (entry.getKey().startsWith(metricRegex)) {
-          metricsBuilder.append(entry.getValue().getPropertyId() + ",");
+          metricsBuilder.append(entry.getValue().getPropertyId()).append(",");
         }
       }
     }

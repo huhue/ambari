@@ -44,22 +44,59 @@ App.ServiceConfig = Ember.Object.extend({
    *
    * @type {Object[]}
    */
-  activeProperties: function() {
-    return this.get('configs').filter(function(c) {
-      return c.get('isVisible') && !c.get('hiddenBySection') && c.get('isRequiredByAgent');
-    });
-  }.property('configs.@each.isVisible', 'configs.@each.hiddenBySection', 'configs.@each.isRequiredByAgent'),
+  activeProperties: [],
 
-  configsWithErrors: function() {
-    return this.get('activeProperties').filter(function(c) {
+  configsWithErrors: [],
+
+  /**
+   * Collection of properties that were changed:
+   * for saved properties use - <code>isNotDefaultValue<code>
+   * for not saved properties (on wizards, for new services) use
+   *    - <code>isNotInitialValue<code>
+   * for added properties use - <code>isNotSaved<code>
+   * @type {Object[]}
+   */
+  changedConfigProperties: [],
+
+  setActiveProperties: function() {
+    Em.run.once(this, 'setActivePropertiesOnce');
+  }.observes('configs.@each.isActive', 'configs.@each.isRequiredByAgent', 'configs.@each.value', 'configs.@each.isUndefinedLabel'),
+
+  setActivePropertiesOnce: function() {
+    if (this.get('isDestroyed')) return false;
+    var activeProperties = this.get('configs').filter(function(c) {
+      return (c.get('isActive') || c.get('isUndefinedLabel')) && (c.get('isRequiredByAgent') || c.get('isRequired'));
+    });
+    this.set('activeProperties', activeProperties);
+  },
+
+  setChangedConfigProperties: function() {
+    Em.run.once(this, 'setChangedConfigPropertiesOnce');
+  }.observes('activeProperties.@each.isNotDefaultValue', 'activeProperties.@each.isNotSaved', 'activeProperties.@each.isNotInitialValue'),
+
+  setChangedConfigPropertiesOnce: function() {
+    var changedConfigProperties = this.get('activeProperties').filter(function(c) {
+      return c.get('isNotDefaultValue') || c.get('isNotSaved') || c.get('isNotInitialValue');
+    }, this);
+    this.set('changedConfigProperties', changedConfigProperties);
+  },
+
+  setConfigsWithErrors: function() {
+    Em.run.once(this, 'setConfigsWithErrorsOnce');
+  }.observes('activeProperties.@each.isValid', 'activeProperties.@each.isValidOverride', 'activeProperties.length'),
+
+  setConfigsWithErrorsOnce: function() {
+    var configsWithErrors = this.get('activeProperties').filter(function(c) {
       return !c.get('isValid') || !c.get('isValidOverride');
     });
-  }.property('activeProperties.@each.isValid', 'activeProperties.@each.isValidOverride'),
+    this.set('configsWithErrors', configsWithErrors);
+  },
 
   observeErrors: function() {
     this.get('configCategories').setEach('errorCount', 0);
     this.get('configsWithErrors').forEach(function(c) {
-      if (this.get('configCategoriesMap')[c.get('category')]) {
+      //configurations with widget shouldn't affect advanced category error counter
+      if (this.get('configCategoriesMap')[c.get('category')] && !c.get('isInDefaultTheme')) {
         this.get('configCategoriesMap')[c.get('category')].incrementProperty('errorCount');
       }
     }, this);
@@ -69,8 +106,14 @@ App.ServiceConfig = Ember.Object.extend({
     return App.StackService.find(this.get('serviceName')).get('configTypeList') || [];
   }.property('serviceName'),
 
+  radioConfigs: Em.computed.filterBy('configs', 'displayType', 'radio button'),
+
   observeForeignKeys: function() {
     //TODO refactor or move this logic to other place
+    Em.run.once(this, 'updateVisibilityByForeignKeys');
+  }.observes('radioConfigs.@each.value'),
+
+  updateVisibilityByForeignKeys: function() {
     var configs = this.get('configs');
     configs.forEach(function (item) {
       if (item.get('isVisible')) {
@@ -88,21 +131,7 @@ App.ServiceConfig = Ember.Object.extend({
         }
       }
     });
-  }.observes('configs.@each.isVisible'),
-
-  /**
-   * Collection of properties that were changed:
-   * for saved properties use - <code>isNotDefaultValue<code>
-   * for not saved properties (on wizards, for new services) use
-   *    - <code>isNotInitialValue<code>
-   * for added properties use - <code>isNotSaved<code>
-   * @type {Object[]}
-   */
-  changedConfigProperties: function() {
-    return this.get('activeProperties').filter(function(c) {
-      return c.get('isNotDefaultValue') || c.get('isNotSaved') || c.get('isNotInitialValue');
-    }, this);
-  }.property('activeProperties.@each.isNotDefaultValue', 'activeProperties.@each.isNotSaved', 'activeProperties.@each.isNotInitialValue'),
+  },
 
   /**
    * Config with overrides that has values that differs from saved
@@ -128,7 +157,11 @@ App.ServiceConfig = Ember.Object.extend({
   init: function() {
     this._super();
     this.set('dependentServiceNames', App.StackService.find(this.get('serviceName')).get('dependentServiceNames') || []);
-  }
+    this.observeForeignKeys();
+    this.setActiveProperties();
+  },
+
+  hasConfigIssues: Em.computed.someBy('activeProperties', 'hasIssues', true)
 });
 
 App.ConfigSiteTag = Ember.Object.extend({

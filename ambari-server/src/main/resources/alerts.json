@@ -25,7 +25,18 @@
         "enabled": true,
         "source": {
           "type": "SERVER",
-          "class": "org.apache.ambari.server.alerts.StaleAlertRunnable"
+          "class": "org.apache.ambari.server.alerts.StaleAlertRunnable",
+          "parameters": [
+            {
+              "name": "stale.interval.multiplier",
+              "display_name": "Interval Multiplier",
+              "value": 2,
+              "type": "NUMERIC",
+              "description": "The number of intervals which must pass before an an alert is considered stale. This value is a multiplier for each alert's individual interval.",
+              "units": "Intervals",
+              "threshold": "CRITICAL"
+            }
+          ]
         }
       },
       {
@@ -95,6 +106,18 @@
             }
           ]
         }
+      },
+      {
+        "name": "ambari_server_component_version",
+        "label": "Component Version",
+        "description": "This alert is triggered if the server detects that there is a problem with the expected and reported version of a component. The alert is suppressed automatically during an upgrade.",
+        "interval": 5,
+        "scope": "SERVICE",
+        "enabled": true,
+        "source": {
+          "type": "SERVER",
+          "class": "org.apache.ambari.server.alerts.ComponentVersionAlertRunnable"
+        }
       }
     ],
     "AMBARI_AGENT" : [
@@ -138,7 +161,50 @@
             }
           ]
         }
+      },
+      {
+        "name": "ambari_agent_ulimit",
+        "label": "Ulimit for open files",
+        "description": "This host-level alert is triggered if value of ulimit for open files (-n) goes above specific thresholds. The default threshold values are 200000 for WARNING and 800000 for CRITICAL.",
+        "interval": 1,
+        "scope": "HOST",
+        "enabled": true,
+        "source": {
+          "type": "SCRIPT",
+          "path": "alert_ulimit.py",
+          "parameters": [
+            {
+              "name": "ulimit.warning.threshold",
+              "display_name": "Warning",
+              "value": 200000,
+              "type": "NUMERIC",
+              "description": "The threshold of ulimit for open files (-n) for WARNING alert.",
+              "threshold": "WARNING"
+            },
+            {
+              "name": "ulimit.critical.threshold",
+              "display_name": "Critical",
+              "value": 800000,
+              "type": "NUMERIC",
+              "description": "The threshold of ulimit for open files (-n) for CRITICAL alert.",
+              "threshold": "CRITICAL"
+            }
+          ]
+        }
+      },
+      {
+        "name": "ambari_agent_version_select",
+        "label": "Ambari Agent Distro/Conf Select Versions",
+        "description": "This host-level alert is triggered if the distro selector such as hdp-select cannot calculate versions available on this host. This may indicate that /usr/$stack/ directory has links/dirs that do not belong inside of it.",
+        "interval": 5,
+        "scope": "HOST",
+        "enabled": true,
+        "source": {
+          "type": "SCRIPT",
+          "path": "alert_version_select.py"
+        }
       }
+
     ]
   }
 }

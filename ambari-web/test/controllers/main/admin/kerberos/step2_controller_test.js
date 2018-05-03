@@ -37,7 +37,7 @@ describe('App.KerberosWizardStep2Controller', function() {
     controller = getController();
   });
 
-  App.TestAliases.testAsComputedAlias(getController(), 'isBackBtnDisabled', 'testConnectionInProgress', 'boolean');
+  App.TestAliases.testAsComputedOr(getController(), 'isBackBtnDisabled', ['testConnectionInProgress', 'App.router.nextBtnClickInProgress'], 'boolean');
 
   App.TestAliases.testAsComputedAlias(getController(), 'hostNames', 'App.allHostNames', 'array');
 
@@ -212,6 +212,7 @@ describe('App.KerberosWizardStep2Controller', function() {
       }]);
       sinon.stub(controller, 'clearStep');
       sinon.stub(App.config, 'setPreDefinedServiceConfigs');
+      sinon.stub(App.config, 'mergeStoredValue');
       sinon.stub(controller, 'filterConfigs');
       sinon.stub(controller, 'getKerberosConfigs');
       sinon.stub(controller, 'initializeKDCStoreProperties');
@@ -233,6 +234,7 @@ describe('App.KerberosWizardStep2Controller', function() {
       this.mockStackService.restore();
       controller.clearStep.restore();
       App.config.setPreDefinedServiceConfigs.restore();
+      App.config.mergeStoredValue.restore();
       controller.filterConfigs.restore();
       controller.getKerberosConfigs.restore();
       controller.initializeKDCStoreProperties.restore();
@@ -416,7 +418,7 @@ describe('App.KerberosWizardStep2Controller', function() {
       controller.set('content.kerberosOption', Em.I18n.t('admin.kerberos.wizard.step1.option.manual'));
       controller.set('controllers.kerberosWizardController.skipClientInstall', true);
       controller.filterConfigs(configs);
-      expect(controller.get('controllers.kerberosWizardController').overrideVisibility.calledOnce).to.be.true;
+      expect(controller.get('controllers.kerberosWizardController').overrideVisibility.called).to.be.true;
     });
 
     it("overrideVisibility results are valid", function() {
@@ -449,7 +451,7 @@ describe('App.KerberosWizardStep2Controller', function() {
     });
 
     it("ipa type configs", function() {
-      var configs = [{name: 'group'}];
+      var configs = [{name: 'ipa_user_group'}];
       controller.setConfigVisibility('ipa', configs, Em.I18n.t('admin.kerberos.wizard.step1.option.ipa'));
       expect(configs[0].isVisible).to.be.true;
     });
@@ -630,9 +632,8 @@ describe('App.KerberosWizardStep2Controller', function() {
           filename: 'site.xml'
         }]
       })]);
-      expect(controller.createKerberosSiteObj('site', 'tag')).to.be.eql({
+      expect(controller.createKerberosSiteObj('site')).to.be.eql({
         "type": 'site',
-        "tag": 'tag',
         "properties": {}
       });
     });
@@ -645,9 +646,8 @@ describe('App.KerberosWizardStep2Controller', function() {
           filename: 'site.xml'
         }]
       })]);
-      expect(controller.createKerberosSiteObj('site', 'tag')).to.be.eql({
+      expect(controller.createKerberosSiteObj('site')).to.be.eql({
         "type": 'site',
-        "tag": 'tag',
         "properties": {
           'kdc_hosts': {
             displayType: 'host',
@@ -665,9 +665,8 @@ describe('App.KerberosWizardStep2Controller', function() {
           filename: 'site.xml'
         }]
       })]);
-      expect(controller.createKerberosSiteObj('site', 'tag')).to.be.eql({
+      expect(controller.createKerberosSiteObj('site')).to.be.eql({
         "type": 'site',
-        "tag": 'tag',
         "properties": {
           'n1': {
             name: 'n1',

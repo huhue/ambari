@@ -25,6 +25,11 @@ logger = logging.getLogger()
 
 
 class LiveStatus:
+
+  SERVICES = []
+  CLIENT_COMPONENTS = []
+  COMPONENTS = []
+
   LIVE_STATUS = "STARTED"
   DEAD_STATUS = "INSTALLED"
 
@@ -57,6 +62,5 @@ class LiveStatus:
     if active_config is not None:
       livestatus['configurationTags'] = active_config
 
-    logger.debug("The live status for component " + str(self.component) +
-                 " of service " + str(self.service) + " is " + str(livestatus))
+    logger.debug("The live status for component %s of service %s is %s", self.component, self.service, livestatus)
     return livestatus

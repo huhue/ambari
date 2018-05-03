@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -22,6 +22,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import javax.persistence.EntityManager;
+
+import org.apache.ambari.server.H2DatabaseCleaner;
+import org.apache.ambari.server.controller.internal.DeleteHostComponentStatusMetaData;
 import org.apache.ambari.server.events.AmbariEvent.AmbariEventType;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
@@ -30,12 +34,12 @@ import org.apache.ambari.server.orm.dao.AlertDefinitionDAO;
 import org.apache.ambari.server.orm.dao.AlertDispatchDAO;
 import org.apache.ambari.server.orm.entities.AlertDefinitionEntity;
 import org.apache.ambari.server.orm.entities.AlertGroupEntity;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Clusters;
 import org.apache.ambari.server.state.Host;
 import org.apache.ambari.server.state.HostState;
 import org.apache.ambari.server.state.MaintenanceState;
-import org.apache.ambari.server.state.RepositoryVersionState;
 import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.ServiceComponent;
 import org.apache.ambari.server.state.ServiceComponentFactory;
@@ -52,7 +56,6 @@ import org.junit.Test;
 import com.google.common.eventbus.EventBus;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 
 import junit.framework.Assert;
 
@@ -75,6 +78,10 @@ public class EventsTest {
   private OrmTestHelper m_helper;
   private AlertDefinitionDAO m_definitionDao;
   private AlertDispatchDAO m_alertDispatchDao;
+
+  private final String STACK_VERSION = "2.0.6";
+  private final String REPO_VERSION = "2.0.6-1234";
+  private RepositoryVersionEntity m_repositoryVersion;
 
   /**
    *
@@ -99,26 +106,24 @@ public class EventsTest {
     m_alertDispatchDao = m_injector.getInstance(AlertDispatchDAO.class);
 
     m_clusterName = "foo";
-    StackId stackId = new StackId("HDP", "2.0.6");
+    StackId stackId = new StackId("HDP", STACK_VERSION);
+    m_helper.createStack(stackId);
 
     m_clusters.addCluster(m_clusterName, stackId);
     m_clusters.addHost(HOSTNAME);
 
     Host host = m_clusters.getHost(HOSTNAME);
-    Map<String, String> hostAttributes = new HashMap<String, String>();
+    Map<String, String> hostAttributes = new HashMap<>();
     hostAttributes.put("os_family", "redhat");
     hostAttributes.put("os_release_version", "6.4");
     host.setHostAttributes(hostAttributes);
     host.setState(HostState.HEALTHY);
-    host.persist();
 
     m_cluster = m_clusters.getCluster(m_clusterName);
     Assert.assertNotNull(m_cluster);
 
     m_cluster.setDesiredStackVersion(stackId);
-    m_helper.getOrCreateRepositoryVersion(stackId, stackId.getStackVersion());
-    m_cluster.createClusterVersion(stackId, stackId.getStackVersion(), "admin",
-        RepositoryVersionState.INSTALLING);
+    m_repositoryVersion = m_helper.getOrCreateRepositoryVersion(stackId, REPO_VERSION);
 
     m_clusters.mapHostToCluster(HOSTNAME, m_clusterName);
   }
@@ -128,7 +133,7 @@ public class EventsTest {
    */
   @After
   public void teardown() throws Exception {
-    m_injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabase(m_injector.getProvider(EntityManager.class).get());
     m_injector = null;
   }
 
@@ -191,7 +196,7 @@ public class EventsTest {
     AlertDefinitionEntity definition = hdfsDefinitions.get(0);
 
     // delete HDFS
-    m_cluster.getService("HDFS").delete();
+    m_cluster.getService("HDFS").delete(new DeleteHostComponentStatusMetaData());
 
     // verify the event was received
     Assert.assertTrue(m_listener.isAmbariEventReceived(eventClass));
@@ -241,7 +246,7 @@ public class EventsTest {
     Assert.assertEquals(0, hdfsDefinitions.size());
 
     // delete HDFS
-    m_cluster.getService("HDFS").delete();
+    m_cluster.getService("HDFS").delete(new DeleteHostComponentStatusMetaData());
 
     // verify the event was received
     Assert.assertTrue(m_listener.isAmbariEventReceived(eventClass));
@@ -281,8 +286,6 @@ public class EventsTest {
     // make sure there are at least 1
     Assert.assertTrue(hdfsDefinitions.size() > 0);
 
-    AlertDefinitionEntity definition = hdfsDefinitions.get(0);
-
     // delete the default alert group
     m_alertDispatchDao.remove(group);
 
@@ -292,7 +295,7 @@ public class EventsTest {
     Assert.assertNull(group);
 
     // delete HDFS
-    m_cluster.getService("HDFS").delete();
+    m_cluster.getService("HDFS").delete(new DeleteHostComponentStatusMetaData());
 
     // verify the event was received
     Assert.assertTrue(m_listener.isAmbariEventReceived(eventClass));
@@ -314,7 +317,7 @@ public class EventsTest {
     installHdfsService();
 
     Assert.assertFalse(m_listener.isAmbariEventReceived(eventClass));
-    m_cluster.getServiceComponentHosts(HOSTNAME).get(0).delete();
+    m_cluster.getServiceComponentHosts(HOSTNAME).get(0).delete(new DeleteHostComponentStatusMetaData());
 
     Assert.assertTrue(m_listener.isAmbariEventReceived(eventClass));
   }
@@ -375,30 +378,20 @@ public class EventsTest {
     Assert.assertEquals(AmbariEventType.CLUSTER_RENAME, ambariEvents.get(0).getType());
   }
 
-  /**
-   * Calls {@link Service#persist()} to mock a service install along with
-   * creating a single {@link Host} and {@link ServiceComponentHost}.
-   */
   private void installHdfsService() throws Exception {
     String serviceName = "HDFS";
-    Service service = m_serviceFactory.createNew(m_cluster, serviceName);
-    service.persist();
+    Service service = m_serviceFactory.createNew(m_cluster, serviceName, m_repositoryVersion);
     service = m_cluster.getService(serviceName);
     Assert.assertNotNull(service);
 
     ServiceComponent component = m_componentFactory.createNew(service, "DATANODE");
     service.addServiceComponent(component);
     component.setDesiredState(State.INSTALLED);
-    component.persist();
 
     ServiceComponentHost sch = m_schFactory.createNew(component, HOSTNAME);
 
     component.addServiceComponentHost(sch);
     sch.setDesiredState(State.INSTALLED);
     sch.setState(State.INSTALLED);
-    sch.setDesiredStackVersion(new StackId("HDP-2.0.6"));
-    sch.setStackVersion(new StackId("HDP-2.0.6"));
-
-    sch.persist();
   }
 }

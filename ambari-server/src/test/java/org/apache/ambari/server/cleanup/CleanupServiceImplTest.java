@@ -17,6 +17,12 @@
  */
 package org.apache.ambari.server.cleanup;
 
+import static org.easymock.EasyMock.capture;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.newCapture;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.reset;
+
 import java.util.HashSet;
 import java.util.Set;
 
@@ -29,12 +35,6 @@ import org.junit.Rule;
 import org.junit.Test;
 
 import junit.framework.Assert;
-
-import static org.easymock.EasyMock.capture;
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.newCapture;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.reset;
 
 
 public class CleanupServiceImplTest {
@@ -51,7 +51,7 @@ public class CleanupServiceImplTest {
   private CleanupServiceImpl cleanupServiceImpl;
   private TimeBasedCleanupPolicy cleanupPolicy;
   private Capture<TimeBasedCleanupPolicy> timeBasedCleanupPolicyCapture;
-  private Set cleanables;
+  private Set<Cleanable> cleanables;
 
   @Before
   public void setUp() throws Exception {
@@ -71,12 +71,49 @@ public class CleanupServiceImplTest {
     cleanupServiceImpl = new CleanupServiceImpl(cleanables);
 
     // WHEN
-    long rows = cleanupServiceImpl.cleanup(cleanupPolicy);
+    cleanupServiceImpl.cleanup(cleanupPolicy);
 
     // THEN
     Assert.assertNotNull("The argument is null", timeBasedCleanupPolicyCapture.getValue());
     Assert.assertEquals("The cluster name is wrong!", timeBasedCleanupPolicyCapture.getValue().getClusterName(), CLUSTER_NAME);
     Assert.assertEquals("The to date is wrong!", timeBasedCleanupPolicyCapture.getValue().getToDateInMillis(), FROM_DATE_TIMESTAMP);
+  }
+
+  @Test
+  public void testAffectedRowsNoError() throws Exception {
+    // GIVEN
+    cleanables = new HashSet<>();
+    cleanables.add(cleanableDao);
+    expect(cleanableDao.cleanup(cleanupPolicy)).andReturn(2L);
+
+    replay(cleanableDao);
+    cleanupServiceImpl = new CleanupServiceImpl(cleanables);
+
+    // WHEN
+    CleanupService.CleanupResult res = cleanupServiceImpl.cleanup(cleanupPolicy);
+
+    // THEN
+    Assert.assertEquals("The affected rows count is wrong", 2L, res.getAffectedRows());
+    Assert.assertEquals("The error count is wrong", 0L, res.getErrorCount());
+  }
+
+  @Test
+  public void testAffectedRowsWithErrors() throws Exception {
+    // GIVEN
+    cleanables = new HashSet<>();
+    cleanables.add(cleanableDao);
+    expect(cleanableDao.cleanup(cleanupPolicy)).andThrow(new RuntimeException());
+
+
+    replay(cleanableDao);
+    cleanupServiceImpl = new CleanupServiceImpl(cleanables);
+
+    // WHEN
+    CleanupService.CleanupResult res = cleanupServiceImpl.cleanup(cleanupPolicy);
+
+    // THEN
+    Assert.assertEquals("The affected rows count is wrong", 0L, res.getAffectedRows());
+    Assert.assertEquals("The error count is wrong", 1L, res.getErrorCount());
   }
 
 }

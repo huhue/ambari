@@ -28,13 +28,14 @@ class TestStormBase(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "STORM/0.9.1/package"
   STACK_VERSION = "2.1"
 
-  def assert_configure_default(self, confDir="/etc/storm/conf"):
+  def assert_configure_default(self, confDir="/etc/storm/conf", has_metrics=False, legacy=True):
     import params
     self.assertResourceCalled('Directory', '/var/log/storm',
       owner = 'storm',
       group = 'hadoop',
       mode = 0777,
       create_parents = True,
+      cd_access='a',
     )
     self.assertResourceCalled('Directory', '/var/run/storm',
       owner = 'storm',
@@ -54,6 +55,12 @@ class TestStormBase(RMFTestCase):
       group = 'hadoop',
       create_parents = True,
       cd_access='a'
+    )
+    self.assertResourceCalled('File', '/etc/security/limits.d/storm.conf',
+        content = Template('storm.conf.j2'),
+        owner = 'root',
+        group = 'root',
+        mode = 0644,
     )
     self.assertResourceCalled('File', confDir + '/config.yaml',
       owner = 'storm',
@@ -69,6 +76,35 @@ class TestStormBase(RMFTestCase):
                               owner = 'storm',
                               content = InlineTemplate(self.getConfig()['configurations']['storm-env']['content'])
                               )
+    if has_metrics:
+      self.assertResourceCalled('File', confDir + '/storm-metrics2.properties',
+                                content = Template('storm-metrics2.properties.j2'),
+                                owner = 'storm',
+                                group = 'hadoop',
+                                )
+      self.assertResourceCalled('Link', '/usr/lib/storm/lib//ambari-metrics-storm-sink.jar',
+                                action = ['delete'],
+                                )
+      self.assertResourceCalled('Link', '/usr/lib/storm/lib/ambari-metrics-storm-sink.jar',
+                                action = ['delete'],
+                                )
+      if legacy:
+        self.assertResourceCalled('Execute', 'ambari-sudo.sh ln -s /usr/lib/storm/lib/ambari-metrics-storm-sink-legacy-with-common-*.jar /usr/lib/storm/lib//ambari-metrics-storm-sink.jar',
+                                  not_if = 'ls /usr/lib/storm/lib//ambari-metrics-storm-sink.jar',
+                                  only_if = 'ls /usr/lib/storm/lib/ambari-metrics-storm-sink-legacy-with-common-*.jar',
+                                  )
+      else:
+        self.assertResourceCalled('Execute', 'ambari-sudo.sh ln -s /usr/lib/storm/lib/ambari-metrics-storm-sink-with-common-*.jar /usr/lib/storm/lib//ambari-metrics-storm-sink.jar',
+                                  not_if = 'ls /usr/lib/storm/lib//ambari-metrics-storm-sink.jar',
+                                  only_if = 'ls /usr/lib/storm/lib/ambari-metrics-storm-sink-with-common-*.jar',
+                                  )
+
+    self.assertResourceCalled('File', confDir + '/storm_jaas.conf',
+                              action=['delete'],
+                              )
+    self.assertResourceCalled('File', confDir + '/client_jaas.conf',
+                              action=['delete'],
+                              )
     return storm_yarn_content
 
   def assert_configure_secured(self, confDir='/etc/storm/conf'):
@@ -78,6 +114,7 @@ class TestStormBase(RMFTestCase):
       group = 'hadoop',
       mode = 0777,
       create_parents = True,
+      cd_access='a',
     )
     self.assertResourceCalled('Directory', '/var/run/storm',
       owner = 'storm',
@@ -97,6 +134,12 @@ class TestStormBase(RMFTestCase):
       group = 'hadoop',
       create_parents = True,
       cd_access='a'
+    )
+    self.assertResourceCalled('File', '/etc/security/limits.d/storm.conf',
+        content = Template('storm.conf.j2'),
+        owner = 'root',
+        group = 'root',
+        mode = 0644,
     )
     self.assertResourceCalled('File', confDir + '/config.yaml',
       owner = 'storm',
@@ -113,6 +156,7 @@ class TestStormBase(RMFTestCase):
                               )
     self.assertResourceCalled('TemplateConfig', confDir + '/storm_jaas.conf',
       owner = 'storm',
+      mode = 0644
     )
     return storm_yarn_content
 

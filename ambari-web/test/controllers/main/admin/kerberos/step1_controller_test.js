@@ -28,17 +28,16 @@ describe('App.KerberosWizardStep1Controller', function() {
   beforeEach(function() {
     controller = getController();
   });
-
+  
   describe("#selectedOption", function () {
-
+  	 
     it("test", function() {
-      controller.setProperties({
-        options: [{value: 'item1'}],
-        selectedItem: 'item1'
-      });
+      var options=controller.get('options');
       controller.propertyDidChange('selectedOption');
-      expect(controller.get('selectedOption')).to.be.eql({value: 'item1'});
+      var option = options.findProperty('value', controller.get('selectedItem'));
+      expect(option.preConditions.everyProperty('checked', false)).to.be.true;
     });
+    
   });
 
   describe("#loadStep()", function () {
@@ -47,22 +46,14 @@ describe('App.KerberosWizardStep1Controller', function() {
       controller.set('options', []);
     });
 
-    it("enableIpa is true", function() {
-      App.set('supports.enableIpa', true);
+    it("on load selected item should not change", function() {
+      controller.set('selectedItem',Em.I18n.t('admin.kerberos.wizard.step3.option.kdc'));	
       controller.loadStep();
-      expect(controller.get('selectedItem')).to.be.equal(Em.I18n.t('admin.kerberos.wizard.step1.option.kdc'));
-      expect(controller.get('options')).to.not.be.empty;
-    });
-
-    it("enableIpa is false", function() {
-      App.set('supports.enableIpa', false);
-      controller.loadStep();
-      expect(controller.get('selectedItem')).to.be.equal(Em.I18n.t('admin.kerberos.wizard.step1.option.kdc'));
-      expect(controller.get('options')).to.be.empty;
+      expect(controller.get('selectedItem')).to.be.equal(Em.I18n.t('admin.kerberos.wizard.step3.option.kdc'));
     });
   });
 
-  describe("#next()", function () {
+  describe("#submit()", function () {
 
     beforeEach(function() {
       sinon.stub(App.router, 'send');
@@ -76,7 +67,7 @@ describe('App.KerberosWizardStep1Controller', function() {
       controller.reopen({
         'isSubmitDisabled': false
       });
-      controller.next();
+      controller.submit();
       expect(App.router.send.calledOnce).to.be.true;
     });
 
@@ -84,7 +75,7 @@ describe('App.KerberosWizardStep1Controller', function() {
       controller.reopen({
         'isSubmitDisabled': true
       });
-      controller.next();
+      controller.submit();
       expect(App.router.send.called).to.be.false;
     });
   });

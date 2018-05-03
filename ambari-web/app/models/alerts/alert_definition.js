@@ -100,7 +100,8 @@ App.AlertDefinition = DS.Model.extend({
    * @type {string}
    */
   lastTriggeredFormatted: function () {
-    return dateUtils.dateFormat(this.get('lastTriggered'));
+    let lastTriggered = this.get('lastTriggered');
+    return lastTriggered ? dateUtils.dateFormat(lastTriggered) : '';
   }.property('lastTriggered'),
 
   /**
@@ -159,6 +160,16 @@ App.AlertDefinition = DS.Model.extend({
     });
     return text;
   }.property('summary'),
+
+  latestTextSummary: function () {
+    var latestText = this.get('latestText');
+    var ellipsis = '...';
+    var summaryLength = 400;
+    if(latestText.length > summaryLength) {
+      latestText = latestText.substring(0, summaryLength - ellipsis.length) + ellipsis;
+    }
+    return latestText;
+  }.property('latestText'),
 
   isAmbariService: Em.computed.equal('service._id', 'AMBARI'),
 
@@ -229,30 +240,30 @@ App.AlertDefinition = DS.Model.extend({
    * @type {object}
    */
   typeIcons: {
-    'METRIC': 'icon-bolt',
-    'SCRIPT': 'icon-file-text',
-    'WEB': 'icon-globe',
-    'PORT': 'icon-signin',
-    'AGGREGATE': 'icon-plus',
-    'SERVER': 'icon-desktop',
-    'RECOVERY': 'icon-desktop',
-    'AMS': 'icon-bar-chart'
+    'METRIC': 'glyphicon glyphicon-flash',
+    'SCRIPT': 'glyphicon glyphicon-file',
+    'WEB': 'glyphicon glyphicon-globe',
+    'PORT': 'glyphicon glyphicon-log-in',
+    'AGGREGATE': 'glyphicon glyphicon-plus',
+    'SERVER': 'glyphicon glyphicon-oil',
+    'RECOVERY': 'glyphicon glyphicon-oil',
+    'AMS': 'glyphicon glyphicon-stats'
   },
 
   /**
    * Sort on load definitions by this severity order
    */
   severityOrder: ['CRITICAL', 'WARNING', 'OK', 'UNKNOWN', 'PENDING'],
-  order: ['OK', 'WARNING', 'CRITICAL', 'UNKNOWN'],
-
-  shortState: {
-    'CRITICAL': 'CRIT',
-    'WARNING': 'WARN',
-    'OK': 'OK',
-    'UNKNOWN': 'UNKWN',
-    'PENDING': 'NONE'
-  }
+  order: ['OK', 'WARNING', 'CRITICAL', 'UNKNOWN']
 });
+
+App.AlertDefinition.shortState = {
+  'CRITICAL': 'CRIT',
+  'WARNING': 'WARN',
+  'OK': 'OK',
+  'UNKNOWN': 'UNKWN',
+  'PENDING': 'NONE'
+};
 
 App.AlertDefinition.reopenClass({
 
@@ -325,3 +336,57 @@ App.AlertMetricsSourceDefinition.FIXTURES = [];
 App.AlertMetricsUriDefinition.FIXTURES = [];
 App.AlertMetricsAmsDefinition.FIXTURES = [];
 App.AlertDefinitionParameter.FIXTURES = [];
+
+
+App.AlertType = DS.Model.extend({
+  name: DS.attr('string'),
+  displayName: DS.attr('string'),
+  iconPath: DS.attr('string'),
+  description: DS.attr('string'),
+  properties: DS.attr('array')
+});
+
+App.AlertType.FIXTURES = [
+  {
+    id: 'PORT',
+    name: 'PORT',
+    icon_path: 'glyphicon glyphicon-log-in',
+    display_name: 'Port',
+    description: Em.I18n.t('alerts.add.wizard.step1.body.port.description')
+  },
+  {
+    id: 'WEB',
+    name: 'WEB',
+    icon_path: 'glyphicon glyphicon-globe',
+    display_name: 'Web',
+    description: Em.I18n.t('alerts.add.wizard.step1.body.web.description')
+  },
+  {
+    id: 'METRIC',
+    name: 'METRIC',
+    display_name: 'Metric',
+    icon_path: 'glyphicon glyphicon-flash',
+    description: Em.I18n.t('alerts.add.wizard.step1.body.metric.description')
+  },
+  {
+    id: 'SCRIPT',
+    name: 'SCRIPT',
+    icon_path: 'glyphicon glyphicon-file',
+    display_name: 'Script',
+    description: Em.I18n.t('alerts.add.wizard.step1.body.script.description')
+  },
+  {
+    id: 'AGGREGATE',
+    name: 'AGGREGATE',
+    icon_path: 'glyphicon glyphicon-plus',
+    display_name: 'Aggregate',
+    description: Em.I18n.t('alerts.add.wizard.step1.body.aggregate.description')
+  },
+  {
+    id: 'RAW',
+    name: 'RAW',
+    icon_path: 'glyphicon glyphicon-align-justify',
+    display_name: 'Raw',
+    description: Em.I18n.t('alerts.add.wizard.step1.body.raw.description')
+  }
+];

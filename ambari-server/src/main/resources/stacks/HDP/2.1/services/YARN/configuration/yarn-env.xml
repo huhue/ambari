@@ -19,7 +19,6 @@
  * limitations under the License.
  */
 -->
-
 <configuration supports_adding_forbidden="true">
   <property>
     <name>apptimelineserver_heapsize</name>
@@ -31,14 +30,16 @@
       <unit>MB</unit>
       <type>int</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-  
   <!-- yarn-env.sh -->
   <property>
     <name>content</name>
+    <display-name>yarn-env template</display-name>
     <description>This is the jinja template for yarn-env.sh file</description>
     <value>
 export HADOOP_YARN_HOME={{hadoop_yarn_home}}
+USER="$(whoami)"
 export YARN_LOG_DIR={{yarn_log_dir_prefix}}/$USER
 export YARN_PID_DIR={{yarn_pid_dir_prefix}}/$USER
 export HADOOP_LIBEXEC_DIR={{hadoop_libexec_dir}}
@@ -145,6 +146,8 @@ YARN_OPTS="$YARN_OPTS -Dyarn.home.dir=$YARN_COMMON_HOME"
 YARN_OPTS="$YARN_OPTS -Dyarn.id.str=$YARN_IDENT_STRING"
 YARN_OPTS="$YARN_OPTS -Dhadoop.root.logger=${YARN_ROOT_LOGGER:-INFO,console}"
 YARN_OPTS="$YARN_OPTS -Dyarn.root.logger=${YARN_ROOT_LOGGER:-INFO,console}"
+export YARN_NODEMANAGER_OPTS="$YARN_NODEMANAGER_OPTS -Dnm.audit.logger=INFO,NMAUDIT"
+export YARN_RESOURCEMANAGER_OPTS="$YARN_RESOURCEMANAGER_OPTS -Drm.audit.logger=INFO,RMAUDIT"
 if [ "x$JAVA_LIBRARY_PATH" != "x" ]; then
   YARN_OPTS="$YARN_OPTS -Djava.library.path=$JAVA_LIBRARY_PATH"
 fi
@@ -154,6 +157,6 @@ YARN_OPTS="$YARN_OPTS -Djava.io.tmpdir={{hadoop_java_io_tmpdir}}"
     <value-attributes>
       <type>content</type>
     </value-attributes>
-  </property>  
-  
+    <on-ambari-upgrade add="true"/>
+  </property>
 </configuration>

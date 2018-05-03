@@ -19,35 +19,32 @@
 
 package org.apache.ambari.logfeeder.mapper;
 
-import java.util.Map;
-
-import org.apache.ambari.logfeeder.LogFeederUtil;
+import org.apache.ambari.logfeeder.conf.LogFeederProps;
+import org.apache.ambari.logfeeder.plugin.filter.mapper.Mapper;
+import org.apache.ambari.logfeeder.util.LogFeederUtil;
+import org.apache.ambari.logsearch.config.api.model.inputconfig.MapFieldDescriptor;
+import org.apache.ambari.logsearch.config.api.model.inputconfig.MapFieldNameDescriptor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 
+import java.util.Map;
+
 /**
  * Overrides the value for the field
  */
-public class MapperFieldName extends Mapper {
-  Logger logger = Logger.getLogger(MapperFieldName.class);
-  String newValue = null;
+public class MapperFieldName extends Mapper<LogFeederProps> {
+  private static final Logger LOG = Logger.getLogger(MapperFieldName.class);
 
-  @SuppressWarnings("hiding")
+  private String newValue = null;
+
   @Override
-  public boolean init(String inputDesc, String fieldName,
-      String mapClassCode, Object mapConfigs) {
-    super.init(inputDesc, fieldName, mapClassCode, mapConfigs);
-    if (!(mapConfigs instanceof Map)) {
-      logger.fatal("Can't initialize object. mapConfigs class is not of type Map. "
-          + mapConfigs.getClass().getName());
-      return false;
-    }
-    @SuppressWarnings("unchecked")
-    Map<String, Object> mapObjects = (Map<String, Object>) mapConfigs;
-    newValue = (String) mapObjects.get("new_fieldname");
+  public boolean init(String inputDesc, String fieldName, String mapClassCode, MapFieldDescriptor mapFieldDescriptor) {
+    init(inputDesc, fieldName, mapClassCode);
+
+    newValue = ((MapFieldNameDescriptor)mapFieldDescriptor).getNewFieldName();
     if (StringUtils.isEmpty(newValue)) {
-      logger.fatal("Map field value is empty.");
+      LOG.fatal("Map field value is empty.");
       return false;
     }
     return true;
@@ -56,17 +53,12 @@ public class MapperFieldName extends Mapper {
   @Override
   public Object apply(Map<String, Object> jsonObj, Object value) {
     if (newValue != null) {
-      // Remove the old one
-      jsonObj.remove(fieldName);
-      // Add with new key name
+      jsonObj.remove(getFieldName());
       jsonObj.put(newValue, value);
     } else {
-      LogFeederUtil.logErrorMessageByInterval(this.getClass()
-          .getSimpleName() + ":apply",
-          "New fieldName is null, so transformation is not applied. "
-              + this.toString(), null, logger, Level.ERROR);
+      LogFeederUtil.logErrorMessageByInterval(this.getClass().getSimpleName() + ":apply",
+          "New fieldName is null, so transformation is not applied. " + this.toString(), null, LOG, Level.ERROR);
     }
     return value;
   }
-
 }

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,15 +17,13 @@
  */
 package org.apache.ambari.server.state.services;
 
-import javax.persistence.EntityManager;
+import static org.easymock.EasyMock.expect;
 
 import org.apache.ambari.server.configuration.Configuration;
-import org.apache.ambari.server.orm.DBAccessor;
 import org.apache.ambari.server.orm.dao.AlertDefinitionDAO;
 import org.apache.ambari.server.orm.dao.AlertsDAO;
 import org.apache.ambari.server.state.Cluster;
-import org.apache.ambari.server.state.Clusters;
-import org.apache.ambari.server.state.stack.OsFamily;
+import org.apache.ambari.server.testutils.PartialNiceMockBinder;
 import org.easymock.EasyMock;
 import org.easymock.EasyMockSupport;
 import org.junit.Before;
@@ -123,18 +121,19 @@ public class CachedAlertFlushServiceTest extends EasyMockSupport {
 
       // required for since the configuration is being mocked
       Configuration configuration = createNiceMock(Configuration.class);
-      EasyMock.expect(configuration.getAlertEventPublisherPoolSize()).andReturn(2).anyTimes();
+      expect(configuration.getAlertEventPublisherCorePoolSize()).andReturn(Integer.valueOf(Configuration.ALERTS_EXECUTION_SCHEDULER_THREADS_CORE_SIZE.getDefaultValue())).anyTimes();
+      expect(configuration.getAlertEventPublisherMaxPoolSize()).andReturn(Integer.valueOf(Configuration.ALERTS_EXECUTION_SCHEDULER_THREADS_MAX_SIZE.getDefaultValue())).anyTimes();
+      expect(configuration.getAlertEventPublisherWorkerQueueSize()).andReturn(Integer.valueOf(Configuration.ALERTS_EXECUTION_SCHEDULER_WORKER_QUEUE_SIZE.getDefaultValue())).anyTimes();
+
 
       EasyMock.replay(configuration);
 
+      PartialNiceMockBinder.newBuilder().addDBAccessorBinding().addAlertDefinitionDAOBinding().build().configure(binder);
+
       binder.bind(Configuration.class).toInstance(configuration);
-      binder.bind(Clusters.class).toInstance(createNiceMock(Clusters.class));
-      binder.bind(OsFamily.class).toInstance(createNiceMock(OsFamily.class));
-      binder.bind(DBAccessor.class).toInstance(createNiceMock(DBAccessor.class));
       binder.bind(Cluster.class).toInstance(cluster);
       binder.bind(AlertDefinitionDAO.class).toInstance(createNiceMock(AlertDefinitionDAO.class));
       binder.bind(AlertsDAO.class).toInstance(createNiceMock(AlertsDAO.class));
-      binder.bind(EntityManager.class).toInstance(createNiceMock(EntityManager.class));
     }
   }
 }

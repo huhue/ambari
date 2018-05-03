@@ -22,7 +22,7 @@ App.HighAvailabilityWizardStep9Controller = App.HighAvailabilityProgressPageCont
 
   name:"highAvailabilityWizardStep9Controller",
 
-  commands: ['startSecondNameNode', 'installZKFC', 'startZKFC', 'installPXF', 'reconfigureHBase', 'reconfigureAccumulo', 'reconfigureHawq', 'deleteSNameNode', 'startAllServices'],
+  commands: ['startSecondNameNode', 'installZKFC', 'startZKFC', 'installPXF', 'reconfigureRanger', 'reconfigureHBase', 'reconfigureAMS', 'reconfigureAccumulo', 'reconfigureHawq', 'deleteSNameNode', 'stopHDFS', 'startAllServices'],
 
   hbaseSiteTag: "",
   accumuloSiteTag: "",
@@ -31,26 +31,30 @@ App.HighAvailabilityWizardStep9Controller = App.HighAvailabilityProgressPageCont
 
   initializeTasks: function () {
     this._super();
-    var numSpliced = 0;
+    var tasksToRemove = [];
 
     // find hostname where second namenode will be installed
     this.set('secondNameNodeHost', this.get('content.masterComponentHosts').filterProperty('component', 'NAMENODE').findProperty('isInstalled', false).hostName);
 
     if (!App.Service.find().someProperty('serviceName', 'PXF') || this.isPxfComponentInstalled()) {
-      this.get('tasks').splice(this.get('tasks').findProperty('command', 'installPXF').get('id'), 1);
-      numSpliced = 1;
+      tasksToRemove.push('installPXF');
+    }
+    if (!App.Service.find().someProperty('serviceName', 'RANGER')) {
+      tasksToRemove.push('reconfigureRanger');
     }
     if (!App.Service.find().someProperty('serviceName', 'HBASE')) {
-      this.get('tasks').splice(this.get('tasks').findProperty('command', 'reconfigureHBase').get('id') - numSpliced, 1);
-      numSpliced++;
+      tasksToRemove.push('reconfigureHBase');
+    }
+    if (!App.Service.find().someProperty('serviceName', 'AMBARI_METRICS')) {
+      tasksToRemove.push('reconfigureAMS');
     }
     if (!App.Service.find().someProperty('serviceName', 'ACCUMULO')) {
-      this.get('tasks').splice(this.get('tasks').findProperty('command', 'reconfigureAccumulo').get('id') - numSpliced, 1);
-      numSpliced++ ;
+      tasksToRemove.push('reconfigureAccumulo');
     }
     if (!App.Service.find().someProperty('serviceName', 'HAWQ')) {
-      this.get('tasks').splice(this.get('tasks').findProperty('command', 'reconfigureHawq').get('id') - numSpliced, 1);
+      tasksToRemove.push('reconfigureHawq');
     }
+    this.removeTasks(tasksToRemove);
   },
 
   startSecondNameNode: function () {
@@ -59,13 +63,13 @@ App.HighAvailabilityWizardStep9Controller = App.HighAvailabilityProgressPageCont
   },
 
   installZKFC: function () {
-    var hostName = this.get('content.masterComponentHosts').filterProperty('component', 'NAMENODE').mapProperty('hostName');
-    this.createInstallComponentTask('ZKFC', hostName, "HDFS");
+    var hostNames = this.get('content.masterComponentHosts').filterProperty('component', 'NAMENODE').mapProperty('hostName');
+    this.createInstallComponentTask('ZKFC', hostNames, "HDFS");
   },
 
   startZKFC: function () {
-    var hostName = this.get('content.masterComponentHosts').filterProperty('component', 'NAMENODE').mapProperty('hostName');
-    this.updateComponent('ZKFC', hostName, "HDFS", "Start");
+    var hostNames = this.get('content.masterComponentHosts').filterProperty('component', 'NAMENODE').mapProperty('hostName');
+    this.updateComponent('ZKFC', hostNames, "HDFS", "Start");
   },
 
   isPxfComponentInstalled: function () {
@@ -88,10 +92,158 @@ App.HighAvailabilityWizardStep9Controller = App.HighAvailabilityProgressPageCont
     this.createInstallComponentTask('PXF', this.get('secondNameNodeHost'), "PXF");
   },
 
-  reconfigureHBase: function () {
+  reconfigureRanger: function () {
     var data = this.get('content.serviceConfigProperties');
-    var configData = this.reconfigureSites(['hbase-site'], data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)));
+    var siteNames = ['ranger-env'];
+    var configs = [];
+    configs.push({
+      Clusters: {
+        desired_config: this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)))
+      }
+    });
+    if (App.Service.find().someProperty('serviceName', 'YARN')) {
+      siteNames = [];
+      var yarnAuditConfig = data.items.findProperty('type', 'ranger-yarn-audit');
+      if (yarnAuditConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in yarnAuditConfig.properties) {
+          siteNames.push('ranger-yarn-audit');
+          configs.push({
+            Clusters: {
+              desired_config: this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)))
+            }
+          });
+        }
+      }
+    }
+    if (App.Service.find().someProperty('serviceName', 'STORM')) {
+      siteNames = [];
+      var stormPluginConfig = data.items.findProperty('type', 'ranger-storm-plugin-properties');
+      if (stormPluginConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in stormPluginConfig.properties) {
+          siteNames.push('ranger-storm-plugin-properties');
+        }
+      }
+      var stormAuditConfig = data.items.findProperty('type', 'ranger-storm-audit');
+      if (stormAuditConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in stormAuditConfig.properties) {
+          siteNames.push('ranger-storm-audit');
+        }
+      }
+      if (siteNames.length) {
+        configs.push({
+          Clusters: {
+            desired_config: this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)))
+          }
+        });
+      }
+    }
+    if (App.Service.find().someProperty('serviceName', 'KAFKA')) {
+      siteNames = [];
+      var kafkaAuditConfig = data.items.findProperty('type', 'ranger-kafka-audit');
+      if (kafkaAuditConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in kafkaAuditConfig.properties) {
+          siteNames.push('ranger-kafka-audit');
+          configs.push({
+            Clusters: {
+              desired_config: this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)))
+            }
+          });
+        }
+      }
+    }
+    if (App.Service.find().someProperty('serviceName', 'KNOX')) {
+      siteNames = [];
+      var knoxPluginConfig = data.items.findProperty('type', 'ranger-knox-plugin-properties');
+      if (knoxPluginConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in knoxPluginConfig.properties) {
+          siteNames.push('ranger-knox-plugin-properties');
+        }
+      }
+      var knoxAuditConfig = data.items.findProperty('type', 'ranger-knox-audit');
+      if (knoxAuditConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in knoxAuditConfig.properties) {
+          siteNames.push('ranger-knox-audit');
+        }
+      }
+      if(siteNames.length) {
+        configs.push({
+          Clusters: {
+            desired_config: this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)))
+          }
+        });
+      }
+    }
+    if (App.Service.find().someProperty('serviceName', 'ATLAS')) {
+      siteNames = [];
+      var atlasAuditConfig = data.items.findProperty('type', 'ranger-atlas-audit');
+      if (atlasAuditConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in atlasAuditConfig.properties) {
+          siteNames.push('ranger-atlas-audit');
+          configs.push({
+            Clusters: {
+              desired_config: this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)))
+            }
+          });
+        }
+      }
+    }
+    if (App.Service.find().someProperty('serviceName', 'HIVE')) {
+      siteNames = [];
+      var hivePluginConfig = data.items.findProperty('type', 'ranger-hive-plugin-properties');
+      if (hivePluginConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in hivePluginConfig.properties) {
+          siteNames.push('ranger-hive-plugin-properties');
+        }
+      }
+      var hiveAuditConfig = data.items.findProperty('type', 'ranger-hive-audit');
+      if (hiveAuditConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in hiveAuditConfig.properties) {
+          siteNames.push('ranger-hive-audit');
+        }
+      }
+      if(siteNames.length) {
+        configs.push({
+          Clusters: {
+            desired_config: this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)))
+          }
+        });
+      }
+    }
+    if (App.Service.find().someProperty('serviceName', 'RANGER_KMS')) {
+      siteNames = [];
+      var rangerKMSConfig = data.items.findProperty('type', 'ranger-kms-audit');
+      if (rangerKMSConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in rangerKMSConfig.properties) {
+          siteNames.push('ranger-kms-audit');
+          configs.push({
+            Clusters: {
+              desired_config: this.reconfigureSites(siteNames, data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)))
+            }
+          });
+        }
+      }
+    }
+
     App.ajax.send({
+      name: 'common.service.multiConfigurations',
+      sender: this,
+      data: {
+        configs: configs
+      },
+      success: 'saveConfigTag',
+      error: 'onTaskError'
+    });
+  },
+
+  /**
+   *
+   * @param {array} siteNames
+   * @param {object} data
+   */
+  saveReconfiguredConfigs: function(siteNames, data) {
+    var note = Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false));
+    var configData = this.reconfigureSites(siteNames, data, note);
+    return App.ajax.send({
       name: 'common.service.configurations',
       sender: this,
       data: {
@@ -100,34 +252,38 @@ App.HighAvailabilityWizardStep9Controller = App.HighAvailabilityProgressPageCont
       success: 'saveConfigTag',
       error: 'onTaskError'
     });
+  },
+
+  reconfigureHBase: function () {
+    var data = this.get('content.serviceConfigProperties');
+    var siteNames = ['hbase-site'];
+    if (App.Service.find().someProperty('serviceName', 'RANGER')) {
+      var hbasePluginConfig = data.items.findProperty('type', 'ranger-hbase-plugin-properties');
+      if (hbasePluginConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in hbasePluginConfig.properties) {
+          siteNames.push('ranger-hbase-plugin-properties');
+        }
+      }
+      var hbaseAuditConfig = data.items.findProperty('type', 'ranger-hbase-audit');
+      if (hbaseAuditConfig) {
+        if ('xasecure.audit.destination.hdfs.dir' in hbaseAuditConfig.properties) {
+          siteNames.push('ranger-hbase-audit');
+        }
+      }
+    }
+    this.saveReconfiguredConfigs(siteNames, data);
+  },
+
+  reconfigureAMS: function () {
+    this.saveReconfiguredConfigs(['ams-hbase-site'], this.get('content.serviceConfigProperties'));
   },
 
   reconfigureAccumulo: function () {
-    var data = this.get('content.serviceConfigProperties');
-    var configData = this.reconfigureSites(['accumulo-site'], data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)));
-    App.ajax.send({
-      name: 'common.service.configurations',
-      sender: this,
-      data: {
-        desired_config: configData
-      },
-      success: 'saveConfigTag',
-      error: 'onTaskError'
-    });
+    this.saveReconfiguredConfigs(['accumulo-site'], this.get('content.serviceConfigProperties'));
   },
 
   reconfigureHawq: function () {
-    var data = this.get('content.serviceConfigProperties');
-    var configData = this.reconfigureSites(['hawq-site', 'hdfs-client'], data, Em.I18n.t('admin.highAvailability.step4.save.configuration.note').format(App.format.role('NAMENODE', false)));
-    App.ajax.send({
-      name: 'common.service.configurations',
-      sender: this,
-      data: {
-        desired_config: configData
-      },
-      success: 'saveConfigTag',
-      error: 'onTaskError'
-    });
+    this.saveReconfiguredConfigs(['hawq-site', 'hdfs-client'], this.get('content.serviceConfigProperties'));
   },
 
   saveConfigTag: function () {
@@ -144,9 +300,13 @@ App.HighAvailabilityWizardStep9Controller = App.HighAvailabilityProgressPageCont
     this.startServices(false);
   },
 
+  stopHDFS: function () {
+    this.stopServices(["HDFS"], true);
+  },
+
   deleteSNameNode: function () {
     var hostName = this.get('content.masterComponentHosts').findProperty('component', 'SECONDARY_NAMENODE').hostName;
-    App.ajax.send({
+    return App.ajax.send({
       name: 'common.delete.host_component',
       sender: this,
       data: {

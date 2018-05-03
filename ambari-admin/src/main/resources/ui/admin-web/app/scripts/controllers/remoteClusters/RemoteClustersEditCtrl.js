@@ -18,15 +18,21 @@
 'use strict';
 
 angular.module('ambariAdminConsole')
-.controller('RemoteClustersEditCtrl', ['$scope', '$modal', '$routeParams', '$location', 'Alert', '$translate', 'Cluster', 'Settings','RemoteCluster', 'ConfirmationModal', function($scope, $modal, $routeParams, $location, Alert, $translate, Cluster, Settings, RemoteCluster, ConfirmationModal) {
+.controller('RemoteClustersEditCtrl', ['$scope', '$modal', '$routeParams', '$location', 'Alert', '$translate', 'Cluster', 'Settings','RemoteCluster', 'DeregisterClusterModal', function($scope, $modal, $routeParams, $location, Alert, $translate, Cluster, Settings, RemoteCluster, DeregisterClusterModal) {
   var $t = $translate.instant;
 
   $scope.cluster = {};
+  $scope.instancesAffected = [];
+
+  $scope.nameValidationPattern = /^\s*\w*\s*$/;
 
   $scope.openChangePwdDialog = function() {
     var modalInstance = $modal.open({
       templateUrl: 'views/remoteClusters/modals/changePassword.html',
       resolve: {
+        clusterId: function() {
+          return $scope.cluster.cluster_id;
+        },
         clusterName: function() {
           return $scope.cluster.cluster_name;
         },
@@ -37,7 +43,7 @@ angular.module('ambariAdminConsole')
           return $scope.cluster.cluster_user;
         }
       },
-      controller: ['$scope', 'clusterName', 'clusterUrl', 'clusterUser', 'Settings','Alert',  function($scope, clusterName, clusterUrl , clusterUser , Settings, Alert) {
+      controller: ['$scope', 'clusterId' ,'clusterName', 'clusterUrl', 'clusterUser', 'Settings','Alert',  function($scope, clusterId, clusterName, clusterUrl , clusterUser , Settings, Alert) {
         $scope.passwordData = {
           password: '',
           currentUserName: clusterUser || ''
@@ -45,6 +51,7 @@ angular.module('ambariAdminConsole')
 
         $scope.form = {};
 
+        $scope.clusterId = clusterId;
         $scope.currentUser = clusterUser;
         $scope.clusterName = clusterName;
         $scope.clusterUrl = clusterUrl;
@@ -57,10 +64,11 @@ angular.module('ambariAdminConsole')
 
             var payload = {
               "ClusterInfo" :{
+                "cluster_id" : $scope.clusterId,
                 "name" : $scope.clusterName,
                 "url" : $scope.clusterUrl,
                 "username" : $scope.passwordData.currentUserName,
-                "password" : $scope.passwordData.password //This field will go once backend API changes are done.
+                "password" : $scope.passwordData.password
               }
             };
 
@@ -72,7 +80,7 @@ angular.module('ambariAdminConsole')
 
             RemoteCluster.edit(payload, config).then(function(data) {
                 Alert.success($t('views.alerts.credentialsUpdated'));
-                $scope.form.passwordChangeForm.$setPristine();
+                $scope.form.passwordChangeForm = {};
               })
               .catch(function(data) {
                 console.log(data);
@@ -91,19 +99,32 @@ angular.module('ambariAdminConsole')
   };
 
   $scope.deleteCluster = function() {
-      ConfirmationModal.show(
-        $t('common.deregisterCluster', {
-          term: $t('common.cluster')
-        }),
-        $t('common.deleteConfirmation', {
-          instanceType: $t('common.cluster').toLowerCase(),
-          instanceName: '"' + $scope.cluster.cluster_name + '"'
+
+    $scope.instancesAffected = [];
+    RemoteCluster.affectedViews($scope.cluster.cluster_name).then(function(response) {
+
+        response.items.forEach(function(item){
+          item.versions.forEach(function(version){
+            version.instances.forEach(function(instance){
+              $scope.instancesAffected.push(instance.ViewInstanceInfo.instance_name);
+            })
+          })
         })
-      ).then(function() {
-        RemoteCluster.deregister($scope.cluster.cluster_name).then(function() {
-          $location.path('/remoteClusters');
+
+        DeregisterClusterModal.show(
+          $t('common.deregisterCluster',{term: $t('common.cluster')}),
+          $t('common.remoteClusterDelConfirmation', {instanceType: $t('common.cluster').toLowerCase(), instanceName: '"' + $scope.cluster.cluster_name + '"'}),
+          $scope.instancesAffected
+
+        ).then(function() {
+          RemoteCluster.deregister($scope.cluster.cluster_name).then(function() {
+            $location.path('/remoteClusters');
+          });
         });
-      });
+    })
+    .catch(function(data) {
+      console.log(data);
+    });
   };
 
   $scope.editRemoteCluster = function () {
@@ -111,6 +132,7 @@ angular.module('ambariAdminConsole')
     if ($scope.form.$valid){
       var payload = {
         "ClusterInfo" :{
+          "cluster_id" : $scope.cluster.cluster_id,
           "name" : $scope.cluster.cluster_name,
           "url" : $scope.cluster.cluster_url,
           "username" : $scope.cluster.cluster_user
@@ -143,7 +165,8 @@ angular.module('ambariAdminConsole')
   $scope.fetchRemoteClusterDetails = function (clusterName) {
 
     RemoteCluster.getDetails(clusterName).then(function(response) {
-        $scope.cluster.cluster_name = response.ClusterInfo.name
+        $scope.cluster.cluster_id = response.ClusterInfo.cluster_id;
+        $scope.cluster.cluster_name = response.ClusterInfo.name;
         $scope.cluster.cluster_url = response.ClusterInfo.url;
         $scope.cluster.cluster_user = response.ClusterInfo.username;
       })

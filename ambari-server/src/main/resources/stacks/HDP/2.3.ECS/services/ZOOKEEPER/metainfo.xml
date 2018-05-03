@@ -23,7 +23,7 @@
       <version>3.4.6.2.3</version>
       <osSpecifics>
         <osSpecific>
-          <osFamily>redhat7,amazon2015,redhat6,suse11</osFamily>
+          <osFamily>redhat7,amazonlinux2,redhat6,suse11</osFamily>
           <packages>
             <package>
               <name>zookeeper_2_3_*</name>
@@ -34,7 +34,7 @@
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>zookeeper-2-3-.*</name>

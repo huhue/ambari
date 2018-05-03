@@ -24,7 +24,6 @@ from service import service
 from service_check import ServiceCheck
 from resource_management.libraries.functions import check_process_status
 from resource_management.libraries.script import Script
-from resource_management.libraries.functions import conf_select
 from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions import format
 from resource_management.core.resources.system import Link
@@ -41,9 +40,6 @@ from resource_management.core.resources.service import Service
 
 
 class UiServer(Script):
-
-  def get_component_name(self):
-    return "storm-client"
 
   def install(self, env):
     self.install_packages(env)
@@ -81,10 +77,10 @@ class UiServerDefault(UiServer):
     import params
     env.set_params(params)
     if params.version and check_stack_feature(StackFeature.ROLLING_UPGRADE, params.version):
-      conf_select.select(params.stack_name, "storm", params.version)
-      stack_select.select("storm-client", params.version)
+      stack_select.select_packages(params.version)
 
   def link_metrics_sink_jar(self):
+    import params
     # Add storm metrics reporter JAR to storm-ui-server classpath.
     # Remove symlinks. They can be there, if you doing upgrade from HDP < 2.2 to HDP >= 2.2
     Link(format("{storm_lib_dir}/ambari-metrics-storm-sink.jar"),
@@ -92,9 +88,14 @@ class UiServerDefault(UiServer):
     # On old HDP 2.1 versions, this symlink may also exist and break EU to newer versions
     Link("/usr/lib/storm/lib/ambari-metrics-storm-sink.jar", action="delete")
 
-    Execute(format("{sudo} ln -s {metric_collector_sink_jar} {storm_lib_dir}/ambari-metrics-storm-sink.jar"),
+    if check_stack_feature(StackFeature.STORM_METRICS_APACHE_CLASSES, params.version_for_stack_feature_checks):
+      sink_jar = params.metric_collector_sink_jar
+    else:
+      sink_jar = params.metric_collector_legacy_sink_jar
+
+    Execute(format("{sudo} ln -s {sink_jar} {storm_lib_dir}/ambari-metrics-storm-sink.jar"),
             not_if=format("ls {storm_lib_dir}/ambari-metrics-storm-sink.jar"),
-            only_if=format("ls {metric_collector_sink_jar}")
+            only_if=format("ls {sink_jar}")
             )
 
   def start(self, env, upgrade_type=None):
@@ -114,59 +115,6 @@ class UiServerDefault(UiServer):
     import status_params
     env.set_params(status_params)
     check_process_status(status_params.pid_ui)
-
-  def security_status(self, env):
-    import status_params
-
-    env.set_params(status_params)
-
-    if status_params.security_enabled:
-      # Expect the following files to be available in status_params.config_dir:
-      #   storm_jaas.conf
-
-      try:
-        props_value_check = None
-        props_empty_check = ['storm_ui_principal_name', 'storm_ui_keytab']
-        props_read_check = ['storm_ui_keytab']
-        storm_env_expectations = build_expectations('storm_ui', props_value_check, props_empty_check,
-                                                 props_read_check)
-
-        storm_expectations = {}
-        storm_expectations.update(storm_env_expectations)
-
-        security_params = {}
-        security_params['storm_ui'] = {}
-        security_params['storm_ui']['storm_ui_principal_name'] = status_params.storm_ui_principal
-        security_params['storm_ui']['storm_ui_keytab'] = status_params.storm_ui_keytab
-
-        result_issues = validate_security_config_properties(security_params, storm_expectations)
-        if not result_issues:  # If all validations passed successfully
-          # Double check the dict before calling execute
-          if ( 'storm_ui' not in security_params
-               or 'storm_ui_principal_name' not in security_params['storm_ui']
-               or 'storm_ui_keytab' not in security_params['storm_ui']):
-            self.put_structured_out({"securityState": "ERROR"})
-            self.put_structured_out({"securityIssuesFound": "Keytab file or principal are not set property."})
-            return
-
-          cached_kinit_executor(status_params.kinit_path_local,
-                                status_params.storm_user,
-                                security_params['storm_ui']['storm_ui_keytab'],
-                                security_params['storm_ui']['storm_ui_principal_name'],
-                                status_params.hostname,
-                                status_params.tmp_dir)
-          self.put_structured_out({"securityState": "SECURED_KERBEROS"})
-        else:
-          issues = []
-          for cf in result_issues:
-            issues.append("Configuration file %s did not pass the validation. Reason: %s" % (cf, result_issues[cf]))
-          self.put_structured_out({"securityIssuesFound": ". ".join(issues)})
-          self.put_structured_out({"securityState": "UNSECURED"})
-      except Exception as e:
-        self.put_structured_out({"securityState": "ERROR"})
-        self.put_structured_out({"securityStateErrorInfo": str(e)})
-    else:
-      self.put_structured_out({"securityState": "UNSECURED"})
       
   def get_log_folder(self):
     import params
@@ -175,6 +123,10 @@ class UiServerDefault(UiServer):
   def get_user(self):
     import params
     return params.storm_user
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.pid_ui]
 
 if __name__ == "__main__":
   UiServer().execute()

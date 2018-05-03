@@ -20,21 +20,29 @@ import json
 import os
 import socket
 from unittest import TestCase
-from mock.mock import patch, MagicMock
-
+from mock.mock import patch
+import unittest
 
 class TestHDP23StackAdvisor(TestCase):
 
   def setUp(self):
     import imp
     self.maxDiff = None
+    if 'util' in dir(unittest): unittest.util._MAX_LENGTH=2000
     self.testDirectory = os.path.dirname(os.path.abspath(__file__))
-    stackAdvisorPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks/stack_advisor.py')
-    hdp206StackAdvisorPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks/HDP/2.0.6/services/stack_advisor.py')
-    hdp21StackAdvisorPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks/HDP/2.1/services/stack_advisor.py')
-    hdp22StackAdvisorPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks/HDP/2.2/services/stack_advisor.py')
-    hdp23StackAdvisorPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks/HDP/2.3/services/stack_advisor.py')
+
+    stacksPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks')
+    stackAdvisorPath = os.path.join(stacksPath, 'stack_advisor.py')
+    ambariConfigurationPath = os.path.abspath(os.path.join(stacksPath, 'ambari_configuration.py'))
+    hdp206StackAdvisorPath = os.path.join(stacksPath, 'HDP/2.0.6/services/stack_advisor.py')
+    hdp21StackAdvisorPath = os.path.join(stacksPath, 'HDP/2.1/services/stack_advisor.py')
+    hdp22StackAdvisorPath = os.path.join(stacksPath, 'HDP/2.2/services/stack_advisor.py')
+    hdp23StackAdvisorPath = os.path.join(stacksPath, 'HDP/2.3/services/stack_advisor.py')
+
     hdp23StackAdvisorClassName = 'HDP23StackAdvisor'
+
+    with open(ambariConfigurationPath, 'rb') as fp:
+      imp.load_module('ambari_configuration', fp, ambariConfigurationPath, ('.py', 'rb', imp.PY_SOURCE))
     with open(stackAdvisorPath, 'rb') as fp:
       imp.load_module('stack_advisor', fp, stackAdvisorPath, ('.py', 'rb', imp.PY_SOURCE))
     with open(hdp206StackAdvisorPath, 'rb') as fp:
@@ -86,692 +94,8 @@ class TestHDP23StackAdvisor(TestCase):
     return self.get_system_min_uid_real()
 
 
-  def test_createComponentLayoutRecommendations_hawq_1_Host(self):
-
-    services = self.load_json("services-hawq-1-host.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    componentNames = [component["StackServiceComponents"]["component_name"] for component in componentsList]
-    self.assertTrue('HAWQSTANDBY' in componentNames)
-
-    hosts = self.load_json("hosts-1-host.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 1)
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.createComponentLayoutRecommendations(services, hosts)
-
-    recommendedComponentsListList = [hostgroup["components"] for hostgroup in recommendations["blueprint"]["host_groups"]]
-    recommendedComponents = [item["name"] for sublist in recommendedComponentsListList for item in sublist]
-    self.assertTrue('HAWQMASTER' in recommendedComponents)
-    self.assertFalse('HAWQSTANDBY' in recommendedComponents)
-    self.assertTrue('HAWQSEGMENT' in recommendedComponents)
-
-  def insertHAWQServiceAdvisorInfo(self, services):
-    for service in services["services"]:
-      if service["StackServices"]["service_name"] == 'HAWQ':
-        service["StackServices"]["advisor_name"] = "HAWQ200ServiceAdvisor"
-        path = os.path.join(self.testDirectory, '../../../../../main/resources/common-services/HAWQ/2.0.0/service_advisor.py')
-        service["StackServices"]["advisor_path"] = path
-
-  def insertPXFServiceAdvisorInfo(self, services):
-    for service in services["services"]:
-      if service["StackServices"]["service_name"] == 'PXF':
-        service["StackServices"]["advisor_name"] = "PXF300ServiceAdvisor"
-        path = os.path.join(self.testDirectory, '../../../../../main/resources/common-services/PXF/3.0.0/service_advisor.py')
-        service["StackServices"]["advisor_path"] = path
-
-  def test_createComponentLayoutRecommendations_hawq_3_Hosts(self):
-    """ Test that HAWQSTANDBY is recommended on a 3-node cluster """
-
-    services = self.load_json("services-hawq-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    componentNames = [component["StackServiceComponents"]["component_name"] for component in componentsList]
-    self.assertTrue('HAWQSTANDBY' in componentNames)
-
-    hosts = self.load_json("hosts-3-hosts.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 3)
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.recommendComponentLayout(services, hosts)
-    layoutRecommendations = recommendations["recommendations"]
-
-    recommendedComponentsListList = [hostgroup["components"] for hostgroup in layoutRecommendations["blueprint"]["host_groups"]]
-    recommendedComponents = [item["name"] for sublist in recommendedComponentsListList for item in sublist]
-    self.assertTrue('HAWQMASTER' in recommendedComponents)
-    self.assertTrue('HAWQSTANDBY' in recommendedComponents)
-    self.assertTrue('HAWQSEGMENT' in recommendedComponents)
-
-    # make sure master components are not collocated
-    for sublist in recommendedComponentsListList:
-      hostComponents = [item["name"] for item in sublist]
-      self.assertFalse(set(['HAWQMASTER', 'HAWQSTANDBY']).issubset(hostComponents))
-
-
-  def test_createComponentLayoutRecommendations_no_hawq_3_Hosts(self):
-    """ Test no failures when there are no HAWQ components """
-
-    services = self.load_json("services-nohawq-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    componentNames = [component["StackServiceComponents"]["component_name"] for component in componentsList]
-    self.assertFalse('HAWQMASTER' in componentNames)
-    self.assertFalse('HAWQSTANDBY' in componentNames)
-    self.assertFalse('HAWQSEGMENT' in componentNames)
-
-    hosts = self.load_json("hosts-3-hosts.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 3)
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.recommendComponentLayout(services, hosts)
-    layoutRecommendations = recommendations["recommendations"]
-
-    recommendedComponentsListList = [hostgroup["components"] for hostgroup in layoutRecommendations["blueprint"]["host_groups"]]
-    recommendedComponents = [item["name"] for sublist in recommendedComponentsListList for item in sublist]
-    self.assertFalse('HAWQMASTER' in recommendedComponents)
-    self.assertFalse('HAWQSTANDBY' in recommendedComponents)
-    self.assertFalse('HAWQSEGMENT' in recommendedComponents)
-
-  def test_createComponentLayoutRecommendations_hawqsegment_cluster_install(self):
-    """ Test that HAWQSEGMENT gets recommended correctly during Cluster Install Wizard, when HAWQ is selected for installation """
-
-    hosts = self.prepareHosts(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-    services =  {
-                  "services" : [
-                    {
-                      "StackServices" : {
-                        "service_name" : "HDFS"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "DATANODE",
-                            "hostnames" : []
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "StackServices" : {
-                        "service_name" : "HAWQ"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "HAWQSEGMENT",
-                            "hostnames" : []
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-
-    hawqSegmentHosts = set(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-    self.insertHAWQServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.createComponentLayoutRecommendations(services, hosts)
-    hostGroups = [ hostgroup["name"] for hostgroup in recommendations["blueprint"]["host_groups"] if {"name": "HAWQSEGMENT"} in hostgroup["components"] ]
-    hostNames = [ host["fqdn"] for hostgroup in recommendations["blueprint_cluster_binding"]["host_groups"] if hostgroup["name"] in hostGroups for host in hostgroup["hosts"] ]
-    self.assertEquals(set(hostNames), hawqSegmentHosts)
-
-  def test_createComponentLayoutRecommendations_hawqsegment_add_service_wizard_to_be_installed(self):
-    """ Test that HAWQSEGMENT gets recommended correctly during Add Service Wizard, when HAWQ is selected for installation """
-
-    hosts = self.prepareHosts(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-    services =  {
-                  "services" : [
-                    {
-                      "StackServices" : {
-                        "service_name" : "HDFS"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "DATANODE",
-                            "hostnames" : ["c6401.ambari.apache.org", "c6403.ambari.apache.org"]
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "StackServices" : {
-                        "service_name" : "HAWQ"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "HAWQSEGMENT",
-                            "hostnames" : []
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-
-    hawqSegmentHosts = set(["c6401.ambari.apache.org", "c6403.ambari.apache.org"])
-    self.insertHAWQServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.createComponentLayoutRecommendations(services, hosts)
-    hostGroups = [ hostgroup["name"] for hostgroup in recommendations["blueprint"]["host_groups"] if {"name": "HAWQSEGMENT"} in hostgroup["components"] ]
-    hostNames = [ host["fqdn"] for hostgroup in recommendations["blueprint_cluster_binding"]["host_groups"] if hostgroup["name"] in hostGroups for host in hostgroup["hosts"] ]
-    self.assertEquals(set(hostNames), hawqSegmentHosts)
-
-  def test_createComponentLayoutRecommendations_hawqsegment_add_service_wizard_already_installed(self):
-    """ Test that HAWQSEGMENT does not get recommended during Add Service Wizard, when HAWQ has already been installed """
-
-    hosts = self.prepareHosts(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-    services =  {
-                  "services" : [
-                    {
-                      "StackServices" : {
-                        "service_name" : "HDFS"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "DATANODE",
-                            "hostnames" : ["c6401.ambari.apache.org", "c6403.ambari.apache.org"]
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "StackServices" : {
-                        "service_name" : "HAWQ"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "HAWQSEGMENT",
-                            "hostnames" : ["c6402.ambari.apache.org"]
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "StackServices" : {
-                        "service_name" : "PXF"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "PXF",
-                            "hostnames" : []
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-
-    hawqSegmentHosts = set(["c6402.ambari.apache.org"])
-    self.insertHAWQServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.createComponentLayoutRecommendations(services, hosts)
-    hostGroups = [ hostgroup["name"] for hostgroup in recommendations["blueprint"]["host_groups"] if {"name": "HAWQSEGMENT"} in hostgroup["components"] ]
-    hostNames = [ host["fqdn"] for hostgroup in recommendations["blueprint_cluster_binding"]["host_groups"] if hostgroup["name"] in hostGroups for host in hostgroup["hosts"] ]
-    self.assertEquals(set(hostNames), hawqSegmentHosts)
-
-  def test_createComponentLayoutRecommendations_pxf_cluster_install(self):
-    """ Test that PXF gets recommended correctly during Cluster Install Wizard, when PXF is selected for installation """
-
-    hosts = self.prepareHosts(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-    services =  {
-                  "services" : [
-                    {
-                      "StackServices" : {
-                        "service_name" : "HDFS"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "MASTER",
-                            "component_name" : "NAMENODE",
-                            "is_master": "true",
-                            "hostnames" : []
-                          }
-                        },
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "DATANODE",
-                            "hostnames" : []
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "StackServices" : {
-                        "service_name" : "PXF"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "PXF",
-                            "hostnames" : []
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-
-    pxfHosts = set(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-
-    self.insertPXFServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.createComponentLayoutRecommendations(services, hosts)
-    hostGroups = [ hostgroup["name"] for hostgroup in recommendations["blueprint"]["host_groups"] if {"name": "PXF"} in hostgroup["components"] ]
-    hostNames = [ host["fqdn"] for hostgroup in recommendations["blueprint_cluster_binding"]["host_groups"] if hostgroup["name"] in hostGroups for host in hostgroup["hosts"] ]
-    self.assertEquals(set(hostNames), pxfHosts)
-
-  def test_createComponentLayoutRecommendations_pxf_add_service_wizard_to_be_installed(self):
-    """ Test that PXF gets recommended correctly during Add Service Wizard, when PXF is selected for installation """
-
-    hosts = self.prepareHosts(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-    services =  {
-                  "services" : [
-                    {
-                      "StackServices" : {
-                        "service_name" : "HDFS"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "MASTER",
-                            "component_name" : "NAMENODE",
-                            "is_master": "true",
-                            "hostnames" : ["c6401.ambari.apache.org"]
-                          }
-                        },
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "DATANODE",
-                            "hostnames" : ["c6402.ambari.apache.org", "c6403.ambari.apache.org"]
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "StackServices" : {
-                        "service_name" : "PXF"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "PXF",
-                            "hostnames" : []
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-
-    pxfHosts = set(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-
-    self.insertPXFServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.createComponentLayoutRecommendations(services, hosts)
-    hostGroups = [ hostgroup["name"] for hostgroup in recommendations["blueprint"]["host_groups"] if {"name": "PXF"} in hostgroup["components"] ]
-    hostNames = [ host["fqdn"] for hostgroup in recommendations["blueprint_cluster_binding"]["host_groups"] if hostgroup["name"] in hostGroups for host in hostgroup["hosts"] ]
-    self.assertEquals(set(hostNames), pxfHosts)
-
-  def test_createComponentLayoutRecommendations_pxf_add_service_wizard_already_installed(self):
-    """ Test that PXF does not get recommended during Add Service Wizard, when PXF has already been installed """
-
-    hosts = self.prepareHosts(["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"])
-    services =  {
-                  "services" : [
-                    {
-                      "StackServices" : {
-                        "service_name" : "HDFS"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "MASTER",
-                            "component_name" : "NAMENODE",
-                            "is_master": "true",
-                            "hostnames" : ["c6401.ambari.apache.org"]
-                          }
-                        },
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "DATANODE",
-                            "hostnames" : ["c6402.ambari.apache.org", "c6403.ambari.apache.org"]
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "StackServices" : {
-                        "service_name" : "PXF"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "SLAVE",
-                            "component_name" : "PXF",
-                            "hostnames" : ["c6402.ambari.apache.org"]
-                          }
-                        }
-                      ]
-                    },
-                    {
-                      "StackServices" : {
-                        "service_name" : "HBASE"
-                      },
-                      "components" : [
-                        {
-                          "StackServiceComponents" : {
-                            "cardinality" : "1+",
-                            "component_category" : "MASTER",
-                            "component_name" : "HBASE_MASTER",
-                            "is_master": "true",
-                            "hostnames" : []
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-
-    pxfHosts = set(["c6402.ambari.apache.org"])
-
-    self.insertPXFServiceAdvisorInfo(services)
-    recommendations = self.stackAdvisor.createComponentLayoutRecommendations(services, hosts)
-    hostGroups = [ hostgroup["name"] for hostgroup in recommendations["blueprint"]["host_groups"] if {"name": "PXF"} in hostgroup["components"] ]
-    hostNames = [ host["fqdn"] for hostgroup in recommendations["blueprint_cluster_binding"]["host_groups"] if hostgroup["name"] in hostGroups for host in hostgroup["hosts"] ]
-    self.assertEquals(set(hostNames), pxfHosts)
-
   def fqdn_mock_result(value=None):
       return 'c6401.ambari.apache.org' if value is None else value
-
-
-  def __getHosts(self, componentsList, componentName):
-    return [component["StackServiceComponents"] for component in componentsList if component["StackServiceComponents"]["component_name"] == componentName][0]
-
-
-  def test_getComponentLayoutValidations_hawqsegment_not_co_located_with_datanode(self):
-    """ Test validation warning for HAWQ segment not colocated with DATANODE """
-
-    services = self.load_json("services-normal-hawq-3-hosts.json")
-    hosts = self.load_json("hosts-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-
-    hawqsegmentComponent = self.__getHosts(componentsList, "HAWQSEGMENT")
-    hawqsegmentComponent["hostnames"] = ['c6401.ambari.apache.org']
-    datanodeComponent = self.__getHosts(componentsList, "DATANODE")
-    datanodeComponent["hostnames"] = ['c6402.ambari.apache.org']
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    validations = self.stackAdvisor.getComponentLayoutValidations(services, hosts)
-    expected = {
-      'type': 'host-component',
-      'level': 'WARN',
-      'component-name': 'HAWQSEGMENT',
-      'message': 'HAWQ Segment must be installed on all DataNodes. The following 2 host(s) do not satisfy the colocation recommendation: c6401.ambari.apache.org, c6402.ambari.apache.org',
-    }
-    self.assertEquals(validations[0], expected)
-
-    datanodeComponent["hostnames"] = ['c6401.ambari.apache.org']
-    validations = self.stackAdvisor.getComponentLayoutValidations(services, hosts)
-    self.assertEquals(len(validations), 0)
-
-
-  def test_getComponentLayoutValidations_pxf_not_co_located_with_nn(self):
-    """ Test warning is generated when PXF is not co-located with NAMENODE """
-
-    services = self.load_json("services-hawq-pxf-hdfs.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    nameNodeComponent = self.__getHosts(componentsList, "NAMENODE")
-    dataNodeComponent = self.__getHosts(componentsList, "DATANODE")
-    pxfComponent = self.__getHosts(componentsList, "PXF")
-    nameNodeComponent["hostnames"] = ["c6401.ambari.apache.org"]
-    dataNodeComponent["hostnames"] = ["c6402.ambari.apache.org", "c6403.ambari.apache.org"]
-    pxfComponent["hostnames"] = ["c6402.ambari.apache.org", "c6403.ambari.apache.org"]
-
-    hosts = self.load_json("hosts-3-hosts.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 3)
-
-    self.insertPXFServiceAdvisorInfo(services)
-    validations = [validation for validation in self.stackAdvisor.getComponentLayoutValidations(services, hosts) if validation["component-name"] == "PXF"]
-    self.assertEquals(len(validations), 1)
-    expected = {
-      "type": 'host-component',
-      "level": 'WARN',
-      "component-name": 'PXF',
-      "message": 'PXF must be installed on the NameNode, Standby NameNode and all DataNodes. The following 1 host(s) do not satisfy the colocation recommendation: c6401.ambari.apache.org'
-    }
-    self.assertEquals(validations[0], expected)
-
-
-  def test_getComponentLayoutValidations_pxf_not_co_located_with_dn(self):
-    """ Test warning is generated when PXF is not co-located with NAMENODE or DATANODE """
-
-    services = self.load_json("services-hawq-pxf-hdfs.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    nameNodeComponent = self.__getHosts(componentsList, "NAMENODE")
-    dataNodeComponent = self.__getHosts(componentsList, "DATANODE")
-    pxfComponent = self.__getHosts(componentsList, "PXF")
-    nameNodeComponent["hostnames"] = ["c6401.ambari.apache.org"]
-    dataNodeComponent["hostnames"] = ["c6402.ambari.apache.org", "c6403.ambari.apache.org"]
-    pxfComponent["hostnames"] = ["c6401.ambari.apache.org"]
-
-    hosts = self.load_json("hosts-3-hosts.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 3)
-
-    self.insertPXFServiceAdvisorInfo(services)
-    validations = [validation for validation in self.stackAdvisor.getComponentLayoutValidations(services, hosts) if validation["component-name"] == "PXF"]
-    self.assertEquals(len(validations), 1)
-    expected = {
-      "type": 'host-component',
-      "level": 'WARN',
-      "component-name": 'PXF',
-      "message": 'PXF must be installed on the NameNode, Standby NameNode and all DataNodes. The following 2 host(s) do not satisfy the colocation recommendation: c6402.ambari.apache.org, c6403.ambari.apache.org'
-    }
-    self.assertEquals(validations[0], expected)
-
-
-  def test_getComponentLayoutValidations_pxf_not_co_located_with_nn_or_dn(self):
-    """ Test warning is generated when PXF is not co-located with NAMENODE or DATANODE """
-
-    services = self.load_json("services-hawq-pxf-hdfs.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    nameNodeComponent = self.__getHosts(componentsList, "NAMENODE")
-    dataNodeComponent = self.__getHosts(componentsList, "DATANODE")
-    pxfComponent = self.__getHosts(componentsList, "PXF")
-    nameNodeComponent["hostnames"] = ["c6401.ambari.apache.org"]
-    dataNodeComponent["hostnames"] = ["c6402.ambari.apache.org"]
-    pxfComponent["hostnames"] = ["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"]
-
-    hosts = self.load_json("hosts-3-hosts.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 3)
-
-    self.insertPXFServiceAdvisorInfo(services)
-    validations = [validation for validation in self.stackAdvisor.getComponentLayoutValidations(services, hosts) if validation["component-name"] == "PXF"]
-    self.assertEquals(len(validations), 1)
-    expected = {
-      "type": 'host-component',
-      "level": 'WARN',
-      "component-name": 'PXF',
-      "message": 'PXF must be installed on the NameNode, Standby NameNode and all DataNodes. The following 1 host(s) do not satisfy the colocation recommendation: c6403.ambari.apache.org'
-    }
-    self.assertEquals(validations[0], expected)
-
-
-  def test_getComponentLayoutValidations_pxf_co_located_with_nn_and_dn(self):
-    """ Test NO warning is generated when PXF is co-located with NAMENODE and DATANODE """
-
-    services = self.load_json("services-hawq-pxf-hdfs.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    nameNodeComponent = self.__getHosts(componentsList, "NAMENODE")
-    dataNodeComponent = self.__getHosts(componentsList, "DATANODE")
-    pxfComponent = self.__getHosts(componentsList, "PXF")
-    nameNodeComponent["hostnames"] = ["c6401.ambari.apache.org"]
-    dataNodeComponent["hostnames"] = ["c6402.ambari.apache.org", "c6403.ambari.apache.org"]
-    pxfComponent["hostnames"] = ["c6401.ambari.apache.org", "c6402.ambari.apache.org", "c6403.ambari.apache.org"]
-
-    hosts = self.load_json("hosts-3-hosts.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 3)
-
-    self.insertPXFServiceAdvisorInfo(services)
-    validations = [validation for validation in self.stackAdvisor.getComponentLayoutValidations(services, hosts) if validation["component-name"] == "PXF"]
-    self.assertEquals(len(validations), 0)
-
-
-  @patch('socket.getfqdn', side_effect=fqdn_mock_result)
-  def test_getComponentLayoutValidations_hawq_3_Hosts(self, socket_mock):
-    """ Test layout validations for HAWQ components on a 3-node cluster """
-
-    # case-1: normal placement, no warnings
-    services = self.load_json("services-normal-hawq-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    hawqMasterHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQMASTER"]
-    hawqStandbyHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQSTANDBY"]
-    self.assertEquals(len(hawqMasterHosts[0]), 1)
-    self.assertEquals(len(hawqStandbyHosts[0]), 1)
-    self.assertNotEquals(hawqMasterHosts[0][0], hawqStandbyHosts[0][0])
-
-    hosts = self.load_json("hosts-3-hosts.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 3)
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    validations = self.stackAdvisor.getComponentLayoutValidations(services, hosts)
-    self.assertEquals(len(validations), 0)
-
-    # case-2: HAWQ masters are collocated
-    services = self.load_json("services-master_standby_colo-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    hawqMasterHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQMASTER"]
-    hawqStandbyHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQSTANDBY"]
-    self.assertEquals(len(hawqMasterHosts[0]), 1)
-    self.assertEquals(len(hawqStandbyHosts[0]), 1)
-    self.assertEquals(hawqMasterHosts[0][0], hawqStandbyHosts[0][0])
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    validations = self.stackAdvisor.getComponentLayoutValidations(services, hosts)
-    self.assertEquals(len(validations), 1)
-    expected = {
-      'component-name': 'HAWQSTANDBY',
-      'message': 'HAWQ Master and HAWQ Standby Master cannot be deployed on the same host.',
-      'type': 'host-component',
-      'host': 'c6403.ambari.apache.org',
-      'level': 'ERROR'
-    }
-    self.assertEquals(validations[0], expected)
-
-    # case-3: HAWQ Master and Ambari Server are collocated
-    services = self.load_json("services-master_ambari_colo-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    hawqMasterHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQMASTER"]
-    hawqStandbyHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQSTANDBY"]
-    self.assertEquals(len(hawqMasterHosts[0]), 1)
-    self.assertEquals(len(hawqStandbyHosts[0]), 1)
-    self.assertNotEquals(hawqMasterHosts[0][0], hawqStandbyHosts[0][0])
-    self.assertEquals(hawqMasterHosts[0][0], "c6401.ambari.apache.org")
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    validations = self.stackAdvisor.getComponentLayoutValidations(services, hosts)
-    self.assertEquals(len(validations), 1)
-    expected = {
-      'component-name': 'HAWQMASTER',
-      'message': 'The default Postgres port (5432) on the Ambari Server conflicts with the default HAWQ Masters port. '  +
-                 'If you are using port 5432 for Postgres, you must either deploy the HAWQ Master on a different host ' +
-                 'or configure a different port for the HAWQ Masters in the HAWQ Configuration page.',
-      'type': 'host-component',
-      'host': 'c6401.ambari.apache.org',
-      'level': 'WARN'
-    }
-    self.assertEquals(validations[0], expected)
-
-    # case-4: HAWQ Standby and Ambari Server are collocated
-    services = self.load_json("services-standby_ambari_colo-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    hawqMasterHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQMASTER"]
-    hawqStandbyHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQSTANDBY"]
-    self.assertEquals(len(hawqMasterHosts[0]), 1)
-    self.assertEquals(len(hawqStandbyHosts[0]), 1)
-    self.assertNotEquals(hawqMasterHosts[0][0], hawqStandbyHosts[0][0])
-    self.assertEquals(hawqStandbyHosts[0][0], "c6401.ambari.apache.org")
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    validations = self.stackAdvisor.getComponentLayoutValidations(services, hosts)
-    self.assertEquals(len(validations), 1)
-    expected = {
-      'component-name': 'HAWQSTANDBY',
-      'message': 'The default Postgres port (5432) on the Ambari Server conflicts with the default HAWQ Masters port. '  +
-                 'If you are using port 5432 for Postgres, you must either deploy the HAWQ Standby Master on a different host ' +
-                 'or configure a different port for the HAWQ Masters in the HAWQ Configuration page.',
-      'type': 'host-component',
-      'host': 'c6401.ambari.apache.org',
-      'level': 'WARN'
-    }
-    self.assertEquals(validations[0], expected)
-
-
-  @patch('socket.getfqdn', side_effect=fqdn_mock_result)
-  def test_getComponentLayoutValidations_nohawq_3_Hosts(self, socket_mock):
-    """ Test no failures when there are no HAWQ components on a 3-node cluster """
-
-    # normal placement, no warnings
-    services = self.load_json("services-normal-nohawq-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    hawqMasterHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQMASTER"]
-    hawqStandbyHosts = [component["StackServiceComponents"]["hostnames"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQSTANDBY"]
-    self.assertEquals(len(hawqMasterHosts), 0)
-    self.assertEquals(len(hawqStandbyHosts), 0)
-
-    hosts = self.load_json("hosts-3-hosts.json")
-    hostsList = [host["Hosts"]["host_name"] for host in hosts["items"]]
-    self.assertEquals(len(hostsList), 3)
-
-    self.insertHAWQServiceAdvisorInfo(services)
-    validations = self.stackAdvisor.getComponentLayoutValidations(services, hosts)
-    self.assertEquals(len(validations), 0)
 
 
   @patch('socket.getfqdn', side_effect=fqdn_mock_result)
@@ -789,7 +113,7 @@ class TestHDP23StackAdvisor(TestCase):
     self.assertEquals(len(hiveMetaStore), 0)
 
     validations = self.stackAdvisor.getComponentLayoutValidations(services, hosts)
-    expected = {'component-name': 'SPARK_THRIFTSERVER', 'message': 'SPARK_THRIFTSERVER requires HIVE_METASTORE to be selected/deployed.', 'type': 'host-component', 'level': 'ERROR'}
+    expected = {'component-name': 'SPARK_THRIFTSERVER', 'message': 'Spark Thrift Server requires HIVE_METASTORE to be present in the cluster.', 'type': 'host-component', 'level': 'ERROR'}
     self.assertEquals(validations[0], expected)
 
 
@@ -870,26 +194,6 @@ class TestHDP23StackAdvisor(TestCase):
     self.stackAdvisor.recommendHDFSConfigurations(configurations, clusterData, services, hosts)
     self.assertEquals(configurations['hdfs-site']['properties']['dfs.namenode.inode.attributes.provider.class'], 'org.apache.ranger.authorization.hadoop.RangerHdfsAuthorizer', "Test with Ranger HDFS plugin is enabled")
 
-    # Test 1 for dfs.allow.truncate with no HAWQ and dfs.allow.truncate not set
-    self.stackAdvisor.recommendHDFSConfigurations(configurations, clusterData, services, hosts)
-    self.assertTrue('dfs.allow.truncate' not in configurations['hdfs-site']['properties'])
-
-    # Test 2 for dfs.allow.truncate with HAWQ and dfs.allow.truncate not set
-    services["services"].append({"StackServices" : {"service_name" : "HAWQ"}, "components":[]})
-    self.stackAdvisor.recommendHDFSConfigurations(configurations, clusterData, services, hosts)
-    self.assertEquals(configurations['hdfs-site']['properties']['dfs.allow.truncate'], 'true')
-
-    # Test 3 for dfs.allow.truncate with no HAWQ and dfs.allow.truncate set to false
-    services["services"].remove({"StackServices" : {"service_name" : "HAWQ"}, "components":[]})
-    configurations['hdfs-site']['properties']['dfs.allow.truncate'] = 'false'
-    self.stackAdvisor.recommendHDFSConfigurations(configurations, clusterData, services, hosts)
-    self.assertEquals(configurations['hdfs-site']['properties']['dfs.allow.truncate'], 'false')
-
-    # Test 4 for dfs.allow.truncate with HAWQ and dfs.allow.truncate set to false
-    services["services"].append({"StackServices" : {"service_name" : "HAWQ"}, "components":[]})
-    self.stackAdvisor.recommendHDFSConfigurations(configurations, clusterData, services, hosts)
-    self.assertEquals(configurations['hdfs-site']['properties']['dfs.allow.truncate'], 'true')
-
   def test_recommendYARNConfigurations(self):
     configurations = {}
     servicesList = ["YARN"]
@@ -915,6 +219,9 @@ class TestHDP23StackAdvisor(TestCase):
       ]
     }
     services = {
+      "context" : {
+        "call_type" : "recommendConfigurations"
+      },
       "services" : [ {
         "StackServices":{
           "service_name": "YARN",
@@ -978,6 +285,12 @@ class TestHDP23StackAdvisor(TestCase):
           },
           {
             "StackServices": {
+              "service_name": "RANGER",
+              "service_version": "0.5.0.2.3"
+            }
+          },
+          {
+            "StackServices": {
               "service_name": "AMBARI_METRICS"
             },
             "components": [{
@@ -993,6 +306,17 @@ class TestHDP23StackAdvisor(TestCase):
               }
 
             }]
+          },
+          {
+            "StackServices": {
+              "service_name": "ZOOKEEPER"
+            },
+            "components": [{
+              "StackServiceComponents": {
+                "component_name": "ZOOKEEPER_SERVER",
+                "hostnames": ["host1"]
+              }
+            }]
           }
         ],
       "Versions": {
@@ -1000,7 +324,13 @@ class TestHDP23StackAdvisor(TestCase):
       },
       "configurations": {
         "core-site": {
-          "properties": { },
+          "properties": {}
+        },
+        "cluster-env": {
+          "properties": {
+            "security_enabled" : "true"
+          },
+          "property_attributes": {}
         },
         "kafka-broker": {
           "properties": {
@@ -1010,22 +340,30 @@ class TestHDP23StackAdvisor(TestCase):
         },
         "ranger-kafka-plugin-properties": {
           "properties": {
-            "ranger-kafka-plugin-enabled": "No"
+            "ranger-kafka-plugin-enabled": "No",
+            "zookeeper.connect": ""
           }
         },
         "kafka-log4j": {
           "properties": {
             "content": "kafka.logs.dir=logs"
           }
+        },
+        "zoo.cfg" : {
+          "properties": {
+            "clientPort": "2181"
+          }
         }
       }
     }
 
     # Test authorizer.class.name with Ranger Kafka plugin disabled in non-kerberos environment
+    services['configurations']['cluster-env']['properties']['security_enabled'] = "false"
     self.stackAdvisor.recommendKAFKAConfigurations(configurations, clusterData, services, None)
     self.assertEquals(configurations['kafka-broker']['property_attributes']['authorizer.class.name'], {'delete': 'true'}, "Test authorizer.class.name with Ranger Kafka plugin is disabled in non-kerberos environment")
 
     # Test authorizer.class.name with Ranger Kafka plugin disabled in kerberos environment
+    services['configurations']['cluster-env']['properties']['security_enabled'] = "true"
     configurations['kafka-broker']['properties'] = {}
     configurations['kafka-broker']['property_attributes'] = {}
     services['configurations']['kafka-broker']['properties']['security.inter.broker.protocol'] = 'PLAINTEXTSASL'
@@ -1033,7 +371,24 @@ class TestHDP23StackAdvisor(TestCase):
     self.stackAdvisor.recommendKAFKAConfigurations(configurations, clusterData, services, None)
     self.assertEquals(configurations['kafka-broker']['properties']['authorizer.class.name'], 'kafka.security.auth.SimpleAclAuthorizer' , "Test authorizer.class.name with Ranger Kafka plugin disabled in kerberos environment")
 
+    # Advise 'PLAINTEXTSASL' for secure cluster by default
+    services['configurations']['cluster-env']['properties']['security_enabled'] = "true"
+    configurations['kafka-broker']['properties'] = {}
+    configurations['kafka-broker']['property_attributes'] = {}
+    self.stackAdvisor.recommendKAFKAConfigurations(configurations, clusterData, services, None)
+    self.assertEqual(configurations['kafka-broker']['properties']['security.inter.broker.protocol'], 'PLAINTEXTSASL')
+
+    # Secure security.inter.broker.protocol values should be retained by stack advisor
+    services['configurations']['cluster-env']['properties']['security_enabled'] = "true"
+    configurations['kafka-broker']['properties'] = {}
+    configurations['kafka-broker']['property_attributes'] = {}
+    for proto in ('PLAINTEXTSASL', 'SASL_PLAINTEXT', 'SASL_SSL'):
+      services['configurations']['kafka-broker']['properties']['security.inter.broker.protocol'] = proto
+      self.stackAdvisor.recommendKAFKAConfigurations(configurations, clusterData, services, None)
+      self.assertEqual(configurations['kafka-broker']['properties']['security.inter.broker.protocol'], proto)
+
     # Test authorizer.class.name with Ranger Kafka plugin enabled in non-kerberos environment
+    services['configurations']['cluster-env']['properties']['security_enabled'] = "false"
     configurations['kafka-broker']['properties'] = {}
     configurations['kafka-broker']['property_attributes'] = {}
     del services['configurations']['kafka-broker']['properties']['security.inter.broker.protocol']
@@ -1042,7 +397,7 @@ class TestHDP23StackAdvisor(TestCase):
     self.stackAdvisor.recommendKAFKAConfigurations(configurations, clusterData, services, None)
     self.assertEquals(configurations['kafka-broker']['properties']['authorizer.class.name'], 'org.apache.ranger.authorization.kafka.authorizer.RangerKafkaAuthorizer', "Test authorizer.class.name with Ranger Kafka plugin enabled in kerberos environment")
 
-    # Test authorizer.class.name with Ranger Kafka plugin enabled in kerberos environment
+    services['configurations']['cluster-env']['properties']['security_enabled'] = "false"
     configurations['kafka-broker']['properties'] = {}
     configurations['kafka-broker']['property_attributes'] = {}
     services['configurations']['kafka-broker']['properties']['security.inter.broker.protocol'] = 'PLAINTEXTSASL'
@@ -1050,6 +405,8 @@ class TestHDP23StackAdvisor(TestCase):
     services['configurations']['ranger-kafka-plugin-properties']['properties']['ranger-kafka-plugin-enabled'] = 'Yes'
     self.stackAdvisor.recommendKAFKAConfigurations(configurations, clusterData, services, None)
     self.assertEquals(configurations['kafka-broker']['properties']['authorizer.class.name'], 'org.apache.ranger.authorization.kafka.authorizer.RangerKafkaAuthorizer', "Test authorizer.class.name with Ranger Kafka plugin enabled in kerberos environment")
+    self.assertEquals(configurations['ranger-kafka-plugin-properties']['properties']['zookeeper.connect'], 'host1:2181')
+    self.assertTrue('security.inter.broker.protocol' not in configurations['kafka-broker']['properties'])
 
     # Test kafka-log4j content when Ranger plugin for Kafka is enabled
 
@@ -1085,7 +442,6 @@ class TestHDP23StackAdvisor(TestCase):
           "hbase.coprocessor.region.classes": "org.apache.hadoop.hbase.security.access.SecureBulkLoadEndpoint",
           "hbase.coprocessor.master.classes": "",
           "hbase.coprocessor.regionserver.classes": "",
-          "hbase.rpc.controllerfactory.class": "org.apache.hadoop.hbase.ipc.controller.ServerRpcControllerFactory",
           "hbase.region.server.rpc.scheduler.factory.class": "org.apache.hadoop.hbase.ipc.PhoenixRpcSchedulerFactory",
           'hbase.regionserver.wal.codec': 'org.apache.hadoop.hbase.regionserver.wal.IndexedWALEditCodec',
           "hbase.bucketcache.ioengine": "offheap",
@@ -1277,7 +633,8 @@ class TestHDP23StackAdvisor(TestCase):
           'hive_exec_orc_storage_strategy': 'SPEED',
           'hive_security_authorization': 'None',
           'hive_timeline_logging_enabled': 'true',
-          'hive_txn_acid': 'off'
+          'hive_txn_acid': 'off',
+          'hive.atlas.hook': 'false'
         }
       },
       'hive-site': {
@@ -1286,11 +643,10 @@ class TestHDP23StackAdvisor(TestCase):
           'hive.server2.tez.default.queues': "queue1,queue2",
           'hive.server2.tez.initialize.default.sessions': 'false',
           'hive.server2.tez.sessions.per.default.queue': '1',
-          'hive.auto.convert.join.noconditionaltask.size': '268435456',
+          'hive.auto.convert.join.noconditionaltask.size': '214748364',
           'hive.compactor.initiator.on': 'false',
           'hive.compactor.worker.threads': '0',
           'hive.compute.query.using.stats': 'true',
-          'hive.enforce.bucketing': 'false',
           'hive.exec.dynamic.partition.mode': 'strict',
           'hive.exec.failure.hooks': 'org.apache.hadoop.hive.ql.hooks.ATSHook',
           'hive.exec.orc.compression.strategy': 'SPEED',
@@ -1321,7 +677,7 @@ class TestHDP23StackAdvisor(TestCase):
           'hive.security.authorization.manager': 'org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdConfOnlyAuthorizerFactory'
         },
        'property_attributes': {
-         'hive.auto.convert.join.noconditionaltask.size': {'maximum': '805306368'},
+         'hive.auto.convert.join.noconditionaltask.size': {'maximum': '644245094'},
          'hive.server2.authentication.pam.services': {'delete': 'true'},
          'hive.server2.custom.authentication.class': {'delete': 'true'},
          'hive.server2.authentication.kerberos.principal': {'delete': 'true'},
@@ -1332,7 +688,8 @@ class TestHDP23StackAdvisor(TestCase):
           },
          'atlas.cluster.name': {'delete': 'true'},
          'atlas.rest.address': {'delete': 'true'},
-         'datanucleus.rdbms.datastoreAdapterClassName': {'delete': 'true'}
+         'datanucleus.rdbms.datastoreAdapterClassName': {'delete': 'true'},
+         'hive.tez.container.size': {'maximum': '8192', 'minimum': '256'}
         }
       },
       'hiveserver2-site': {
@@ -1342,9 +699,23 @@ class TestHDP23StackAdvisor(TestCase):
          'hive.security.authorization.manager': {'delete': 'true'},
          'hive.security.authenticator.manager': {'delete': 'true'}
         }
+      },
+      'webhcat-site': {
+        'properties': {
+          'templeton.hadoop.queue.name': 'queue2'
+        }
       }
     }
     services = {
+      "Versions": {
+        "parent_stack_version": "2.2",
+        "stack_name": "HDP",
+        "stack_version": "2.3",
+        "stack_hierarchy": {
+          "stack_name": "HDP",
+          "stack_versions": ["2.2", "2.1", "2.0.6"]
+        }
+      },
       "services": [
         {
           "href": "/api/v1/stacks/HDP/versions/2.2/services/YARN",
@@ -1420,6 +791,7 @@ class TestHDP23StackAdvisor(TestCase):
         },
         "hive-env": {
           "properties": {
+            "hive.atlas.hook": "false"
           }
         },
         "hive-site": {
@@ -1538,7 +910,8 @@ class TestHDP23StackAdvisor(TestCase):
           'hive_exec_orc_storage_strategy': 'SPEED',
           'hive_security_authorization': 'None',
           'hive_timeline_logging_enabled': 'true',
-          'hive_txn_acid': 'off'
+          'hive_txn_acid': 'off',
+          'hive.atlas.hook': 'true'
         }
       },
       'hive-site': {
@@ -1547,11 +920,10 @@ class TestHDP23StackAdvisor(TestCase):
           'hive.server2.tez.default.queues': "queue1,queue2",
           'hive.server2.tez.initialize.default.sessions': 'false',
           'hive.server2.tez.sessions.per.default.queue': '1',
-          'hive.auto.convert.join.noconditionaltask.size': '268435456',
+          'hive.auto.convert.join.noconditionaltask.size': '214748364',
           'hive.compactor.initiator.on': 'false',
           'hive.compactor.worker.threads': '0',
           'hive.compute.query.using.stats': 'true',
-          'hive.enforce.bucketing': 'false',
           'hive.exec.dynamic.partition.mode': 'strict',
           'hive.exec.failure.hooks': 'org.apache.hadoop.hive.ql.hooks.ATSHook',
           'hive.exec.orc.compression.strategy': 'SPEED',
@@ -1582,7 +954,8 @@ class TestHDP23StackAdvisor(TestCase):
           'hive.security.authorization.manager': 'org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdConfOnlyAuthorizerFactory'
         },
         'property_attributes': {
-          'hive.auto.convert.join.noconditionaltask.size': {'maximum': '805306368'},
+          'hive.auto.convert.join.noconditionaltask.size': {'maximum': '644245094'},
+          'hive.tez.container.size': {'maximum': '8192', 'minimum': '256'},
           'hive.server2.authentication.pam.services': {'delete': 'true'},
           'hive.server2.custom.authentication.class': {'delete': 'true'},
           'hive.server2.authentication.kerberos.principal': {'delete': 'true'},
@@ -1603,9 +976,23 @@ class TestHDP23StackAdvisor(TestCase):
           'hive.security.authorization.manager': {'delete': 'true'},
           'hive.security.authenticator.manager': {'delete': 'true'}
         }
+      },
+      'webhcat-site': {
+        'properties': {
+          'templeton.hadoop.queue.name': 'queue2'
+        }
       }
     }
     services = {
+      "Versions": {
+        "parent_stack_version": "2.2",
+        "stack_name": "HDP",
+        "stack_version": "2.3",
+        "stack_hierarchy": {
+          "stack_name": "HDP",
+          "stack_versions": ["2.2", "2.1", "2.0.6"]
+        }
+      },
       "services": [
         {
           "href": "/api/v1/stacks/HDP/versions/2.2/services/YARN",
@@ -1705,6 +1092,7 @@ class TestHDP23StackAdvisor(TestCase):
         },
         "hive-env": {
           "properties": {
+            "hive.atlas.hook": "false"
           }
         },
         "hive-site": {
@@ -1818,10 +1206,11 @@ class TestHDP23StackAdvisor(TestCase):
           "tez.task.resource.memory.mb": "768",
           "tez.am.launch.cmd-opts": "-XX:+PrintGCDetails -verbose:gc -XX:+PrintGCTimeStamps -XX:+UseNUMA -XX:+UseParallelGC",
           "tez.task.launch.cmd-opts": "-XX:+PrintGCDetails -verbose:gc -XX:+PrintGCTimeStamps -XX:+UseNUMA -XX:+UseParallelGC",
-          "tez.runtime.io.sort.mb": "307",
+          "tez.runtime.io.sort.mb": "202",
           "tez.session.am.dag.submit.timeout.secs": "600",
           "tez.runtime.unordered.output.buffer.size-mb": "57",
-          "tez.am.resource.memory.mb": "4000"
+          "tez.am.resource.memory.mb": "4000",
+          "tez.queue.name": "queue2",
         }
       },
       "yarn-site": {
@@ -1832,6 +1221,15 @@ class TestHDP23StackAdvisor(TestCase):
       }
     }
     services = {
+      "Versions": {
+        "parent_stack_version": "2.2",
+        "stack_name": "HDP",
+        "stack_version": "2.3",
+        "stack_hierarchy": {
+          "stack_name": "HDP",
+          "stack_versions": ["2.2", "2.1", "2.0.6"]
+        }
+      },
       "services": [
         {
           "href": "/api/v1/stacks/HDP/versions/2.2/services/YARN",
@@ -1951,7 +1349,10 @@ class TestHDP23StackAdvisor(TestCase):
     self.assertEquals(configurations, expected)
 
     server_host = socket.getfqdn()
-    tez_ui_url =  "http://" + server_host + ":8080/#/main/views/TEZ/0.7.0.2.3.0.0-2155/TEZ_CLUSTER_INSTANCE"
+    for host in hosts["items"]:
+      if server_host == host["Hosts"]["host_name"]:
+        server_host = host["Hosts"]["public_host_name"]
+    tez_ui_url =  "http://" + server_host + ":8080/#/main/view/TEZ/tez_cluster_instance"
 
     # Test JDK1.7
     services['ambari-server-properties'] = {'java.home': '/usr/jdk64/jdk1.7.3_23'}
@@ -1974,106 +1375,6 @@ class TestHDP23StackAdvisor(TestCase):
     expected['tez-site']['properties']['tez.tez-ui.history-url.base'] = tez_ui_url
     self.stackAdvisor.recommendTezConfigurations(configurations, clusterData, services, hosts)
     self.assertEquals(configurations, expected)
-
-  def createHAWQServiceAdvisor(self):
-    path = os.path.join(self.testDirectory, '../../../../../main/resources/common-services/HAWQ/2.0.0/service_advisor.py')
-    service = {"service_name" : "HAWQ", "service_version" : "2.0", "advisor_path" : path, "advisor_name" : "HAWQ200ServiceAdvisor"}
-    service = {"StackServices" : service}
-    return self.stackAdvisor.instantiateServiceAdvisor(service)
-
-  def createPXFServiceAdvisor(self):
-    path = os.path.join(self.testDirectory, '../../../../../main/resources/common-services/PXF/3.0.0/service_advisor.py')
-    service = {"service_name" : "PXF", "service_version" : "3.0", "advisor_path" : path, "advisor_name" : "PXF300ServiceAdvisor"}
-    service = {"StackServices" : service}
-    return self.stackAdvisor.instantiateServiceAdvisor(service)
-
-  def test_recommendHAWQConfigurations(self):
-
-    hosts = {
-      "items": [
-        {
-          "Hosts": {
-            "host_name": "c6401.ambari.apache.org",
-            "total_mem": 12345678
-          }
-        },
-        {
-          "Hosts": {
-            "host_name": "c6402.ambari.apache.org",
-            "total_mem": 12345678
-          }
-        },
-        {
-          "Hosts": {
-            "host_name": "c6403.ambari.apache.org",
-            "total_mem": 12345678
-          }
-        },
-        {
-          "Hosts": {
-            "host_name": "c6404.ambari.apache.org",
-            "total_mem": 12345678
-          }
-        }
-      ]
-    }
-
-    # original cluster data with 3 segments
-    services = self.load_json("services-normal-hawq-3-hosts.json")
-    componentsListList = [service["components"] for service in services["services"]]
-    componentsList = [item for sublist in componentsListList for item in sublist]
-    hawqSegmentComponent = [component["StackServiceComponents"] for component in componentsList if component["StackServiceComponents"]["component_name"] == "HAWQSEGMENT"][0]
-
-    # setup default configuration values
-    services["configurations"]["hawq-site"] = {"properties": {"default_hash_table_bucket_number": "24",
-                                                              "hawq_rm_nvseg_perquery_limit": "512",
-                                                              "hawq_rm_yarn_address": "localhost:8032",
-                                                              "hawq_rm_yarn_scheduler_address": "localhost:8030"}}
-
-    services["configurations"]["hdfs-client"] = {"properties": {"output.replace-datanode-on-failure": "true"}}
-
-    services["configurations"]["yarn-site"] = {"properties": {"yarn.resourcemanager.address": "host1:8050",
-                                                              "yarn.resourcemanager.scheduler.address": "host1:8030"}}
-    services["services"].append({"StackServices" : {"service_name" : "YARN"}, "components":[]})
-    configurations = {}
-    clusterData = {}
-
-    # Test 1 - with 3 segments
-    self.assertEquals(len(hawqSegmentComponent["hostnames"]), 3)
-    serviceAdvisor = self.createHAWQServiceAdvisor()
-    serviceAdvisor.getServiceConfigurationRecommendations(self.stackAdvisor, configurations, clusterData, services, hosts)
-    self.assertEquals(configurations["hawq-site"]["properties"]["default_hash_table_bucket_number"], str(3 * 6))
-    self.assertEquals(configurations["hdfs-client"]["properties"]["output.replace-datanode-on-failure"], "false")
-
-    # check derived properties
-    self.assertEquals(configurations["hawq-site"]["properties"]["hawq_rm_yarn_address"], "host1:8050")
-    self.assertEquals(configurations["hawq-site"]["properties"]["hawq_rm_yarn_scheduler_address"], "host1:8030")
-
-    # Test 2 - with 100 segments
-    hawqSegmentComponent["hostnames"] = ["host" + str(i) for i in range(100)]
-    serviceAdvisor.getServiceConfigurationRecommendations(self.stackAdvisor, configurations, clusterData, services, hosts)
-    self.assertEquals(configurations["hawq-site"]["properties"]["default_hash_table_bucket_number"], str(100 * 5))
-    self.assertEquals(configurations["hdfs-client"]["properties"]["output.replace-datanode-on-failure"], "true")
-
-    # Test 3 - with 512 segments
-    hawqSegmentComponent["hostnames"] = ["host" + str(i) for i in range(512)]
-    serviceAdvisor.getServiceConfigurationRecommendations(self.stackAdvisor, configurations, clusterData, services, hosts)
-    self.assertEquals(configurations["hawq-site"]["properties"]["default_hash_table_bucket_number"], "512")
-    self.assertEquals(configurations["hdfs-client"]["properties"]["output.replace-datanode-on-failure"], "true")
-
-    # Test 4 - with 513 segments
-    hawqSegmentComponent["hostnames"] = ["host" + str(i) for i in range(513)]
-    serviceAdvisor.getServiceConfigurationRecommendations(self.stackAdvisor, configurations, clusterData, services, hosts)
-    self.assertEquals(configurations["hawq-site"]["properties"]["default_hash_table_bucket_number"], "512")
-    self.assertEquals(configurations["hdfs-client"]["properties"]["output.replace-datanode-on-failure"], "true")
-
-    # Test 5 - with no segments
-    configurations = {}
-    services["configurations"]["hawq-site"] = {"properties":{'hawq-site': {'properties': {}}}}
-    hawqSegmentComponent["hostnames"] = []
-    serviceAdvisor.getServiceConfigurationRecommendations(self.stackAdvisor, configurations, clusterData, services, hosts)
-    self.assertEquals(configurations, {'hdfs-client': {'properties': {'output.replace-datanode-on-failure': 'false'}},
-                                       'hawq-site': {'properties': {}},  'hdfs-site': {'properties': {'dfs.allow.truncate': 'true'}}})
 
   def test_validateHiveConfigurations(self):
     properties = {"hive_security_authorization": "None",
@@ -2185,9 +1486,15 @@ class TestHDP23StackAdvisor(TestCase):
     clusterData = {}
     # Recommend for not existing DB_FLAVOR and http enabled, HDP-2.3
     services = {
-      "Versions" : {
-        "stack_version" : "2.3",
-        },
+      "Versions": {
+        "parent_stack_version": "2.2",
+        "stack_name": "HDP",
+        "stack_version": "2.3",
+        "stack_hierarchy": {
+          "stack_name": "HDP",
+          "stack_versions": ["2.2", "2.1", "2.0.6"]
+        }
+      },
       "services":  [
         {
           "StackServices": {
@@ -2203,6 +1510,31 @@ class TestHDP23StackAdvisor(TestCase):
             }
           ]
         },
+        {
+          "href": "/api/v1/stacks/HDP/versions/2.3/services/KNOX",
+          "StackServices": {
+            "service_name": "KNOX",
+            "service_version": "0.9.0.2.3",
+            "stack_name": "HDP",
+            "stack_version": "2.3"
+          },
+          "components": [
+            {
+              "href": "/api/v1/stacks/HDP/versions/2.3/services/KNOX/components/KNOX_GATEWAY",
+              "StackServiceComponents": {
+                "advertise_version": "false",
+                "cardinality": "1+",
+                "component_category": "MASTER",
+                "component_name": "KNOX_GATEWAY",
+                "display_name": "Knox Gateway",
+                "is_client": "false",
+                "is_master": "true",
+                "hostnames": ["c6401.ambari.apache.org"]
+              },
+              "dependencies": []
+            }
+          ]
+        }
         ],
       "configurations": {
         "admin-properties": {
@@ -2214,6 +1546,7 @@ class TestHDP23StackAdvisor(TestCase):
           "properties": {
             "ranger.service.http.port": "7777",
             "ranger.service.http.enabled": "true",
+            "ranger.sso.providerurl": "",
             }
         }
       },
@@ -2256,14 +1589,16 @@ class TestHDP23StackAdvisor(TestCase):
       'ranger-admin-site': {
         'properties': {
           "ranger.audit.solr.zookeepers": "NONE",
-          "ranger.audit.source.type": "solr"
+          "ranger.audit.source.type": "solr",
+          "ranger.sso.providerurl": "https://c6401.ambari.apache.org:8443/gateway/knoxsso/api/v1/websso"
         }
       },
       'ranger-env': {
         'properties': {
           'ranger-storm-plugin-enabled': 'No',
         }
-      }
+      },
+      'ranger-knox-security': {'properties': {}}
     }
 
     recommendedConfigurations = {}
@@ -2281,341 +1616,25 @@ class TestHDP23StackAdvisor(TestCase):
     self.stackAdvisor.recommendRangerConfigurations(recommendedConfigurations, clusterData, services, None)
     self.assertEquals(recommendedConfigurations['ranger-admin-site']['properties']['ranger.audit.solr.zookeepers'], 'NONE')
 
-  def test_validateHDFSConfigurations(self):
-    properties = {}
-    recommendedDefaults = {}
-    configurations = {
-      "core-site": {"properties": {}},
-    }
-    services = self.load_json("services-hawq-3-hosts.json")
-    services["configurations"]["hdfs-site"] = {}
-    services["configurations"]["hdfs-site"]["properties"] = {}
-    hosts = {}
-
-    expected_warning = {
-        'config-type':'hdfs-site',
-        'message':'HAWQ requires dfs.allow.truncate in hdfs-site.xml set to True.',
-        'type':'configuration',
-        'config-name':'dfs.allow.truncate',
-        'level':'WARN'
-    }
-
-    # Test following cases:
-    # when HAWQ is being installed and dfs.allow.truncate is not set at all, warning
-    # when HAWQ is being installed and dfs.allow.truncate is set to True, no warning
-    # when HAWQ is being installed and dfs.allow.truncate is not set to True, warning
-    # when HAWQ is not installed and dfs.allow.truncate is not set at all, no warning
-    # when HAWQ is not installed and dfs.allow.truncate is set to True, no warning
-    # when HAWQ is not installed and dfs.allow.truncate is not set to True, no warning
-    # 1
-    problems = self.stackAdvisor.validateHDFSConfigurations(properties, recommendedDefaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 1)
-    self.assertEqual(problems[0], expected_warning)
-
-    # 2
-    services["configurations"]["hdfs-site"]["properties"]["dfs.allow.truncate"] = "True"
-    problems = self.stackAdvisor.validateHDFSConfigurations(properties, recommendedDefaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-    # 3
-    services["configurations"]["hdfs-site"]["properties"]["dfs.allow.truncate"] = "false"
-    problems = self.stackAdvisor.validateHDFSConfigurations(properties, recommendedDefaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 1)
-    self.assertEqual(problems[0], expected_warning)
-
-    del services["configurations"]["hdfs-site"]["properties"]["dfs.allow.truncate"]
-    servicesElementWithoutHAWQ = [service for service in services["services"] if service["StackServices"]["service_name"] != "HAWQ"]
-    services["services"] = servicesElementWithoutHAWQ
-
-    # 4
-    problems = self.stackAdvisor.validateHDFSConfigurations(properties, recommendedDefaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-    # 5
-    services["configurations"]["hdfs-site"]["properties"]["dfs.allow.truncate"] = "True"
-    problems = self.stackAdvisor.validateHDFSConfigurations(properties, recommendedDefaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-    # 6
-    services["configurations"]["hdfs-site"]["properties"]["dfs.allow.truncate"] = "false"
-    problems = self.stackAdvisor.validateHDFSConfigurations(properties, recommendedDefaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-
-  def test_validateHAWQSiteConfigurations(self):
-    services = self.load_json("services-hawq-3-hosts.json")
-    # setup default configuration values
-    # Test hawq_rm_yarn_address and hawq_rm_scheduler_address are set correctly
-    configurations = services["configurations"]
-    configurations["hawq-site"] = {"properties": {"hawq_rm_yarn_address": "localhost:8032",
-                                                  "hawq_rm_yarn_scheduler_address": "localhost:8030"}}
-    configurations["yarn-site"] = {"properties": {"yarn.resourcemanager.address": "host1:8050",
-                                                  "yarn.resourcemanager.scheduler.address": "host1:8030"}}
-    services["services"].append({"StackServices" : {"service_name" : "YARN"}, "components":[]})
-    properties = configurations["hawq-site"]["properties"]
-    defaults = {}
-    hosts = {}
-
-    expected_warnings = {
-      'hawq_rm_yarn_address': {
-        'config-type': 'hawq-site',
-        'message': 'Expected value: host1:8050 (this property should have the same value as the property yarn.resourcemanager.address in yarn-site)',
-        'type': 'configuration',
-        'config-name': 'hawq_rm_yarn_address',
-        'level': 'WARN'
-      },
-      'hawq_rm_yarn_scheduler_address': {
-        'config-type': 'hawq-site',
-        'message': 'Expected value: host1:8030 (this property should have the same value as the property yarn.resourcemanager.scheduler.address in yarn-site)',
-        'type': 'configuration',
-        'config-name': 'hawq_rm_yarn_scheduler_address',
-        'level': 'WARN'
-      }
-    }
-
-    serviceAdvisor = self.createHAWQServiceAdvisor()
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    problems_dict = {}
-    for problem in problems:
-      problems_dict[problem['config-name']] = problem
-    self.assertEqual(len(problems), 2)
-    self.assertEqual(problems_dict, expected_warnings)
-
-    # Test hawq_master_directory multiple directories validation
-    configurations["hawq-site"] = {"properties": {"hawq_master_directory": "/data/hawq/master",
-                                                  "hawq_segment_directory": "/data/hawq/segment"}}
-    properties = configurations["hawq-site"]["properties"]
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    problems_dict = {}
-    self.assertEqual(len(problems), 0)
-    expected_warnings = {}
-    self.assertEqual(problems_dict, expected_warnings)
-
-    configurations["hawq-site"] = {"properties": {"hawq_master_directory": "/data/hawq/master1,/data/hawq/master2",
-                                                  "hawq_segment_directory": "/data/hawq/segment1 /data/hawq/segment2"}}
-    properties = configurations["hawq-site"]["properties"]
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    problems_dict = {}
-    for problem in problems:
-      problems_dict[problem['config-name']] = problem
-    self.assertEqual(len(problems), 2)
-    expected_warnings = {
-      'hawq_master_directory': {
-        'config-type': 'hawq-site',
-        'message': 'Multiple directories for HAWQ Master directory are not allowed.',
-        'type': 'configuration',
-        'config-name': 'hawq_master_directory',
-        'level': 'ERROR'
-      },
-      'hawq_segment_directory': {
-        'config-type': 'hawq-site',
-        'message': 'Multiple directories for HAWQ Segment directory are not allowed.',
-        'type': 'configuration',
-        'config-name': 'hawq_segment_directory',
-        'level': 'ERROR'
-      }
-    }
-    self.assertEqual(problems_dict, expected_warnings)
-
-    # Test hawq_global_rm_type validation
-    services = {
-                 "services" : [
-                   {
-                     "StackServices" : {
-                     "service_name" : "HAWQ"
-                     },
-                     "components": []
-                   } ],
-                 "configurations":
-                   {
-                     "hawq-site": {
-                       "properties": {
-                         "hawq_global_rm_type": "yarn"
-                       }
-                     }
-                   }
-                }
-    properties = services["configurations"]["hawq-site"]["properties"]
-
-    # case 1: hawq_global_rm_type is set as yarn, but YARN service is not installed. Validation error expected.
-    """
-    Validation error expected is as below:
-                    [ {
-                          "config-type": "hawq-site",
-                          "message": "hawq_global_rm_type must be set to none if YARN service is not installed",
-                          "type": "configuration",
-                          "config-name": "hawq_global_rm_type",
-                          "level": "ERROR"
-                    } ]
-    """
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, services["configurations"], services, hosts)
-    self.assertEqual(len(problems), 1)
-    expected = {
-      "config-type": "hawq-site",
-      "message": "hawq_global_rm_type must be set to none if YARN service is not installed",
-      "type": "configuration",
-      "config-name": "hawq_global_rm_type",
-      "level": "ERROR"
-    }
-    self.assertEqual(problems[0], expected)
-
-    # case 2: hawq_global_rm_type is set as yarn, and YARN service is installed. No validation errors expected.
-    services["services"].append({"StackServices" : {"service_name" : "YARN"}, "components":[]})
-
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, services["configurations"], services, hosts)
-    self.assertEqual(len(problems), 0)
-
-    # Test HAWQ Master port conflict with Ambari Server Postgres port
-
-    # case 1: HAWQ Master is placed on Ambari Server and HAWQ Master port is same as Ambari Server Postgres Port
-    serviceAdvisor.isHawqMasterComponentOnAmbariServer = MagicMock(return_value=True)
-    configurations = {
-      "hawq-site": {
-        "properties":
-          {"hawq_master_address_port": "5432"}
-      }
-    }
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 1)
-    expected = {
-      "config-name": "hawq_master_address_port",
-      "config-type": "hawq-site",
-      "level": "WARN",
-      "message": "The default Postgres port (5432) on the Ambari Server conflicts with the default HAWQ Masters port. "
-                 "If you are using port 5432 for Postgres, you must either deploy the HAWQ Masters on a different host "
-                 "or configure a different port for the HAWQ Masters in the HAWQ Configuration page.",
-      "type": "configuration"}
-    self.assertEqual(problems[0], expected)
-
-    # case 2: HAWQ Master is placed on Ambari Server and HAWQ Master port is different from  Ambari Server Postgres Port
-    serviceAdvisor.isHawqMasterComponentOnAmbariServer = MagicMock(return_value=True)
-    configurations["hawq-site"]["properties"]["hawq_master_address_port"] = "10432"
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-    # case 3: HAWQ Master is not placed on Ambari Server and HAWQ Master port is same as  Ambari Server Postgres Port
-    serviceAdvisor.isHawqMasterComponentOnAmbariServer = MagicMock(return_value=False)
-    configurations["hawq-site"]["properties"]["hawq_master_address_port"] = "5432"
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-    # case 4: HAWQ Master is not placed on Ambari Server and HAWQ Master port is different from  Ambari Server Postgres Port
-    serviceAdvisor.isHawqMasterComponentOnAmbariServer = MagicMock(return_value=False)
-    configurations["hawq-site"]["properties"]["hawq_master_address_port"] = "10432"
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-    # -------- test query limits warning ----------
-    services = {
-      "services":  [
-        { "StackServices": {"service_name": "HAWQ"},
-          "components": [{
-            "StackServiceComponents": {
-              "component_name": "HAWQSEGMENT",
-              "hostnames": []
-            }}]
-          }],
-      "configurations": {}
-    }
-    # setup default configuration values
-    configurations = services["configurations"]
-    configurations["hawq-site"] = {"properties": {"default_hash_table_bucket_number": "600",
-                                                  "hawq_rm_nvseg_perquery_limit": "500"}}
-    properties = configurations["hawq-site"]["properties"]
-    defaults = {}
-    hosts = {}
-
-    expected = {
-      'config-type': 'hawq-site',
-      'message': 'Default buckets for Hash Distributed tables parameter value should not be greater than the value of Virtual Segments Limit per Query (Total) parameter, currently set to 500.',
-      'type': 'configuration',
-      'config-name': 'default_hash_table_bucket_number',
-      'level': 'ERROR'
-    }
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 1)
-    self.assertEqual(problems[0], expected)
-
-    configurations["hawq-site"] = {"properties": {"default_hash_table_bucket_number": "500",
-                                                  "hawq_rm_nvseg_perquery_limit": "500"}}
-    properties = configurations["hawq-site"]["properties"]
-    problems = serviceAdvisor.validateHAWQSiteConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-
-  def test_validateHAWQHdfsClientConfigurations(self):
-    services = {
-      "services":  [
-        { "StackServices": {"service_name": "HAWQ"},
-          "components": [{
-            "StackServiceComponents": {
-              "component_name": "HAWQSEGMENT",
-              "hostnames": []
-            }}]
-          }],
-      "configurations": {}
-    }
-    # setup default configuration values
-    configurations = services["configurations"]
-    configurations["hdfs-client"] = {"properties": {"output.replace-datanode-on-failure": "true"}}
-    properties = configurations["hdfs-client"]["properties"]
-    defaults = {}
-    hosts = {}
-
-    # 1. Try with no hosts
-    expected = {
-        'config-type': 'hdfs-client',
-        'message': 'output.replace-datanode-on-failure should be set to false (unchecked) for clusters with 3 or less HAWQ Segments',
-        'type': 'configuration',
-        'config-name': 'output.replace-datanode-on-failure',
-        'level': 'WARN'
-    }
-
-    serviceAdvisor = self.createHAWQServiceAdvisor()
-    problems = serviceAdvisor.validateHAWQHdfsClientConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 1)
-    self.assertEqual(problems[0], expected)
-
-    # 2. Try with 3 hosts
-    services["services"][0]["components"][0]["StackServiceComponents"]["hostnames"] = ["host1", "host2", "host3"]
-    problems = serviceAdvisor.validateHAWQHdfsClientConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 1)
-    self.assertEqual(problems[0], expected)
-
-    # 3. Try with 4 hosts - default value
-    services["services"][0]["components"][0]["StackServiceComponents"]["hostnames"] = ["host1", "host2", "host3", "host4"]
-    problems = serviceAdvisor.validateHAWQHdfsClientConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 0)
-
-    # 4. Try with 4 hosts
-    properties = {"output.replace-datanode-on-failure": "false"}
-    expected = {
-      'config-type': 'hdfs-client',
-      'message': 'output.replace-datanode-on-failure should be set to true (checked) for clusters with more than 3 HAWQ Segments',
-      'type': 'configuration',
-      'config-name': 'output.replace-datanode-on-failure',
-      'level': 'WARN'
-    }
-    problems = serviceAdvisor.validateHAWQHdfsClientConfigurations(self.stackAdvisor, properties, defaults, configurations, services, hosts)
-    self.assertEqual(len(problems), 1)
-    self.assertEqual(problems[0], expected)
-
   def test_recommendRangerKMSConfigurations(self):
     clusterData = {}
     services = {
+      "ambari-server-properties": {
+        "ambari-server.user": "root"
+        },
       "Versions": {
         "stack_version" : "2.3",
         },
       "services": [
         {
           "StackServices": {
-            "service_name": "RANGER",
+            "service_name": "RANGER_KMS",
             "service_version": "0.5.0.2.3"
           },
           "components": [
             {
               "StackServiceComponents": {
-                "component_name": "RANGER_ADMIN",
+                "component_name": "RANGER_KMS_SERVER",
                 "hostnames": ["host1"]
               }
             }
@@ -2630,6 +1649,23 @@ class TestHDP23StackAdvisor(TestCase):
         },
         "core-site": {
           "properties": {
+            "fs.defaultFS": "hdfs://host1:8020"
+          }
+        },
+        'ranger-kms-audit': {
+          'properties': {
+          }
+        },
+        'kms-properties': {
+          'properties': {
+            'DB_FLAVOR': 'ORACLE',
+            'db_host' : 'c6401.ambari.apache.org:1521:XE',
+            'db_name' : "XE"
+          }
+        },
+        'cluster-env': {
+          'properties': {
+            'security_enabled': 'false'
           }
         }
       },
@@ -2640,10 +1676,27 @@ class TestHDP23StackAdvisor(TestCase):
         'properties': {}
       },
       'dbks-site': {
-        'properties': {}
+        'properties': {
+          "ranger.ks.jpa.jdbc.driver" : "oracle.jdbc.driver.OracleDriver",
+          "ranger.ks.jpa.jdbc.url" : "jdbc:oracle:thin:@c6401.ambari.apache.org:1521:XE"
+        }
       },
       'core-site': {
         'properties': {
+        }
+      },
+      'ranger-kms-audit': {
+          'properties': {
+          }
+      },
+      'kms-site': {
+        'properties': {
+        },
+        'property_attributes': {
+        'hadoop.kms.proxyuser.HTTP.hosts': {'delete': 'true'},
+        'hadoop.kms.proxyuser.HTTP.users': {'delete': 'true'},
+        'hadoop.kms.proxyuser.root.hosts': {'delete': 'true'},
+        'hadoop.kms.proxyuser.root.users': {'delete': 'true'}
         }
       }
     }
@@ -2659,17 +1712,34 @@ class TestHDP23StackAdvisor(TestCase):
         "service_name": "KERBEROS"
       }
     })
+    services['configurations']['cluster-env']['properties']['security_enabled'] = "true"
+    services['configurations']['cluster-env']['properties']['ambari_principal_name'] = "ambari-cl1@EXAMPLE.COM"
 
     expected = {
       'kms-properties': {
         'properties': {}
       },
       'dbks-site': {
-        'properties': {}
+        'properties': {
+          "ranger.ks.jpa.jdbc.driver" : "oracle.jdbc.driver.OracleDriver",
+          "ranger.ks.jpa.jdbc.url" : "jdbc:oracle:thin:@c6401.ambari.apache.org:1521:XE"
+        }
       },
       'core-site': {
         'properties': {
           'hadoop.proxyuser.kmsname.groups': '*'
+        }
+      },
+      'ranger-kms-audit': {
+          'properties': {
+          }
+      },
+      'kms-site': {
+        'properties': {
+        'hadoop.kms.proxyuser.HTTP.hosts': '*',
+        'hadoop.kms.proxyuser.HTTP.users': '*',
+        'hadoop.kms.proxyuser.ambari-cl1.hosts': '*',
+        'hadoop.kms.proxyuser.ambari-cl1.users': '*'
         }
       }
     }
@@ -2711,6 +1781,11 @@ class TestHDP23StackAdvisor(TestCase):
         "properties": {
           "storm.topology.submission.notifier.plugin.class": "foo"
         }
+      },
+      "ranger-storm-plugin-properties": {
+        "properties": {
+          "ranger-storm-plugin-enabled": "No"
+        }
       }
     }
     clusterData = {
@@ -2725,6 +1800,19 @@ class TestHDP23StackAdvisor(TestCase):
       'storm-site': {
         'properties': {
           'storm.topology.submission.notifier.plugin.class': 'foo,org.apache.atlas.storm.hook.StormAtlasHook',
+        },
+        "property_attributes":{
+          'nimbus.authorizer': {'delete':'true'}
+        }
+      },
+      "ranger-storm-plugin-properties": {
+        "properties": {
+          "ranger-storm-plugin-enabled": "No"
+        }
+      },
+      "storm-env": {
+        "properties": {
+          "storm.atlas.hook": "true"
         }
       }
     }
@@ -2759,92 +1847,17 @@ class TestHDP23StackAdvisor(TestCase):
         "storm-site": {
           "properties": {
             "storm.topology.submission.notifier.plugin.class": "foo"
-          }
-        }
-      },
-      "changed-configurations": [ ]
-
-    }
-    hosts = {
-      "items" : [
-        {
-          "href" : "/api/v1/hosts/c6401.ambari.apache.org",
-          "Hosts" : {
-            "cpu_count" : 1,
-            "host_name" : "c6401.ambari.apache.org",
-            "os_arch" : "x86_64",
-            "os_type" : "centos6",
-            "ph_cpu_count" : 1,
-            "public_host_name" : "c6401.ambari.apache.org",
-            "rack_info" : "/default-rack",
-            "total_mem" : 1922680
-          }
-        }
-      ]
-    }
-
-    self.stackAdvisor.recommendStormConfigurations(configurations, clusterData, services, hosts)
-    self.assertEquals(configurations, expected)
-
-    services['ambari-server-properties'] = {'java.home': '/usr/jdk64/jdk1.7.3_23'}
-    self.stackAdvisor.recommendStormConfigurations(configurations, clusterData, services, hosts)
-    self.assertEquals(configurations, expected)
-
-  def test_recommendFalconConfigurations(self):
-    self.maxDiff = None
-    configurations = {
-      "falcon-startup.properties": {
-        "properties": {
-          "*.application.services": "foo"
-        }
-      }
-    }
-    clusterData = {
-      "cpu": 4,
-      "mapMemory": 3000,
-      "amMemory": 2000,
-      "reduceMemory": 2056,
-      "containers": 3,
-      "ramPerContainer": 256
-    }
-    expected = {
-      'falcon-startup.properties': {
-        'properties': {
-          '*.application.services': 'foo,org.apache.falcon.atlas.service.AtlasService',
-        }
-      }
-    }
-    services = {
-      "services": [
-        {
-          "href": "/api/v1/stacks/HDP/versions/2.2/services/ATLAS",
-          "StackServices": {
-            "service_name": "ATLAS",
-            "service_version": "2.6.0.2.2",
-            "stack_name": "HDP",
-            "stack_version": "2.3"
           },
-          "components": [
-            {
-              "StackServiceComponents": {
-                "advertise_version": "false",
-                "cardinality": "1",
-                "component_category": "MASTER",
-                "component_name": "ATLAS_SERVER",
-                "display_name": "Atlas Server",
-                "is_client": "false",
-                "is_master": "true",
-                "hostnames": []
-              },
-              "dependencies": []
-            }
-          ]
+          "property-attributes":{}
         },
-      ],
-      "configurations": {
-        "falcon-startup.properties": {
+        "ranger-storm-plugin-properties": {
           "properties": {
-            "*.application.services": "foo"
+            "ranger-storm-plugin-enabled": "No"
+          }
+        },
+        "storm-env": {
+          "properties": {
+          "storm.atlas.hook": "false"
           }
         }
       },
@@ -2869,12 +1882,17 @@ class TestHDP23StackAdvisor(TestCase):
       ]
     }
 
-    self.stackAdvisor.recommendFalconConfigurations(configurations, clusterData, services, hosts)
+    self.stackAdvisor.recommendStormConfigurations(configurations, clusterData, services, hosts)
     self.assertEquals(configurations, expected)
 
     services['ambari-server-properties'] = {'java.home': '/usr/jdk64/jdk1.7.3_23'}
-    self.stackAdvisor.recommendFalconConfigurations(configurations, clusterData, services, hosts)
+    self.stackAdvisor.recommendStormConfigurations(configurations, clusterData, services, hosts)
     self.assertEquals(configurations, expected)
+
+    services["services"] = []
+    services["configurations"]["storm-site"]["properties"]["storm.topology.submission.notifier.plugin.class"] = "org.apache.atlas.storm.hook.StormAtlasHook"
+    self.stackAdvisor.recommendStormConfigurations(configurations, clusterData, services, hosts)
+    self.assertEquals(True, "storm.topology.submission.notifier.plugin.class" in configurations["storm-site"]["property_attributes"])
 
   def test_recommendSqoopConfigurations(self):
     self.maxDiff = None
@@ -2897,6 +1915,11 @@ class TestHDP23StackAdvisor(TestCase):
       'sqoop-site': {
         'properties': {
           'sqoop.job.data.publish.class': 'org.apache.atlas.sqoop.hook.SqoopHook',
+        }
+      },
+      'sqoop-env': {
+        'properties': {
+          'sqoop.atlas.hook': 'true'
         }
       }
     }
@@ -2932,6 +1955,11 @@ class TestHDP23StackAdvisor(TestCase):
           "properties": {
             "sqoop.job.data.publish.class": "foo"
           }
+        },
+        "sqoop-env": {
+          "properties": {
+            "sqoop.atlas.hook": "false"
+          }
         }
       },
       "changed-configurations": [ ]
@@ -2962,104 +1990,48 @@ class TestHDP23StackAdvisor(TestCase):
     self.stackAdvisor.recommendSqoopConfigurations(configurations, clusterData, services, hosts)
     self.assertEquals(configurations, expected)
 
-  def test_recommendLogsearchConfiguration(self):
-    configurations = {
-      "logsearch-properties": {
-        "properties": {
-          "logsearch.collection.service.logs.numshards" : "5",
-          "logsearch.collection.service.logs.replication.factor": "0",
-          "logsearch.collection.audit.logs.numshards" : "5",
-          "logsearch.collection.audit.logs.replication.factor": "0"
-        }
+  def test_validateRangerConfigurationsEnv(self):
+    properties = {
+      "ranger-kafka-plugin-enabled": "Yes",
       }
-    }
+    recommendedDefaults = {
+      "ranger-kafka-plugin-enabled": "No",
+      }
 
-    clusterData = {
-      "cpu": 4,
-      "mapMemory": 3000,
-      "amMemory": 2000,
-      "reduceMemory": 2056,
-      "containers": 3,
-      "ramPerContainer": 256
-    }
-    expected = {
-      'logsearch-properties': {
-        'properties': {
-          "logsearch.collection.service.logs.numshards" : "2",
-          "logsearch.collection.service.logs.replication.factor": "1",
-          "logsearch.collection.audit.logs.numshards" : "2",
-          "logsearch.collection.audit.logs.replication.factor": "1"
-        },
-        "property_attributes": {
-          "logsearch.collection.service.logs.numshards": {
-            "minimum": "1",
-            "maximum": "3"
-          },
-          "logsearch.collection.audit.logs.numshards": {
-            "minimum": "1",
-            "maximum": "3"
+    configurations = {
+      "cluster-env": {
+        "properties": {
+          "security_enabled": "false",
           }
-        }
       }
     }
     services = {
-      "services": [
-        {
-          "href": "/api/v1/stacks/HDP/versions/2.3/services/LOGSEARCH",
-          "StackServices": {
-            "service_name": "LOGSEARCH",
-            "service_version": "2.6.0.2.2",
-            "stack_name": "HDP",
-            "stack_version": "2.3"
-          },
-          "components": [
-            {
-              "StackServiceComponents": {
-                "advertise_version": "false",
-                "cardinality": "1",
-                "component_category": "MASTER",
-                "component_name": "LOGSEARCH_SOLR",
-                "display_name": "Log Search Solr Instance",
-                "is_client": "false",
-                "is_master": "true",
-                "hostnames": []
-              },
-              "dependencies": []
+      "services":
+        [
+          {
+            "StackServices": {
+              "service_name" : "RANGER"
             }
-          ]
-        },
-      ],
+          }
+        ],
       "configurations": {
-        "logsearch-properties": {
+        "cluster-env": {
           "properties": {
-            "logsearch.collection.numshards" : "5",
-            "logsearch.collection.replication.factor": "0"
-          }
+            "security_enabled" : "false"
+          },
+          "property_attributes": {}
         }
-      },
-      "changed-configurations": [ ]
-
+      }
     }
 
-    hosts = {
-      "items" : [
-        {
-          "href" : "/api/v1/hosts/c6401.ambari.apache.org",
-          "Hosts" : {
-            "cpu_count" : 1,
-            "host_name" : "c6401.ambari.apache.org",
-            "os_arch" : "x86_64",
-            "os_type" : "centos6",
-            "ph_cpu_count" : 1,
-            "public_host_name" : "c6401.ambari.apache.org",
-            "rack_info" : "/default-rack",
-            "total_mem" : 1922680
-          }
-        }
-      ]
-    }
-    def return_c6401_hostname(services, service_name, component_name):
-      return ["c6401.ambari.apache.org"]
-    self.stackAdvisor.getComponentHostNames = return_c6401_hostname
-    self.stackAdvisor.recommendLogsearchConfigurations(configurations, clusterData, services, hosts)
-    self.assertEquals(configurations, expected)
+    # Test with ranger plugin enabled, validation fails
+    res_expected = [{'config-type': 'ranger-env', 'message': 'Ranger Kafka plugin should not be enabled in non-kerberos environment.', 'type': 'configuration', 'config-name': 'ranger-kafka-plugin-enabled', 'level': 'WARN'}]
+    res = self.stackAdvisor.validateRangerConfigurationsEnv(properties, recommendedDefaults, configurations, services, {})
+    self.assertEquals(res, res_expected)
+
+    # Test for security_enabled is true
+    services['configurations']['cluster-env']['properties']['security_enabled'] = "true"
+    configurations['cluster-env']['properties']['security_enabled'] = "true"
+    res_expected = []
+    res = self.stackAdvisor.validateRangerConfigurationsEnv(properties, recommendedDefaults, configurations, services, {})
+    self.assertEquals(res, res_expected)

@@ -22,13 +22,13 @@ var date = require('utils/date/date');
 describe('date', function () {
 
   var incorrectTests = Em.A([
-    {t: null},
-    {t: ''},
-    {t: false},
-    {t: []},
-    {t: {}},
-    {t: undefined},
-    {t: function(){}}
+    {m: 'null', t: null},
+    {m: 'empty', t: ''},
+    {m: 'false', t: false},
+    {m:'[]' , t: []},
+    {m: '{}', t: {}},
+    {m: 'undefined', t: undefined},
+    {m: 'empty function', t: function(){}}
   ]);
 
   describe('#dateFormatZeroFirst()', function() {
@@ -68,40 +68,49 @@ describe('date', function () {
     });
   });
 
+  describe('#endTime()', function() {
+    var today = new Date();
+    var testDate = new Date(1349752195000);
+    var tests = [
+      { t: 1349752195000, e: testDate.toDateString() + ' {0}:{1}'.format(date.dateFormatZeroFirst(testDate.getHours()), date.dateFormatZeroFirst(testDate.getMinutes())) },
+      { t: -10000000, e: 'Not finished' },
+      { t: today.getTime(), e: 'Today {0}:{1}'.format(date.dateFormatZeroFirst(today.getHours()), date.dateFormatZeroFirst(today.getMinutes())) },
+      { t: today, e: ''}
+    ];
+    tests.forEach(function(test) {
+      var testMessage = 'should convert {0} to {1}'.format(test.t, test.e);
+      it(testMessage, function() {
+        expect(date.endTime(test.t)).to.be.eql(test.e);
+      });
+    });
+  });
+
   describe('#timingFormat', function() {
     var tests = Em.A([
-      {i: '30', e:'30 ms'},
-      {i: '300', e:'300 ms'},
-      {i: '999', e:'999 ms'},
-      {i: '1000', e:'1.00 secs'},
-      {i: '3000', e:'3.00 secs'},
-      {i: '35000', e:'35.00 secs'},
-      {i: '350000', e:'350.00 secs'},
-      {i: '999999', e:'1000.00 secs'},
-      {i: '1000000', e:'16.67 mins'},
-      {i: '3500000', e:'58.33 mins'},
-      {i: '35000000', e:'9.72 hours'},
-      {i: '350000000', e:'4.05 days'},
-      {i: '3500000000', e:'40.51 days'},
-      {i: '35000000000', e:'405.09 days'}
+      {i: '0', e:'0s'},
+      {i: '1', e:'1ms'},
+      {i: '999', e:'999ms'},
+      {i: '1000', e:'1s'},
+      {i: '59999', e:'59s 999ms'},
+      {i: '60000', e:'1m'},
+      {i: '61001', e:'1m 1s'},
+      {i: '3599999', e:'59m 59s'},
+      {i: '3600000', e:'1h'},
+      {i: '86399999', e:'23h 59m 59s'},
+      {i: '86400000', e:'1d'},
+      {i: '86494321', e:'1d 1m'},
+      {i: '96494321', e:'1d 2h 48m'}
     ]);
 
-    describe('Correct data', function(){
-      tests.forEach(function(test) {
-        it(test.t, function() {
-          expect(date.timingFormat(test.i)).to.equal(test.e);
-        });
-      });
+    it('Corrupted data', function() {
+      expect(date.timingFormat(null)).to.be.null;
     });
 
-    describe('Incorrect data', function(){
-      incorrectTests.forEach(function(test) {
-        it(test.t, function() {
-          expect(date.timingFormat(test.t)).to.equal(null);
-        });
+    tests.forEach(function(test) {
+      it(test.i, function() {
+        expect(date.timingFormat(test.i)).to.equal(test.e);
       });
     });
-
   });
 
   describe('#duration', function() {
@@ -131,12 +140,12 @@ describe('date', function () {
       {
         startTimestamp: 1349752195000,
         endTimestamp: 1349752199000,
-        e: '4.00 secs'
+        e: '4s'
       },
       {
         startTimestamp: 1349752195000,
         endTimestamp: 1367752195000,
-        e: '208.33 days'
+        e: '208d 8h'
       },
       {
         startTimestamp: -10000000,
@@ -147,13 +156,13 @@ describe('date', function () {
         startTimestamp: 1349752195000,
         endTimestamp: -1,
         stubbed: true,
-        e: '0 secs'
+        e: '0s'
       },
       {
         startTimestamp: 100000000,
         endTimestamp: -1,
         stubbed: true,
-        e: '19.00 secs'
+        e: '19s'
       }
     ];
 

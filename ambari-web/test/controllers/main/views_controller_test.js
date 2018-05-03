@@ -103,16 +103,32 @@ describe('MainViewsController', function () {
       ]
     };
 
-    it("should parse view instance data", function () {
+    var viewInstanceFields = {
+      iconPath: 'icon_path1',
+      label: 'label1',
+      visible: true,
+      version: '1.0',
+      description: 'desc1',
+      href: 'path1/'
+    };
+    
+    beforeEach(function () {
       mainViewsController.loadViewInstancesSuccess(data);
-      expect(JSON.parse(JSON.stringify(mainViewsController.get('ambariViews')))).to.be.eql([{
-        "iconPath": "icon_path1",
-        "label": "label1",
-        "visible": true,
-        "version": "1.0",
-        "description": "desc1",
-        "href": "path1/"
-      }]);
+    });
+
+    it('one view instance is parsed', function () {
+      expect(mainViewsController.get('ambariViews.length')).to.be.equal(1);
+    });
+
+
+    Object.keys(viewInstanceFields).forEach(function (fieldName) {
+      it(JSON.stringify(fieldName) + ' is set correctly', function () {
+        expect(mainViewsController.get('ambariViews.firstObject.' + fieldName)).to.be.equal(viewInstanceFields[fieldName]);
+      });
+    });
+
+
+    it('`isDataLoaded` is set `true` when view instances are parsed', function () {
       expect(mainViewsController.get('isDataLoaded')).to.be.true;
     });
   });
@@ -127,28 +143,34 @@ describe('MainViewsController', function () {
   });
 
   describe("#setView", function () {
+    var mock = {
+      document: {
+        write: Em.K
+      },
+      focus: Em.K
+    };
 
     beforeEach(function () {
-      sinon.stub(App.router, 'route');
+      sinon.stub(window, 'open').returns(mock);
     });
     afterEach(function () {
-      App.router.route.restore();
+      window.open.restore();
     });
 
     it("no context", function () {
       mainViewsController.setView({});
-      expect(App.router.route.called).to.be.false;
+      expect(window.open.called).to.be.false;
     });
 
     it("context exist", function () {
       mainViewsController.setView({
-        context: {
+        context: App.ViewInstance.create({
           viewName: 'view1',
           version: '1',
           instanceName: 'instance1'
-        }
+        })
       });
-      expect(App.router.route.calledWith('main/views/view1/1/instance1')).to.be.true;
+      expect(window.open.called).to.be.true;
     });
   });
 

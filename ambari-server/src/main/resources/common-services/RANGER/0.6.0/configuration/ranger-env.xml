@@ -20,10 +20,98 @@
  */
 -->
 <configuration>
-
   <property>
     <name>xasecure.audit.destination.db</name>
     <deleted>true</deleted>
+    <on-ambari-upgrade add="false"/>
+  </property>
+  <property>
+    <name>ranger_solr_config_set</name>
+    <value>ranger_audits</value>
+    <on-ambari-upgrade add="true"/>
+  </property>
+  <property>
+    <name>ranger_solr_collection_name</name>
+    <value>ranger_audits</value>
+    <on-ambari-upgrade add="true"/>
+  </property>
+  <property>
+    <name>ranger_solr_shards</name>
+    <value>1</value>
+    <on-ambari-upgrade add="true"/>
+  </property>
+  <property>
+    <name>ranger_solr_replication_factor</name>
+    <value>1</value>
+    <on-ambari-upgrade add="true"/>
+  </property>
+  <property>
+    <name>ranger-atlas-plugin-enabled</name>
+    <value>No</value>
+    <display-name>Atlas Ranger Plugin</display-name>
+    <description>Enable Atlas Ranger plugin</description>
+    <value-attributes>
+      <overridable>false</overridable>
+      <type>value-list</type>
+      <entries>
+        <entry>
+          <value>Yes</value>
+          <label>ON</label>
+        </entry>
+        <entry>
+          <value>No</value>
+          <label>OFF</label>
+        </entry>
+      </entries>
+      <selection-cardinality>1</selection-cardinality>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
+  </property>
+
+  <property>
+    <name>is_external_solrCloud_enabled</name>
+    <display-name>External SolrCloud</display-name>
+    <value>false</value>
+    <description>Using Externally managed solr cloud ?</description>
+    <value-attributes>
+      <overridable>false</overridable>
+      <type>value-list</type>
+      <entries>
+        <entry>
+          <value>true</value>
+          <label>ON</label>
+        </entry>
+        <entry>
+          <value>false</value>
+          <label>OFF</label>
+        </entry>
+      </entries>
+      <selection-cardinality>1</selection-cardinality>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
+  </property>
+
+  <property>
+    <name>is_external_solrCloud_kerberos</name>
+    <display-name>External SolrCloud kerberos</display-name>
+    <value>false</value>
+    <description>Is Externally managed solr cloud kerberos ?</description>
+    <value-attributes>
+      <overridable>false</overridable>
+      <type>value-list</type>
+      <entries>
+        <entry>
+          <value>true</value>
+          <label>ON</label>
+        </entry>
+        <entry>
+          <value>false</value>
+          <label>OFF</label>
+        </entry>
+      </entries>
+      <selection-cardinality>1</selection-cardinality>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
 
 </configuration>

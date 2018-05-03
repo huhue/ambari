@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -21,6 +21,7 @@ package org.apache.ambari.server.controller.internal;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -35,19 +36,24 @@ import org.apache.ambari.server.api.services.stackadvisor.StackAdvisorRequest;
 import org.apache.ambari.server.api.services.stackadvisor.StackAdvisorRequest.StackAdvisorRequestBuilder;
 import org.apache.ambari.server.api.services.stackadvisor.StackAdvisorRequest.StackAdvisorRequestType;
 import org.apache.ambari.server.api.services.stackadvisor.recommendations.RecommendationResponse;
+import org.apache.ambari.server.configuration.Configuration;
 import org.apache.ambari.server.controller.AmbariManagementController;
 import org.apache.ambari.server.controller.spi.Request;
+import org.apache.ambari.server.controller.spi.Resource;
 import org.apache.ambari.server.controller.spi.Resource.Type;
 import org.apache.ambari.server.controller.utilities.PropertyHelper;
+import org.apache.ambari.server.state.ChangedConfigInfo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.inject.Inject;
-import org.apache.ambari.server.state.ChangedConfigInfo;
-import org.apache.ambari.server.state.PropertyDependencyInfo;
 
 /**
  * Abstract superclass for recommendations and validations.
  */
 public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvider {
+
+  private static final Logger LOG = LoggerFactory.getLogger(StackAdvisorResourceProvider.class);
 
   protected static final String STACK_NAME_PROPERTY_ID = PropertyHelper.getPropertyId("Versions",
       "stack_name");
@@ -58,6 +64,9 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
   private static final String SERVICES_PROPERTY = "services";
 
   private static final String CHANGED_CONFIGURATIONS_PROPERTY = "changed_configurations";
+  private static final String OPERATION_PROPERTY = "operation";
+  private static final String OPERATION_DETAILS_PROPERTY = "operation_details";
+
 
   private static final String BLUEPRINT_HOST_GROUPS_PROPERTY = "recommendations/blueprint/host_groups";
   private static final String BINDING_HOST_GROUPS_PROPERTY = "recommendations/blueprint_cluster_binding/host_groups";
@@ -75,15 +84,19 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
   private static final String CONFIG_GROUPS_HOSTS_PROPERTY = "hosts";
 
   protected static StackAdvisorHelper saHelper;
+  protected static Configuration configuration;
+  protected static final String USER_CONTEXT_OPERATION_PROPERTY = "user_context/operation";
+  protected static final String USER_CONTEXT_OPERATION_DETAILS_PROPERTY = "user_context/operation_details";
 
   @Inject
-  public static void init(StackAdvisorHelper instance) {
+  public static void init(StackAdvisorHelper instance, Configuration serverConfig) {
     saHelper = instance;
+    configuration = serverConfig;
   }
 
-  protected StackAdvisorResourceProvider(Set<String> propertyIds, Map<Type, String> keyPropertyIds,
-      AmbariManagementController managementController) {
-    super(propertyIds, keyPropertyIds, managementController);
+  protected StackAdvisorResourceProvider(Resource.Type type, Set<String> propertyIds, Map<Type, String> keyPropertyIds,
+                                         AmbariManagementController managementController) {
+    super(type, propertyIds, keyPropertyIds, managementController);
   }
 
   protected abstract String getRequestTypePropertyId();
@@ -102,17 +115,33 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
        * 
        * @see JsonRequestBodyParser for arrays parsing
        */
-      List<String> hosts = (List<String>) getRequestProperty(request, HOST_PROPERTY);
-      List<String> services = (List<String>) getRequestProperty(request, SERVICES_PROPERTY);
+      Object hostsObject = getRequestProperty(request, HOST_PROPERTY);
+      if (hostsObject instanceof LinkedHashSet) {
+        if (((LinkedHashSet)hostsObject).isEmpty()) {
+          throw new Exception("Empty host list passed to recommendation service");
+        }
+      }
+      List<String> hosts = (List<String>) hostsObject;
+
+      Object servicesObject = getRequestProperty(request, SERVICES_PROPERTY);
+      if (servicesObject instanceof LinkedHashSet) {
+        if (((LinkedHashSet)servicesObject).isEmpty()) {
+          throw new Exception("Empty service list passed to recommendation service");
+        }
+      }
+      List<String> services = (List<String>) servicesObject;
+
       Map<String, Set<String>> hgComponentsMap = calculateHostGroupComponentsMap(request);
       Map<String, Set<String>> hgHostsMap = calculateHostGroupHostsMap(request);
       Map<String, Set<String>> componentHostsMap = calculateComponentHostsMap(hgComponentsMap,
           hgHostsMap);
       Map<String, Map<String, Map<String, String>>> configurations = calculateConfigurations(request);
+      Map<String, String> userContext = readUserContext(request);
+      Boolean gplLicenseAccepted = configuration.getGplLicenseAccepted();
 
       List<ChangedConfigInfo> changedConfigurations =
         requestType == StackAdvisorRequestType.CONFIGURATION_DEPENDENCIES ?
-          calculateChangedConfigurations(request) : Collections.<ChangedConfigInfo>emptyList();
+          calculateChangedConfigurations(request) : Collections.emptyList();
 
       Set<RecommendationResponse.ConfigGroup> configGroups = calculateConfigGroups(request);
       return StackAdvisorRequestBuilder.
@@ -122,12 +151,13 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
         withComponentHostsMap(componentHostsMap).
         withConfigurations(configurations).
         withConfigGroups(configGroups).
-        withChangedConfigurations(changedConfigurations).build();
+        withChangedConfigurations(changedConfigurations).
+        withUserContext(userContext).
+        withGPLLicenseAccepted(gplLicenseAccepted).build();
     } catch (Exception e) {
-      LOG.warn("Error occured during preparation of stack advisor request", e);
+      LOG.warn("Error occurred during preparation of stack advisor request", e);
       Response response = Response.status(Status.BAD_REQUEST)
           .entity(String.format("Request body is not correct, error: %s", e.getMessage())).build();
-      // TODO: Hosts and services must not be empty
       throw new WebApplicationException(response);
     }
   }
@@ -143,7 +173,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
   private Map<String, Set<String>> calculateHostGroupComponentsMap(Request request) {
     Set<Map<String, Object>> hostGroups = (Set<Map<String, Object>>) getRequestProperty(request,
         BLUEPRINT_HOST_GROUPS_PROPERTY);
-    Map<String, Set<String>> map = new HashMap<String, Set<String>>();
+    Map<String, Set<String>> map = new HashMap<>();
     if (hostGroups != null) {
       for (Map<String, Object> hostGroup : hostGroups) {
         String hostGroupName = (String) hostGroup.get(BLUEPRINT_HOST_GROUPS_NAME_PROPERTY);
@@ -151,7 +181,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
         Set<Map<String, Object>> componentsSet = (Set<Map<String, Object>>) hostGroup
             .get(BLUEPRINT_HOST_GROUPS_COMPONENTS_PROPERTY);
 
-        Set<String> components = new HashSet<String>();
+        Set<String> components = new HashSet<>();
         for (Map<String, Object> component : componentsSet) {
           components.add((String) component.get(BLUEPRINT_HOST_GROUPS_COMPONENTS_NAME_PROPERTY));
         }
@@ -174,7 +204,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
   private Map<String, Set<String>> calculateHostGroupHostsMap(Request request) {
     Set<Map<String, Object>> bindingHostGroups = (Set<Map<String, Object>>) getRequestProperty(
         request, BINDING_HOST_GROUPS_PROPERTY);
-    Map<String, Set<String>> map = new HashMap<String, Set<String>>();
+    Map<String, Set<String>> map = new HashMap<>();
     if (bindingHostGroups != null) {
       for (Map<String, Object> hostGroup : bindingHostGroups) {
         String hostGroupName = (String) hostGroup.get(BINDING_HOST_GROUPS_NAME_PROPERTY);
@@ -182,7 +212,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
         Set<Map<String, Object>> hostsSet = (Set<Map<String, Object>>) hostGroup
             .get(BINDING_HOST_GROUPS_HOSTS_PROPERTY);
 
-        Set<String> hosts = new HashSet<String>();
+        Set<String> hosts = new HashSet<>();
         for (Map<String, Object> host : hostsSet) {
           hosts.add((String) host.get(BINDING_HOST_GROUPS_HOSTS_NAME_PROPERTY));
         }
@@ -196,7 +226,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
 
   protected List<ChangedConfigInfo> calculateChangedConfigurations(Request request) {
     List<ChangedConfigInfo> configs =
-      new LinkedList<ChangedConfigInfo>();
+      new LinkedList<>();
     HashSet<HashMap<String, String>> changedConfigs =
       (HashSet<HashMap<String, String>>) getRequestProperty(request, CHANGED_CONFIGURATIONS_PROPERTY);
     for (HashMap<String, String> props: changedConfigs) {
@@ -209,7 +239,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
   protected Set<RecommendationResponse.ConfigGroup> calculateConfigGroups(Request request) {
 
     Set<RecommendationResponse.ConfigGroup> configGroups =
-      new HashSet<RecommendationResponse.ConfigGroup>();
+      new HashSet<>();
 
     Set<HashMap<String, Object>> configGroupsProperties =
       (HashSet<HashMap<String, Object>>) getRequestProperty(request, CONFIG_GROUPS_PROPERTY);
@@ -228,7 +258,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
               RecommendationResponse.BlueprintConfigurations configurations =
                 new RecommendationResponse.BlueprintConfigurations();
               configGroup.getConfigurations().put(siteName, configurations);
-              configGroup.getConfigurations().get(siteName).setProperties(new HashMap<String, String>());
+              configGroup.getConfigurations().get(siteName).setProperties(new HashMap<>());
             }
             configGroup.getConfigurations().get(siteName).getProperties().put(propertyName, entry.getValue());
           }
@@ -240,10 +270,30 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
     return configGroups;
   }
 
+  /**
+   * Parse the user contex for the call. Typical structure
+   * { "operation" : "createCluster" }
+   * { "operation" : "addService", "services" : "Atlas,Slider" }
+   * @param request
+   * @return
+   */
+  protected Map<String, String> readUserContext(Request request) {
+    HashMap<String, String> userContext = new HashMap<>();
+    if (null != getRequestProperty(request, USER_CONTEXT_OPERATION_PROPERTY)) {
+      userContext.put(OPERATION_PROPERTY,
+                      (String) getRequestProperty(request, USER_CONTEXT_OPERATION_PROPERTY));
+    }
+    if (null != getRequestProperty(request, USER_CONTEXT_OPERATION_DETAILS_PROPERTY)) {
+      userContext.put(OPERATION_DETAILS_PROPERTY,
+                      (String) getRequestProperty(request, USER_CONTEXT_OPERATION_DETAILS_PROPERTY));
+    }
+    return userContext;
+  }
+
   protected static final String CONFIGURATIONS_PROPERTY_ID = "recommendations/blueprint/configurations/";
 
   protected Map<String, Map<String, Map<String, String>>> calculateConfigurations(Request request) {
-    Map<String, Map<String, Map<String, String>>> configurations = new HashMap<String, Map<String, Map<String, String>>>();
+    Map<String, Map<String, Map<String, String>>> configurations = new HashMap<>();
     Map<String, Object> properties = request.getProperties().iterator().next();
     for (String property : properties.keySet()) {
       if (property.startsWith(CONFIGURATIONS_PROPERTY_ID)) {
@@ -256,13 +306,13 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
 
           Map<String, Map<String, String>> siteMap = configurations.get(siteName);
           if (siteMap == null) {
-            siteMap = new HashMap<String, Map<String, String>>();
+            siteMap = new HashMap<>();
             configurations.put(siteName, siteMap);
           }
 
           Map<String, String> propertiesMap = siteMap.get(propertiesProperty);
           if (propertiesMap == null) {
-            propertiesMap = new HashMap<String, String>();
+            propertiesMap = new HashMap<>();
             siteMap.put(propertiesProperty, propertiesMap);
           }
 
@@ -289,7 +339,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
      * missed, etc.
      */
 
-    Map<String, Set<String>> componentHostsMap = new HashMap<String, Set<String>>();
+    Map<String, Set<String>> componentHostsMap = new HashMap<>();
     if (null != bindingHostGroups && null != hostGroups) {
       for (Map.Entry<String, Set<String>> hgComponents : hostGroups.entrySet()) {
         String hgName = hgComponents.getKey();
@@ -299,7 +349,7 @@ public abstract class StackAdvisorResourceProvider extends ReadOnlyResourceProvi
         for (String component : components) {
           Set<String> componentHosts = componentHostsMap.get(component);
           if (componentHosts == null) { // if was not initialized
-            componentHosts = new HashSet<String>();
+            componentHosts = new HashSet<>();
             componentHostsMap.put(component, componentHosts);
           }
           componentHosts.addAll(hosts);

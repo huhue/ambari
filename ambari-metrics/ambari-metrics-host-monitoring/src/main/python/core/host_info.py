@@ -19,13 +19,15 @@ limitations under the License.
 '''
 
 import logging
-import psutil
+import operator
 import os
 import platform
-import time
-import threading
+import psutil
+import re
 import socket
-import operator
+import threading
+import time
+from collections import namedtuple
 
 logger = logging.getLogger()
 cached_hostname = None
@@ -53,6 +55,9 @@ class HostInfo():
     """
     cpu_times = psutil.cpu_times_percent()
     cpu_count = self.__host_static_info.get('cpu_num', 1)
+    # Since only boot time which is a part of static info is not sent with
+    # other payload sending it with cpu stats.
+    boot_time = self.__host_static_info.get('boottime')
 
     result = {
       'cpu_num': int(cpu_count),
@@ -63,7 +68,8 @@ class HostInfo():
       'cpu_wio': cpu_times.iowait if hasattr(cpu_times, 'iowait') else 0,
       'cpu_intr': cpu_times.irq if hasattr(cpu_times, 'irq') else 0,
       'cpu_sintr': cpu_times.softirq if hasattr(cpu_times, 'softirq') else 0,
-      'cpu_steal': cpu_times.steal if hasattr(cpu_times, 'steal') else 0
+      'cpu_steal': cpu_times.steal if hasattr(cpu_times, 'steal') else 0,
+      'boottime': long(boot_time) if boot_time else 0
     }
     if platform.system() != "Windows":
       load_avg = os.getloadavg()
@@ -147,13 +153,22 @@ class HostInfo():
 
     net_stats = psutil.net_io_counters(True)
     new_net_stats = {}
+
+    skip_virtual_interfaces = self.get_virtual_network_interfaces() if self.__config.get_virtual_interfaces_skip() == 'True' else []
+    skip_network_patterns = self.__config.get_network_interfaces_skip_pattern()
+    skip_network_patterns_list = skip_network_patterns.split(',') if skip_network_patterns and skip_network_patterns != 'None' else []
     for interface, values in net_stats.iteritems():
-      if interface != 'lo':
-        new_net_stats = {'bytes_out': new_net_stats.get('bytes_out', 0) + values.bytes_sent,
-                         'bytes_in': new_net_stats.get('bytes_in', 0) + values.bytes_recv,
-                         'pkts_out': new_net_stats.get('pkts_out', 0) + values.packets_sent,
-                         'pkts_in': new_net_stats.get('pkts_in', 0) + values.packets_recv
-        }
+      if interface != 'lo' and not interface in skip_virtual_interfaces:
+        ignore_network = False
+        for p in skip_network_patterns_list:
+          if re.match(p, interface):
+            ignore_network = True
+        if not ignore_network:
+          new_net_stats = {'bytes_out': new_net_stats.get('bytes_out', 0) + values.bytes_sent,
+                           'bytes_in': new_net_stats.get('bytes_in', 0) + values.bytes_recv,
+                           'pkts_out': new_net_stats.get('pkts_out', 0) + values.packets_sent,
+                           'pkts_in': new_net_stats.get('pkts_in', 0) + values.packets_recv
+          }
 
     with self.__last_network_lock:
       result = dict((k, (v - self.__last_network_data.get(k, 0)) / delta) for k, v in new_net_stats.iteritems())
@@ -172,6 +187,7 @@ class HostInfo():
     max_percent_usage = ('', 0)
 
     partition_count = 0
+    devices = set()
     for part in psutil.disk_partitions(all=False):
       if os.name == 'nt':
         if 'cdrom' in part.opts or part.fstype == '':
@@ -181,8 +197,15 @@ class HostInfo():
           continue
         pass
       pass
-      usage = psutil.disk_usage(part.mountpoint)
+      try:
+        usage = psutil.disk_usage(part.mountpoint)
+      except Exception, e:
+        logger.debug('Failed to read disk_usage for a mountpoint : ' + str(e))
+        continue
 
+      if part.device in devices: # Skip devices already seen.
+        continue
+      devices.add(part.device)
       combined_disk_total += usage.total if hasattr(usage, 'total') else 0
       combined_disk_used += usage.used if hasattr(usage, 'used') else 0
       combined_disk_free += usage.free if hasattr(usage, 'free') else 0
@@ -240,16 +263,38 @@ class HostInfo():
     if delta <= 0:
       delta = float("inf")
 
-    io_counters = psutil.disk_io_counters()
+    skip_disk_patterns = self.__config.get_disk_metrics_skip_pattern()
+    logger.debug('skip_disk_patterns: %s' % skip_disk_patterns)
+    if not skip_disk_patterns or skip_disk_patterns == 'None':
+      io_counters = psutil.disk_io_counters()
+      print io_counters
+    else:
+      sdiskio = namedtuple('sdiskio', ['read_count', 'write_count',
+                                       'read_bytes', 'write_bytes',
+                                       'read_time', 'write_time'])
+      skip_disk_pattern_list = skip_disk_patterns.split(',')
+      rawdict = psutil.disk_io_counters(True)
+      if not rawdict:
+        raise RuntimeError("Couldn't find any physical disk")
+      trimmed_dict = {}
+      for disk, fields in rawdict.items():
+        ignore_disk = False
+        for p in skip_disk_pattern_list:
+          if re.match(p, disk):
+            ignore_disk = True
+        if not ignore_disk:
+          trimmed_dict[disk] = sdiskio(*fields)
+      io_counters = sdiskio(*[sum(x) for x in zip(*trimmed_dict.values())])
 
     new_disk_stats = {
-      'read_count' : io_counters.read_count if hasattr(io_counters, 'read_count') else 0,
-      'write_count' : io_counters.write_count if hasattr(io_counters, 'write_count') else 0,
-      'read_bytes' : io_counters.read_bytes if hasattr(io_counters, 'read_bytes') else 0,
-      'write_bytes' : io_counters.write_bytes if hasattr(io_counters, 'write_bytes') else 0,
-      'read_time' : io_counters.read_time if hasattr(io_counters, 'read_time') else 0,
-      'write_time' : io_counters.write_time if hasattr(io_counters, 'write_time') else 0
-    }
+        'read_count' : io_counters.read_count if hasattr(io_counters, 'read_count') else 0,
+        'write_count' : io_counters.write_count if hasattr(io_counters, 'write_count') else 0,
+        'read_bytes' : io_counters.read_bytes if hasattr(io_counters, 'read_bytes') else 0,
+        'write_bytes' : io_counters.write_bytes if hasattr(io_counters, 'write_bytes') else 0,
+        'read_time' : io_counters.read_time if hasattr(io_counters, 'read_time') else 0,
+        'write_time' : io_counters.write_time if hasattr(io_counters, 'write_time') else 0
+      }
+
     if not self.__last_disk_data:
       self.__last_disk_data = new_disk_stats
     read_bps = (new_disk_stats['read_bytes'] - self.__last_disk_data['read_bytes']) / delta
@@ -276,7 +321,7 @@ class HostInfo():
         disk = item[0]
         logger.debug('Adding disk counters for %s' % str(disk))
         sdiskio = item[1]
-        prefix = 'disk_{0}_'.format(disk_counter)
+        prefix = 'sdisk_{0}_'.format(disk)
         counter_dict = {
           prefix + 'read_count' : sdiskio.read_count if hasattr(sdiskio, 'read_count') else 0,
           prefix + 'write_count' : sdiskio.write_count if hasattr(sdiskio, 'write_count') else 0,
@@ -317,3 +362,13 @@ class HostInfo():
 
   def get_ip_address(self):
     return socket.gethostbyname(socket.getfqdn())
+
+  def get_virtual_network_interfaces(self):
+    sys_net_path = "/sys/class/net"
+    net_devices = []
+    if os.path.isdir(sys_net_path):
+      links = [f for f in os.listdir(sys_net_path) if os.path.islink(os.path.join(sys_net_path, f))]
+      for link in links:
+        if "devices/virtual" in os.readlink(os.path.join(sys_net_path, link)):
+          net_devices.append(link)
+    return net_devices

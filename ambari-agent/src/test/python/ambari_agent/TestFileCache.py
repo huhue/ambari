@@ -83,7 +83,7 @@ class TestFileCache(TestCase):
     fileCache = FileCache(self.config)
     # Check missing parameter
     command = {
-      'commandParams' : {
+      'clusterLevelParams' : {
       }
     }
     base = fileCache.get_hook_base_dir(command, "server_url_pref")
@@ -92,8 +92,8 @@ class TestFileCache(TestCase):
 
     # Check existing dir case
     command = {
-      'commandParams' : {
-        'hooks_folder' : os.path.join('HDP', '2.1.1', 'hooks')
+      'clusterLevelParams' : {
+        'hooks_folder' : 'stack-hooks'
       }
     }
     provide_directory_mock.return_value = "dummy value"
@@ -103,7 +103,7 @@ class TestFileCache(TestCase):
       pprint.pformat(provide_directory_mock.call_args_list[0][0]),
       "('/var/lib/ambari-agent/cache', "
       "{0}, "
-      "'server_url_pref')".format(pprint.pformat(os.path.join('stacks','HDP', '2.1.1', 'hooks'))))
+      "'server_url_pref')".format(pprint.pformat('stack-hooks')))
     self.assertEquals(res, "dummy value")
 
 
@@ -116,6 +116,24 @@ class TestFileCache(TestCase):
       pprint.pformat(provide_directory_mock.call_args_list[0][0]),
       "('/var/lib/ambari-agent/cache', 'custom_actions', 'server_url_pref')")
     self.assertEquals(res, "dummy value")
+
+
+  @patch.object(FileCache, "provide_directory")
+  def test_get_custom_resources_subdir(self, provide_directory_mock):
+    provide_directory_mock.return_value = "dummy value"
+    fileCache = FileCache(self.config)
+    command = {
+      'commandParams': {
+        'custom_folder' : 'dashboards'
+      }
+    }
+
+    res = fileCache.get_custom_resources_subdir(command, "server_url_pref")
+    self.assertEquals(
+      pprint.pformat(provide_directory_mock.call_args_list[0][0]),
+      "('/var/lib/ambari-agent/cache', 'dashboards', 'server_url_pref')")
+    self.assertEquals(res, "dummy value")
+
 
   @patch.object(FileCache, "build_download_url")
   def test_provide_directory_no_update(self, build_download_url_mock):
@@ -262,10 +280,10 @@ class TestFileCache(TestCase):
 
   def test_build_download_url(self):
     fileCache = FileCache(self.config)
-    url = fileCache.build_download_url('http://localhost:8080/resources/',
+    url = fileCache.build_download_url('http://localhost:8080/resources',
                                        'stacks/HDP/2.1.1/hooks', 'archive.zip')
     self.assertEqual(url,
-        'http://localhost:8080/resources//stacks/HDP/2.1.1/hooks/archive.zip')
+        'http://localhost:8080/resources/stacks/HDP/2.1.1/hooks/archive.zip')
 
 
   @patch("urllib2.OpenerDirector.open")

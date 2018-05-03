@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -28,16 +28,10 @@ public class ComponentStatus {
   private String msg;
   private String status;
 
-  /**
-   * A String declaring the component's security state
-   *
-   * @see org.apache.ambari.server.state.SecurityState
-   */
-  private String securityState;
   private String sendExecCmdDet = "False";
 
   private String serviceName;
-  private String clusterName;
+  private Long clusterId;
   private String stackVersion;
   private Map<String, Map<String, String>> configurationTags;
   private Map<String, Object> extra;
@@ -74,26 +68,6 @@ public class ComponentStatus {
     this.status = status;
   }
 
-  /**
-   * Gets the relevant component's security state.
-   *
-   * @return a String declaring this component's security state
-   * @see org.apache.ambari.server.state.SecurityState
-   */
-  public String getSecurityState() {
-    return securityState;
-  }
-
-  /**
-   * Sets the relevant component's security state.
-   *
-   * @param securityState a String declaring this component's security state
-   * @see org.apache.ambari.server.state.SecurityState
-   */
-  public void setSecurityState(String securityState) {
-    this.securityState = securityState;
-  }
-
   public String getStackVersion() {
     return stackVersion;
   }
@@ -118,12 +92,12 @@ public class ComponentStatus {
     this.serviceName = serviceName;
   }
 
-  public String getClusterName() {
-    return clusterName;
+  public Long getClusterId() {
+    return clusterId;
   }
 
-  public void setClusterName(String clusterName) {
-    this.clusterName = clusterName;
+  public void setClusterId(Long clusterId) {
+    this.clusterId = clusterId;
   }
 
   /**
@@ -158,8 +132,8 @@ public class ComponentStatus {
   @Override
   public String toString() {
     return "ComponentStatus [componentName=" + componentName + ", msg=" + msg
-        + ", status=" + status + ", securityState=" + securityState
-        + ", serviceName=" + serviceName + ", clusterName=" + clusterName
+        + ", status=" + status
+        + ", serviceName=" + serviceName + ", clusterId=" + clusterId
         + ", stackVersion=" + stackVersion + ", configurationTags="
         + configurationTags + ", extra=" + extra + "]";
   }

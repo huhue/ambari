@@ -46,203 +46,119 @@ convention listed above.
 For examples see: common-services/HAWQ/2.0.0/service_advisor.py
 and common-services/PXF/3.0.0/service_advisor.py
 """
-class ServiceAdvisor(object):
+from stack_advisor import DefaultStackAdvisor
+
+class ServiceAdvisor(DefaultStackAdvisor):
   """
   Abstract class implemented by all service advisors.
   """
 
-  """
-  Provides a scheme for laying out a given component on different number of hosts.
-  It should return a json object such as {6: 2, 31: 1, "else": 5}.  If a service
-  contains more than one component, it may have a statement such as:
+  def colocateServiceWithServicesInfo(self, hostsComponentsMap, serviceComponents, services):
+    """
+    Populate hostsComponentsMap with key = hostname and value = [{"name": "COMP_NAME_1"}, {"name": "COMP_NAME_2"}, ...]
+    of services that must be co-hosted and on which host they should be present.
+    :param hostsComponentsMap: Map from hostname to list of [{"name": "COMP_NAME_1"}, {"name": "COMP_NAME_2"}, ...]
+    present on on that host.
+    :param serviceComponents: Mapping of components
+    :param services: The full list of servies
 
-    if componentName == 'HAWQMASTER':
-      return {6: 2, 31: 1, "else": 5}
+    If any components of the service should be colocated with other services,
+    and the decision should be based on information that is only available in the services list,
+    such as what are the master components, etc,
+    this is where you should set up that layout.
 
-    return None
-  """
-  def getComponentLayoutScheme(self, componentName):
-    return None
-
-  """
-  Returns the cardinality of the component as a json object with min and max attributes.
-  Example: {"min": 1, "max": 1}
-  """
-  def getComponentCardinality(self, componentName):
-    return {"min": 1, "max": 1}
-
-  """
-  Returns True if the component should avoid being configured on the ambari server host.
-  """
-  def isComponentNotPreferableOnAmbariServerHost(self, componentName):
-    return False
-
-  """
-  Return True if the component is not considered valuable, otherwise returns False.
-  Hosts which are only running non valuable components are considered to be not used.
-  """
-  def isComponentNotValuable(self, component):
-    return False
-
-  """
-  Returns True if the component should use its cardinatity to determine its layout.
-  """
-  def isComponentUsingCardinalityForLayout(self, componentName):
-    return False
-
-  """
-  Returns True if the component is a master component with multiple instances.
-  """
-  def isMasterComponentWithMultipleInstances(self, component):
-    return False
-
-  """
-  If any components of the service should be colocated with other services,
-  this is where you should set up that layout.  Example:
-
-    # colocate HAWQSEGMENT with DATANODE, if no hosts have been allocated for HAWQSEGMENT
-    hawqSegment = [component for component in serviceComponents if component["StackServiceComponents"]["component_name"] == "HAWQSEGMENT"][0]
-    if not stackAdvisor.isComponentHostsPopulated(hawqSegment):
-      for hostName in hostsComponentsMap.keys():
-        hostComponents = hostsComponentsMap[hostName]
-        if {"name": "DATANODE"} in hostComponents and {"name": "HAWQSEGMENT"} not in hostComponents:
-          hostsComponentsMap[hostName].append( { "name": "HAWQSEGMENT" } )
-        if {"name": "DATANODE"} not in hostComponents and {"name": "HAWQSEGMENT"} in hostComponents:
-          hostComponents.remove({"name": "HAWQSEGMENT"})
-  """
-  def colocateService(self, stackAdvisor, hostsComponentsMap, serviceComponents):
+    Each service should only implement either this method or the colocateService method
+    """
     pass
 
-  """
-  Any configuration recommendations for the service should be defined in this function.
-  This should be similar to any of the recommendXXXXConfigurations functions in the stack_advisor.py
-  such as recommendYARNConfigurations().
-  """
-  def getServiceConfigurationRecommendations(self, stackAdvisor, configurations, clusterSummary, services, hosts):
+  def colocateService(self, hostsComponentsMap, serviceComponents):
+    """
+    Populate hostsComponentsMap with key = hostname and value = [{"name": "COMP_NAME_1"}, {"name": "COMP_NAME_2"}, ...]
+    of services that must be co-hosted and on which host they should be present.
+    :param hostsComponentsMap: Map from hostname to list of [{"name": "COMP_NAME_1"}, {"name": "COMP_NAME_2"}, ...]
+    present on on that host.
+    :param serviceComponents: Mapping of components
+
+    If any components of the service should be colocated with other services, this is where you should set up that layout.
+
+    Each service should only implement either this method or the colocateServiceWithServicesInfo method
+    """
     pass
 
-  """
-  Returns an array of Validation objects about issues with the hostnames to which components are assigned.
-  This should detect validation issues which are different than those the stack_advisor.py detects.
-  The default validations are in stack_advisor.py getComponentLayoutValidations function.
-  """
-  def getComponentLayoutValidations(self, stackAdvisor, services, hosts):
+  def getServiceConfigurationRecommendations(self, configurations, clusterSummary, services, hosts):
+    """
+    Any configuration recommendations for the service should be defined in this function.
+    This should be similar to any of the recommendXXXXConfigurations functions in the stack_advisor.py
+    such as recommendYARNConfigurations().
+    """
+    pass
+
+  def getServiceConfigurationRecommendationsForSSO(self, configurations, clusterSummary, services, hosts):
+    """
+    Any SSO-related configuration recommendations for the service should be defined in this function.
+    """
+    pass
+
+  def getServiceComponentLayoutValidations(self, services, hosts):
+    """
+    Returns an array of Validation objects about issues with the hostnames to which components are assigned.
+    This should detect validation issues which are different than those the stack_advisor.py detects.
+    The default validations are in stack_advisor.py getComponentLayoutValidations function.
+    """
     return []
 
-  """
-  Any configuration validations for the service should be defined in this function.
-  This should be similar to any of the validateXXXXConfigurations functions in the stack_advisor.py
-  such as validateHDFSConfigurations.
-  """
-  def getConfigurationsValidationItems(self, stackAdvisor, configurations, recommendedDefaults, services, hosts):
+  def getServiceConfigurationsValidationItems(self, configurations, recommendedDefaults, services, hosts):
+    """
+    Any configuration validations for the service should be defined in this function.
+    This should be similar to any of the validateXXXXConfigurations functions in the stack_advisor.py
+    such as validateHDFSConfigurations.
+    """
     return []
 
-  """
-  If the service needs to any processing differently than the stack_advisor.py getHostsForMasterComponents
-  function, then this logic should be added in this function.
-  """
-  def getHostsForMasterComponent(self, stackAdvisor, services, hosts, component, hostsList, hostsComponentsMap):
-    return stackAdvisor.getHostsForMasterComponent(services, hosts, component, hostsList, hostsComponentsMap)
+  def getDBDriver(self, databaseType):
+    driverDict = {
+      "NEW MYSQL DATABASE": "com.mysql.jdbc.Driver",
+      "NEW DERBY DATABASE": "org.apache.derby.jdbc.EmbeddedDriver",
+      "EXISTING MYSQL DATABASE": "com.mysql.jdbc.Driver",
+      "EXISTING MYSQL / MARIADB DATABASE": "com.mysql.jdbc.Driver",
+      "EXISTING POSTGRESQL DATABASE": "org.postgresql.Driver",
+      "EXISTING ORACLE DATABASE": "oracle.jdbc.driver.OracleDriver",
+      "EXISTING SQL ANYWHERE DATABASE": "sap.jdbc4.sqlanywhere.IDriver"
+    }
+    return driverDict.get(databaseType.upper())
 
-  """
-  If the service needs to any processing differently than the stack_advisor.py getHostsForSlaveComponents
-  function, then this logic should be added in this function.
-  """
-  def getHostsForSlaveComponent(self, stackAdvisor, services, hosts, component, hostsList, hostsComponentsMap, freeHosts):
-    return stackAdvisor.getHostsForSlaveComponent(services, hosts, component, hostsList, hostsComponentsMap, freeHosts)
+  def getDBConnectionString(self, databaseType):
+    driverDict = {
+      "NEW MYSQL DATABASE": "jdbc:mysql://{0}/{1}?createDatabaseIfNotExist=true",
+      "NEW DERBY DATABASE": "jdbc:derby:${{oozie.data.dir}}/${{oozie.db.schema.name}}-db;create=true",
+      "EXISTING MYSQL DATABASE": "jdbc:mysql://{0}/{1}",
+      "EXISTING MYSQL / MARIADB DATABASE": "jdbc:mysql://{0}/{1}",
+      "EXISTING POSTGRESQL DATABASE": "jdbc:postgresql://{0}:5432/{1}",
+      "EXISTING ORACLE DATABASE": "jdbc:oracle:thin:@//{0}:1521/{1}",
+      "EXISTING SQL ANYWHERE DATABASE": "jdbc:sqlanywhere:host={0};database={1}"
+    }
+    return driverDict.get(databaseType.upper())
 
+  def getProtocol(self, databaseType):
+    first_parts_of_connection_string = {
+      "NEW MYSQL DATABASE": "jdbc:mysql",
+      "NEW DERBY DATABASE": "jdbc:derby",
+      "EXISTING MYSQL DATABASE": "jdbc:mysql",
+      "EXISTING MYSQL / MARIADB DATABASE": "jdbc:mysql",
+      "EXISTING POSTGRESQL DATABASE": "jdbc:postgresql",
+      "EXISTING ORACLE DATABASE": "jdbc:oracle",
+      "EXISTING SQL ANYWHERE DATABASE": "jdbc:sqlanywhere"
+    }
+    return first_parts_of_connection_string.get(databaseType.upper())
 
-  """
-  Utility methods
-  """
-
-  """
-  Utility method used for validation warnings.
-  """
-  def getWarnItem(self, message):
-    return {"level": "WARN", "message": message}
-
-  """
-  Utility method used for validation errors.
-  """
-  def getErrorItem(self, message):
-    return {"level": "ERROR", "message": message}
-
-  """
-  Returns the hosts which are running the given component.
-  """
-  def getHosts(self, componentsList, componentName):
-    hostNamesList = [component["hostnames"] for component in componentsList if component["component_name"] == componentName]
-    return hostNamesList[0] if len(hostNamesList) > 0 else []
-
-  """
-  Utility method for setting a configuration property value.
-  """
-  def putProperty(self, config, configType, services=None):
-    userConfigs = {}
-    changedConfigs = []
-    # if services parameter, prefer values, set by user
-    if services:
-      if 'configurations' in services.keys():
-        userConfigs = services['configurations']
-      if 'changed-configurations' in services.keys():
-        changedConfigs = services["changed-configurations"]
-
-    if configType not in config:
-      config[configType] = {}
-    if"properties" not in config[configType]:
-      config[configType]["properties"] = {}
-    def appendProperty(key, value):
-      # If property exists in changedConfigs, do not override, use user defined property
-      if self.__isPropertyInChangedConfigs(configType, key, changedConfigs):
-        config[configType]["properties"][key] = userConfigs[configType]['properties'][key]
-      else:
-        config[configType]["properties"][key] = str(value)
-    return appendProperty
-
-  """
-  Utility method to determine if the configuration property value has been changed.
-  """
-  def __isPropertyInChangedConfigs(self, configType, propertyName, changedConfigs):
-    for changedConfig in changedConfigs:
-      if changedConfig['type']==configType and changedConfig['name']==propertyName:
-        return True
-    return False
-
-  """
-  Utility method for setting a configuration property attribute.
-  """
-  def putPropertyAttribute(self, config, configType):
-    if configType not in config:
-      config[configType] = {}
-    def appendPropertyAttribute(key, attribute, attributeValue):
-      if "property_attributes" not in config[configType]:
-        config[configType]["property_attributes"] = {}
-      if key not in config[configType]["property_attributes"]:
-        config[configType]["property_attributes"][key] = {}
-      config[configType]["property_attributes"][key][attribute] = attributeValue if isinstance(attributeValue, list) else str(attributeValue)
-    return appendPropertyAttribute
-
-  """
-  Utility method to validate configuration settings for a given configuration file.
-  This function will call the method provided.
-  """
-  def validateConfigurationsForSite(self, stackAdvisor, configurations, recommendedDefaults, services, hosts, siteName, method):
-    if siteName in recommendedDefaults:
-      siteProperties = self.getSiteProperties(configurations, siteName)
-      if siteProperties is not None:
-        siteRecommendations = recommendedDefaults[siteName]["properties"]
-        print("SiteName: %s, method: %s\n" % (siteName, method.__name__))
-        print("Site properties: %s\n" % str(siteProperties))
-        print("Recommendations: %s\n********\n" % str(siteRecommendations))
-        return method(stackAdvisor, siteProperties, siteRecommendations, configurations, services, hosts)
-    return []
-
-  """
-  Utility method used to return all the properties from a given configuration file.
-  """
-  def getSiteProperties(self, configurations, siteName):
-    siteConfig = configurations.get(siteName)
-    if siteConfig is None:
-      return None
-    return siteConfig.get("properties")
+  def getDBTypeAlias(self, databaseType):
+    driverDict = {
+      "NEW MYSQL DATABASE": "mysql",
+      "NEW DERBY DATABASE": "derby",
+      "EXISTING MYSQL / MARIADB DATABASE": "mysql",
+      "EXISTING MYSQL DATABASE": "mysql",
+      "EXISTING POSTGRESQL DATABASE": "postgres",
+      "EXISTING ORACLE DATABASE": "oracle",
+      "EXISTING SQL ANYWHERE DATABASE": "sqla"
+    }
+    return driverDict.get(databaseType.upper())

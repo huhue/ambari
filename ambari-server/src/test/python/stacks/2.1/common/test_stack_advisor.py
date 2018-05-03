@@ -18,6 +18,7 @@ limitations under the License.
 
 import json
 import os
+import socket
 from unittest import TestCase
 
 class TestHDP21StackAdvisor(TestCase):
@@ -26,10 +27,17 @@ class TestHDP21StackAdvisor(TestCase):
     import imp
 
     self.testDirectory = os.path.dirname(os.path.abspath(__file__))
-    stackAdvisorPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks/stack_advisor.py')
-    hdp206StackAdvisorPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks/HDP/2.0.6/services/stack_advisor.py')
-    hdp21StackAdvisorPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks/HDP/2.1/services/stack_advisor.py')
+
+    stacksPath = os.path.join(self.testDirectory, '../../../../../main/resources/stacks')
+    stackAdvisorPath = os.path.join(stacksPath, 'stack_advisor.py')
+    ambariConfigurationPath = os.path.abspath(os.path.join(stacksPath, 'ambari_configuration.py'))
+    hdp206StackAdvisorPath = os.path.join(stacksPath, 'HDP/2.0.6/services/stack_advisor.py')
+    hdp21StackAdvisorPath = os.path.join(stacksPath, 'HDP/2.1/services/stack_advisor.py')
+
     hdp21StackAdvisorClassName = 'HDP21StackAdvisor'
+
+    with open(ambariConfigurationPath, 'rb') as fp:
+      imp.load_module('ambari_configuration', fp, ambariConfigurationPath, ('.py', 'rb', imp.PY_SOURCE))
     with open(stackAdvisorPath, 'rb') as fp:
       imp.load_module('stack_advisor', fp, stackAdvisorPath, ('.py', 'rb', imp.PY_SOURCE))
     with open(hdp206StackAdvisorPath, 'rb') as fp:
@@ -167,11 +175,8 @@ class TestHDP21StackAdvisor(TestCase):
       if len(components) > 0:
         groups.append(components)
 
-    def sort_nested_lists(list):
-      result_list = []
-      for sublist in list:
-        result_list.append(sorted(sublist))
-      return sorted(result_list)
+    def sort_nested_lists(l):
+      return sorted(reduce(lambda x,y: x+y, l))
 
     self.assertEquals(sort_nested_lists(expected_layout), sort_nested_lists(groups))
 
@@ -184,7 +189,7 @@ class TestHDP21StackAdvisor(TestCase):
           },
           "components" : [ {
             "StackServiceComponents" : {
-              "component_name" : "HIVE_METASTORE",
+              "component_name" : "HIVE_SERVER",
               "service_name" : "HIVE",
               "hostnames" : ["example.com"]
             }
@@ -206,7 +211,7 @@ class TestHDP21StackAdvisor(TestCase):
         "properties": {
           "javax.jdo.option.ConnectionDriverName": "",
           "ambari.hive.db.schema.name": "hive_name",
-          "javax.jdo.option.ConnectionURL": ""
+          "javax.jdo.option.ConnectionURL": "jdbc:mysql://localhost/hive?createDatabaseIfNotExist=true"
         }
       },
       "hive-env": {
@@ -215,7 +220,15 @@ class TestHDP21StackAdvisor(TestCase):
         }
       }
     }
+    changed_configurations = [{
+                               "type" : "hive-env",
+                               "name" : "hive_database",
+                               "old_value" : "New Database"
+                             }]
+
+
     services['configurations'] = configurations
+    services['changed-configurations'] = changed_configurations
     hosts = {
       "items": [
         {
@@ -260,6 +273,94 @@ class TestHDP21StackAdvisor(TestCase):
     self.stackAdvisor.recommendHiveConfigurations(configurations, clusterData, services, hosts)
     self.assertEquals(configurations['hive-site']['properties']['javax.jdo.option.ConnectionURL'], "jdbc:mysql://example.com/hive_name")
     self.assertEquals(configurations['hive-site']['properties']['javax.jdo.option.ConnectionDriverName'], "com.mysql.jdbc.Driver")
+
+  def test_recommendHiveConfigurationsSecure(self):
+    services = {
+      "services": [
+        {
+          "StackServices": {
+            "service_name": "YARN"
+          }, "components": []
+        },
+        {
+          "StackServices": {
+            "service_name": "HIVE",
+          },
+          "components": [
+            {
+              "StackServiceComponents": {
+                "component_name": "WEBHCAT_SERVER",
+                "service_name": "HIVE",
+                "hostnames": ["example.com"]
+              }
+            }
+          ]
+        }
+      ],
+      "configurations": {}
+    }
+
+    configurations = {
+      "hive-site": {
+        "properties": {
+          "javax.jdo.option.ConnectionDriverName": "",
+          "ambari.hive.db.schema.name": "hive_name",
+          "javax.jdo.option.ConnectionURL": "jdbc:mysql://localhost/hive?createDatabaseIfNotExist=true"
+        }
+      },
+      "hive-env": {
+        "properties": {
+          "hive_database": "New MySQL Database"
+        }
+      },
+      "cluster-env": {
+        "properties": {
+          "security_enabled": "true"
+        }
+      }
+    }
+
+    services['configurations'] = configurations
+    clusterData = {
+      "mapMemory": 3000,
+      "reduceMemory": 2056,
+      "containers": 3,
+      "ramPerContainer": 256
+    }
+    services['changed-configurations'] = []
+    hosts = {
+      "items": [
+        {
+          "Hosts": {
+            "host_name": "example.com"
+          }
+        },
+        {
+          "Hosts": {
+            "host_name": "example.org"
+          }
+        }
+      ]
+    }
+
+    # new mysql
+    self.stackAdvisor.recommendHiveConfigurations(configurations, clusterData, services, hosts)
+    self.assertEquals("core-site" in configurations, True)
+    self.assertEqual("hadoop.proxyuser.HTTP.hosts" in configurations["core-site"]["properties"], True)
+    self.assertEqual(configurations["core-site"]["properties"]["hadoop.proxyuser.HTTP.hosts"] == "example.com", True)
+
+    newhost_list = ["example.com", "example.org"]
+    services["services"][1]["components"][0]["StackServiceComponents"]["hostnames"] = newhost_list
+    configurations["core-site"]["properties"]["hadoop.proxyuser.HTTP.hosts"] = ""
+
+    self.stackAdvisor.recommendHiveConfigurations(configurations, clusterData, services, hosts)
+    self.assertEquals("core-site" in configurations, True)
+    self.assertEqual("hadoop.proxyuser.HTTP.hosts" in configurations["core-site"]["properties"], True)
+
+    fetch_list = sorted(configurations["core-site"]["properties"]["hadoop.proxyuser.HTTP.hosts"].split(","))
+    self.assertEqual(sorted(newhost_list), fetch_list)
+
+
 
   def test_recommendHiveConfigurations_containersRamIsLess(self):
     configurations = {}
@@ -355,7 +456,7 @@ class TestHDP21StackAdvisor(TestCase):
         {
           "Hosts": {
             "disk_info": [{
-              "size": '8',
+              "size": '80000000',
               "mountpoint": "/"
             }]
           }
@@ -374,6 +475,7 @@ class TestHDP21StackAdvisor(TestCase):
     clusterData = {
       "totalAvailableRam": 2048
     }
+    ambariHostName = socket.getfqdn()
     expected = {
       'hadoop-env': {
         'properties': {
@@ -387,14 +489,16 @@ class TestHDP21StackAdvisor(TestCase):
         "properties": {
           "hadoop.proxyuser.hdfs.hosts": "*",
           "hadoop.proxyuser.hdfs.groups": "*",
-          "hadoop.proxyuser.ambari_user.hosts": "*",
+          "hadoop.proxyuser.ambari_user.hosts": ambariHostName,
           "hadoop.proxyuser.ambari_user.groups": "*"
         }
       },
       "hdfs-site": {
         "properties": {
           'dfs.datanode.data.dir': '/hadoop/hdfs/data',
-          'dfs.datanode.du.reserved': '1024'
+          'dfs.namenode.name.dir': '/hadoop/hdfs/namenode',
+          'dfs.namenode.checkpoint.dir': '/hadoop/hdfs/namesecondary',
+          'dfs.datanode.du.reserved': '10240000000'
         }
       }
     }
@@ -459,4 +563,32 @@ class TestHDP21StackAdvisor(TestCase):
                     ]
 
     res = self.stackAdvisor.validateHiveConfigurations(properties, recommendedDefaults, configurations, '', '')
+    self.assertEquals(res, res_expected)
+
+  def test_modifyComponentLayoutSchemes(self):
+    res_expected = {}
+    res_expected.update({
+      'NAMENODE': {"else": 0},
+      'SECONDARY_NAMENODE': {"else": 1},
+      'HBASE_MASTER': {6: 0, 31: 2, "else": 3},
+
+      'HISTORYSERVER': {31: 1, "else": 2},
+      'RESOURCEMANAGER': {31: 1, "else": 2},
+
+      'OOZIE_SERVER': {6: 1, 31: 2, "else": 3},
+
+      'HIVE_SERVER': {6: 1, 31: 2, "else": 4},
+      'HIVE_METASTORE': {6: 1, 31: 2, "else": 4},
+      'WEBHCAT_SERVER': {6: 1, 31: 2, "else": 4},
+      'METRICS_COLLECTOR': {3: 2, 6: 2, 31: 3, "else": 5},
+    })
+
+    res_expected.update({
+      'APP_TIMELINE_SERVER': {31: 1, "else": 2},
+      'FALCON_SERVER': {6: 1, 31: 2, "else": 3}
+    })
+
+    self.stackAdvisor.modifyComponentLayoutSchemes()
+    res = self.stackAdvisor.getComponentLayoutSchemes()
+
     self.assertEquals(res, res_expected)

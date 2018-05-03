@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -26,6 +26,7 @@ public class ServiceComponentHostRequest {
   private String serviceName;
   private String componentName;
   private String hostname;
+  private String publicHostname;
   private String state;
   private String desiredState; // CREATE/UPDATE
   private String desiredStackId; // UPDATE
@@ -117,20 +118,6 @@ public class ServiceComponentHostRequest {
   }
 
   /**
-   * @return the desiredStackId
-   */
-  public String getDesiredStackId() {
-    return desiredStackId;
-  }
-
-  /**
-   * @param desiredStackId the desiredStackId to set
-   */
-  public void setDesiredStackId(String desiredStackId) {
-    this.desiredStackId = desiredStackId;
-  }
-
-  /**
    * @return the clusterName
    */
   public String getClusterName() {
@@ -155,7 +142,7 @@ public class ServiceComponentHostRequest {
    * @return Stale config indicator
    */
   public String getStaleConfig() {
-    return this.staleConfig;
+    return staleConfig;
   }
 
   /**
@@ -169,20 +156,24 @@ public class ServiceComponentHostRequest {
    * @return the admin state of the component
    */
   public String getAdminState() {
-    return this.adminState;
+    return adminState;
   }
 
+  @Override
   public String toString() {
     StringBuilder sb = new StringBuilder();
     sb.append("{" + " clusterName=").append(clusterName)
       .append(", serviceName=").append(serviceName)
       .append(", componentName=").append(componentName)
       .append(", hostname=").append(hostname)
+      .append(", publicHostname=").append(publicHostname)
       .append(", desiredState=").append(desiredState)
       .append(", state=").append(state)
       .append(", desiredStackId=").append(desiredStackId)
       .append(", staleConfig=").append(staleConfig)
-      .append(", adminState=").append(adminState).append("}");
+      .append(", adminState=").append(adminState)
+      .append(", maintenanceState=").append(maintenanceState)
+      .append("}");
     return sb.toString();
   }
 
@@ -198,5 +189,13 @@ public class ServiceComponentHostRequest {
    */
   public String getMaintenanceState() {
     return maintenanceState;
+  }
+
+  public String getPublicHostname() {
+    return publicHostname;
+  }
+
+  public void setPublicHostname(String publicHostname) {
+    this.publicHostname = publicHostname;
   }
 }

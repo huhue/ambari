@@ -17,6 +17,7 @@
  */
 
 var App = require('app');
+var validator = require('utils/validator');
 var filters = require('views/common/filter_view');
 var sort = require('views/common/sort_view');
 
@@ -43,6 +44,11 @@ App.MainAlertDefinitionDetailsView = App.TableView.extend({
   colPropAssoc: ['serviceName', 'hostName', 'state'],
 
   /**
+   * @type {string}
+   */
+  errorMessage: '',
+
+  /**
    * return filtered number of all content number information displayed on the page footer bar
    * @returns {String}
    */
@@ -60,26 +66,30 @@ App.MainAlertDefinitionDetailsView = App.TableView.extend({
       this.set('isLoaded', true);
       this.get('controller').loadAlertInstances();
     } else {
-      this.loadDefinitionDetails();
+      App.router.get('clusterController').addObserver('isAlertsLoaded', this, 'loadAfterModelLoaded');
     }
   },
 
-  loadDefinitionDetails: function() {
-    var self = this,
-        updater = App.router.get('updateController');
-
-    updater.updateAlertGroups(function () {
-      updater.updateAlertDefinitions(function () {
-        updater.updateAlertDefinitionSummary(function () {
-          self.set('isLoaded', true);
-          // App.AlertDefinition doesn't represents real models
-          // Real model (see AlertDefinition types) should be used
-          self.set('controller.content', App.AlertDefinition.find(parseInt(self.get('controller.content.id'))));
-          self.get('controller').loadAlertInstances();
-        });
-      });
-    });
+  loadAfterModelLoaded: function() {
+    var clusterController = App.router.get('clusterController');
+    if (clusterController.get('isAlertsLoaded')) {
+      this.set('isLoaded', true);
+      this.set('controller.content', App.AlertDefinition.find(parseInt(this.get('controller.content.id'))));
+      this.get('controller').loadAlertInstances();
+      clusterController.removeObserver('isAlertsLoaded', this, 'loadAfterModelLoaded');
+    }
   },
+
+  nameValidation: function () {
+     var alertName = this.get('controller.editing.label.value').trim();
+     var errorMessage = '';
+     this.set('controller.editing.label.isError',false);
+     if(alertName && !validator.isValidAlertName(alertName)){
+      errorMessage = Em.I18n.t("alert.definition.name.invalid");
+      this.set('controller.editing.label.isError',true);
+    }
+    this.set('controller.errorMessage',errorMessage);            
+  }.observes('controller.editing.label.value'),
 
   didInsertElement: function () {
     this.filter();
@@ -146,7 +156,7 @@ App.MainAlertDefinitionDetailsView = App.TableView.extend({
    */
   serviceFilterView: filters.createSelectView({
     column: 0,
-    fieldType: 'input-small',
+    fieldType: 'input-sm',
     content: filters.getComputedServicesList(),
     onChangeValue: function () {
       this.get('parentView').updateFilter(this.get('column'), this.get('value'), 'select');
@@ -199,7 +209,7 @@ App.MainAlertDefinitionDetailsView = App.TableView.extend({
     template: Ember.Handlebars.compile('<span>{{view.count}}</span>'),
     count: function () {
       var lastDayAlertsCount = this.get('parentView.controller.lastDayAlertsCount');
-      return lastDayAlertsCount ? lastDayAlertsCount[this.get('hostName')] || 0 : Em.I18n.t('app.loadingPlaceholder');
+      return lastDayAlertsCount ? lastDayAlertsCount[this.get('hostName')] || 0 : Em.I18n.t('common.loading.eclipses');
     }.property('parentView.controller.lastDayAlertsCount', 'hostName')
   }),
 
@@ -309,9 +319,7 @@ App.AlertInstanceServiceHostView = Em.View.extend({
   /**
    * Define whether show link for transition to service page
    */
-  serviceIsLink: function () {
-    return App.get('services.all').contains(this.get('instance.service.serviceName'));
-  }.property('instance.service.serviceName'),
+  serviceIsLink: Em.computed.existsInByKey('instance.service.serviceName', 'App.services.all'),
 
   /**
    * Define whether show separator between service and hosts labels

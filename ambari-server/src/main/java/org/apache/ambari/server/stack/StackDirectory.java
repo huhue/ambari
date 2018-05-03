@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,31 +18,27 @@
 
 package org.apache.ambari.server.stack;
 
+import java.io.File;
+import java.io.FilenameFilter;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+
 import org.apache.ambari.server.AmbariException;
-import org.apache.ambari.server.api.services.AmbariMetaInfo;
+import org.apache.ambari.server.state.stack.ConfigUpgradePack;
 import org.apache.ambari.server.state.stack.RepositoryXml;
 import org.apache.ambari.server.state.stack.StackMetainfoXml;
 import org.apache.ambari.server.state.stack.StackRoleCommandOrder;
-import org.apache.ambari.server.state.stack.ConfigUpgradePack;
 import org.apache.ambari.server.state.stack.UpgradePack;
 import org.apache.commons.io.FilenameUtils;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.codehaus.jackson.type.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.xml.bind.JAXBException;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Encapsulates IO operations on a stack definition stack directory.
@@ -51,10 +47,23 @@ import java.util.Set;
 //todo: Currently some are relative and some are absolute.
 //todo: Current values were dictated by the StackInfo expectations.
 public class StackDirectory extends StackDefinitionDirectory {
+  public static final String SERVICE_CONFIG_FOLDER_NAME = "configuration";
+  public static final String SERVICE_PROPERTIES_FOLDER_NAME = "properties";
+  public static final String SERVICE_THEMES_FOLDER_NAME = "themes";
+  public static final String SERVICE_QUICKLINKS_CONFIGURATIONS_FOLDER_NAME = "quicklinks";
+  public static final String SERVICE_CONFIG_FILE_NAME_POSTFIX = ".xml";
+  public static final String RCO_FILE_NAME = "role_command_order.json";
+  public static final String SERVICE_METRIC_FILE_NAME = "metrics.json";
+  public static final String SERVICE_ALERT_FILE_NAME = "alerts.json";
+  public static final String SERVICE_ADVISOR_FILE_NAME = "service_advisor.py";
   /**
-   * hooks directory path
+   * The filename for a Kerberos descriptor preconfigure file at either the stack or service level
    */
-  private String hooksDir;
+  public static final String KERBEROS_DESCRIPTOR_PRECONFIGURE_FILE_NAME = "kerberos_preconfigure.json";
+  /**
+   * Filename for theme file at service layer
+   */
+  public static final String SERVICE_THEME_FILE_NAME = "theme.json";
 
   /**
    * upgrades directory path
@@ -67,14 +76,9 @@ public class StackDirectory extends StackDefinitionDirectory {
   private String rcoFilePath;
 
   /**
-   * kerberos descriptor file path
+   * kerberos descriptor (preconfigure) file path
    */
-  private String kerberosDescriptorFilePath;
-
-  /**
-   * kerberos descriptor file path
-   */
-  private String widgetsDescriptorFilePath;
+  private String kerberosDescriptorPreconfigureFilePath;
 
   /**
    * repository file
@@ -116,10 +120,12 @@ public class StackDirectory extends StackDefinitionDirectory {
    */
   ModuleFileUnmarshaller unmarshaller = new ModuleFileUnmarshaller();
 
-  /**
-   * name of the hooks directory
-   */
-  public static final String HOOKS_FOLDER_NAME = "hooks";
+  public static final FilenameFilter FILENAME_FILTER = new FilenameFilter() {
+    @Override
+    public boolean accept(File dir, String s) {
+      return !(s.equals(".svn") || s.equals(".git"));
+    }
+  };
 
   /**
    * repository directory name
@@ -155,7 +161,7 @@ public class StackDirectory extends StackDefinitionDirectory {
   /**
    * Constructor.
    *
-   * @param directory  stack directory
+   * @param directory stack directory
    * @throws AmbariException if unable to parse the stack directory
    */
   public StackDirectory(String directory) throws AmbariException {
@@ -170,15 +176,6 @@ public class StackDirectory extends StackDefinitionDirectory {
    */
   public String getStackDirName() {
     return getDirectory().getParentFile().getName();
-  }
-
-  /**
-   * Obtain the hooks directory path.
-   *
-   * @return hooks directory path
-   */
-  public String getHooksDir() {
-    return hooksDir;
   }
 
   /**
@@ -200,21 +197,12 @@ public class StackDirectory extends StackDefinitionDirectory {
   }
 
   /**
-   * Obtain the path to the (stack-level) Kerberos descriptor file
+   * Obtain the path to the (stack-level) Kerberos descriptor pre-configuration file
    *
-   * @return the path to the (stack-level) Kerberos descriptor file
+   * @return the path to the (stack-level) Kerberos descriptor pre-configuration file
    */
-  public String getKerberosDescriptorFilePath() {
-    return kerberosDescriptorFilePath;
-  }
-
-  /**
-   * Obtain the path to the (stack-level) widgets descriptor file
-   *
-   * @return the path to the (stack-level) widgets descriptor file
-   */
-  public String getWidgetsDescriptorFilePath() {
-    return widgetsDescriptorFilePath;
+  public String getKerberosDescriptorPreconfigureFilePath() {
+    return kerberosDescriptorPreconfigureFilePath;
   }
 
   /**
@@ -274,7 +262,6 @@ public class StackDirectory extends StackDefinitionDirectory {
    *
    * @return object representation of the stack role_command_order.json file
    */
-
   public StackRoleCommandOrder getRoleCommandOrder() {
     return roleCommandOrder;
   }
@@ -286,28 +273,14 @@ public class StackDirectory extends StackDefinitionDirectory {
    */
   private void parsePath() throws AmbariException {
     Collection<String> subDirs = Arrays.asList(directory.list());
-    if (subDirs.contains(HOOKS_FOLDER_NAME)) {
-      // hooksDir is expected to be relative to stack root
-      hooksDir = getStackDirName() + File.separator + getName() +
-          File.separator + HOOKS_FOLDER_NAME;
-    } else {
-      LOG.debug("Hooks folder " + getAbsolutePath() + File.separator +
-          HOOKS_FOLDER_NAME + " does not exist");
-    }
-
-    if (subDirs.contains(AmbariMetaInfo.RCO_FILE_NAME)) {
+    if (subDirs.contains(RCO_FILE_NAME)) {
       // rcoFile is expected to be absolute
-      rcoFilePath = getAbsolutePath() + File.separator + AmbariMetaInfo.RCO_FILE_NAME;
+      rcoFilePath = getAbsolutePath() + File.separator + RCO_FILE_NAME;
     }
 
-
-    if (subDirs.contains(AmbariMetaInfo.KERBEROS_DESCRIPTOR_FILE_NAME)) {
-      // kerberosDescriptorFilePath is expected to be absolute
-      kerberosDescriptorFilePath = getAbsolutePath() + File.separator + AmbariMetaInfo.KERBEROS_DESCRIPTOR_FILE_NAME;
-    }
-
-    if (subDirs.contains(AmbariMetaInfo.WIDGETS_DESCRIPTOR_FILE_NAME)) {
-      widgetsDescriptorFilePath = getAbsolutePath() + File.separator + AmbariMetaInfo.WIDGETS_DESCRIPTOR_FILE_NAME;
+    if (subDirs.contains(KERBEROS_DESCRIPTOR_PRECONFIGURE_FILE_NAME)) {
+      // kerberosDescriptorPreconfigureFilePath is expected to be absolute
+      kerberosDescriptorPreconfigureFilePath = getAbsolutePath() + File.separator + KERBEROS_DESCRIPTOR_PRECONFIGURE_FILE_NAME;
     }
 
     parseUpgradePacks(subDirs);
@@ -321,29 +294,11 @@ public class StackDirectory extends StackDefinitionDirectory {
    * Parse the repository file.
    *
    * @param subDirs stack directory sub directories
-   * @throws AmbariException if unable to parse the repository file
    */
-  private void parseRepoFile(Collection<String> subDirs) throws AmbariException {
-    File repositoryFile;
-
-    if (subDirs.contains(REPOSITORY_FOLDER_NAME)) {
-      repoDir = getAbsolutePath() + File.separator + REPOSITORY_FOLDER_NAME;
-      repositoryFile = new File(getPath()+ File.separator +
-          REPOSITORY_FOLDER_NAME + File.separator + REPOSITORY_FILE_NAME);
-
-      if (repositoryFile.exists()) {
-        try {
-          repoFile = unmarshaller.unmarshal(RepositoryXml.class, repositoryFile);
-        } catch (JAXBException e) {
-          repoFile = new RepositoryXml();
-          repoFile.setValid(false);
-          String msg = "Unable to parse repo file at location: " +
-                       repositoryFile.getAbsolutePath();
-          repoFile.addError(msg);
-          LOG.warn(msg);
-        }
-      }
-    }
+  private void parseRepoFile(Collection<String> subDirs) {
+    RepositoryFolderAndXml repoDirAndXml = RepoUtil.parseRepoFile(directory, subDirs, unmarshaller);
+    repoDir = repoDirAndXml.repoDir.orNull();
+    repoFile = repoDirAndXml.repoXml.orNull();
 
     if (repoFile == null || !repoFile.isValid()) {
       LOG.warn("No repository information defined for "
@@ -365,16 +320,16 @@ public class StackDirectory extends StackDefinitionDirectory {
     //todo: is it ok for this file not to exist?
     if (stackMetaInfoFile.exists()) {
       if (LOG.isDebugEnabled()) {
-        LOG.debug("Reading stack version metainfo from file " + stackMetaInfoFile.getAbsolutePath());
+        LOG.debug("Reading stack version metainfo from file {}", stackMetaInfoFile.getAbsolutePath());
       }
 
       try {
         metaInfoXml = unmarshaller.unmarshal(StackMetainfoXml.class, stackMetaInfoFile);
-      } catch (JAXBException e) {
+      } catch (Exception e) {
         metaInfoXml = new StackMetainfoXml();
         metaInfoXml.setValid(false);
         String msg = "Unable to parse stack metainfo.xml file at location: " +
-                     stackMetaInfoFile.getAbsolutePath();
+            stackMetaInfoFile.getAbsolutePath();
         metaInfoXml.addError(msg);
         LOG.warn(msg);
       }
@@ -384,16 +339,16 @@ public class StackDirectory extends StackDefinitionDirectory {
   /**
    * Parse the stacks service directories.
    *
-   * @param subDirs  stack sub directories
-   * @throws AmbariException  if unable to parse the service directories
+   * @param subDirs stack sub directories
+   * @throws AmbariException if unable to parse the service directories
    */
   private void parseServiceDirectories(Collection<String> subDirs) throws AmbariException {
-    Collection<ServiceDirectory> dirs = new HashSet<ServiceDirectory>();
+    Collection<ServiceDirectory> dirs = new HashSet<>();
 
     if (subDirs.contains(ServiceDirectory.SERVICES_FOLDER_NAME)) {
       String servicesDir = getAbsolutePath() + File.separator + ServiceDirectory.SERVICES_FOLDER_NAME;
       File baseServiceDir = new File(servicesDir);
-      File[] serviceFolders = baseServiceDir.listFiles(AmbariMetaInfo.FILENAME_FILTER);
+      File[] serviceFolders = baseServiceDir.listFiles(FILENAME_FILTER);
       if (serviceFolders != null) {
         for (File d : serviceFolders) {
           if (d.isDirectory()) {
@@ -417,10 +372,11 @@ public class StackDirectory extends StackDefinitionDirectory {
     serviceDirectories = dirs;
   }
 
+
   /**
    * Parse all stack upgrade files for the stack.
    *
-   * @param subDirs  stack sub directories
+   * @param subDirs stack sub directories
    * @throws AmbariException if unable to parse stack upgrade file
    */
   private void parseUpgradePacks(Collection<String> subDirs) throws AmbariException {
@@ -432,27 +388,16 @@ public class StackDirectory extends StackDefinitionDirectory {
         upgradesDir = f.getAbsolutePath();
         for (File upgradeFile : f.listFiles(XML_FILENAME_FILTER)) {
           if (upgradeFile.getName().toLowerCase().startsWith(CONFIG_UPGRADE_XML_FILENAME_PREFIX)) {
-            try { // Parse config upgrade pack
-              if (configUpgradePack == null) {
-                configUpgradePack = unmarshaller.unmarshal(ConfigUpgradePack.class, upgradeFile);
-              } else { // If user messed things up with lower/upper case filenames
-                throw new AmbariException(String.format("There are multiple files with name like %s" +
-                        upgradeFile.getAbsolutePath()));
-              }
-            } catch (JAXBException e) {
-              throw new AmbariException("Unable to parse stack upgrade file at location: " +
-                      upgradeFile.getAbsolutePath(), e);
+            if (configUpgradePack == null) {
+              configUpgradePack = parseConfigUpgradePack(upgradeFile);
+            } else { // If user messed things up with lower/upper case filenames
+              throw new AmbariException(String.format("There are multiple files with name like %s" + upgradeFile.getAbsolutePath()));
             }
           } else {
-            try {
-              String upgradePackName = FilenameUtils.removeExtension(upgradeFile.getName());
-              UpgradePack pack = unmarshaller.unmarshal(UpgradePack.class, upgradeFile);
-              pack.setName(upgradePackName);
-              upgradeMap.put(upgradePackName, pack);
-            } catch (JAXBException e) {
-              throw new AmbariException("Unable to parse stack upgrade file at location: " +
-                      upgradeFile.getAbsolutePath(), e);
-            }
+            String upgradePackName = FilenameUtils.removeExtension(upgradeFile.getName());
+            UpgradePack pack = parseUpgradePack(upgradePackName, upgradeFile);
+            pack.setName(upgradePackName);
+            upgradeMap.put(upgradePackName, pack);
           }
         }
       }
@@ -462,16 +407,45 @@ public class StackDirectory extends StackDefinitionDirectory {
       LOG.info("Stack '{}' doesn't contain an upgrade directory ", getPath());
     }
 
-    if (! upgradeMap.isEmpty()) {
+    if (!upgradeMap.isEmpty()) {
       upgradePacks = upgradeMap;
     }
 
     if (configUpgradePack != null) {
       this.configUpgradePack = configUpgradePack;
     } else {
+      ConfigUpgradePack emptyConfigUpgradePack = new ConfigUpgradePack();
+      emptyConfigUpgradePack.services = new ArrayList<>();
+      this.configUpgradePack = emptyConfigUpgradePack;
       LOG.info("Stack '{}' doesn't contain config upgrade pack file", getPath());
     }
+  }
 
+  private UpgradePack parseUpgradePack(final String packName, File upgradeFile) throws AmbariException {
+    UpgradePack pack = null;
+    try {
+      pack = unmarshaller.unmarshal(UpgradePack.class, upgradeFile);
+      pack.setName(packName);
+    } catch (Exception e) {
+      if (upgradeFile == null) {
+        throw new AmbariException("Null upgrade pack");
+      }
+      throw new AmbariException("Unable to parse stack upgrade file at location: " + upgradeFile.getAbsolutePath(), e);
+    }
+    return pack;
+  }
+
+  private ConfigUpgradePack parseConfigUpgradePack(File upgradeFile) throws AmbariException {
+    ConfigUpgradePack pack = null;
+    try {
+      pack = unmarshaller.unmarshal(ConfigUpgradePack.class, upgradeFile);
+    } catch (Exception e) {
+      if (upgradeFile == null) {
+        throw new AmbariException("Null config upgrade pack");
+      }
+      throw new AmbariException("Unable to parse stack upgrade file at location: " + upgradeFile.getAbsolutePath(), e);
+    }
+    return pack;
   }
 
   /**
@@ -481,53 +455,23 @@ public class StackDirectory extends StackDefinitionDirectory {
     HashMap<String, Object> result = null;
     ObjectMapper mapper = new ObjectMapper();
     try {
-      TypeReference<Map<String, Object>> rcoElementTypeReference = new TypeReference<Map<String, Object>>() {};
+      TypeReference<Map<String, Object>> rcoElementTypeReference = new TypeReference<Map<String, Object>>() {
+      };
       if (rcoFilePath != null) {
         File file = new File(rcoFilePath);
         result = mapper.readValue(file, rcoElementTypeReference);
         LOG.info("Role command order info was loaded from file: {}", file.getAbsolutePath());
       } else {
         LOG.info("Stack '{}' doesn't contain role command order file", getPath());
-        result = new HashMap<String, Object>();
+        result = new HashMap<>();
       }
       roleCommandOrder = new StackRoleCommandOrder(result);
-      parseRoleCommandOrdersForServices();
       if (LOG.isDebugEnabled()) {
-        LOG.debug("Role Command Order for " + rcoFilePath);
+        LOG.debug("Role Command Order for {}", rcoFilePath);
         roleCommandOrder.printRoleCommandOrder(LOG);
       }
     } catch (IOException e) {
       LOG.error(String.format("Can not read role command order info %s", rcoFilePath), e);
     }
   }
-
-  private void parseRoleCommandOrdersForServices() {
-    if (rcoFilePath != null) {
-      File stack = new File(rcoFilePath).getParentFile();
-      File servicesDir = new File(stack, "services");
-      File[] services = servicesDir.listFiles();
-      for (File service : services) {
-        if (service.isDirectory()) {
-          File rcoFile = new File(service, ROLE_COMMAND_ORDER_FILE);
-          if (rcoFile.exists())
-            parseRoleCommandOrdersForService(rcoFile);
-        }
-      }
-    }
-  }
-
-  private void parseRoleCommandOrdersForService(File rcoFile) {
-    HashMap<String, Object> result = null;
-    ObjectMapper mapper = new ObjectMapper();
-    TypeReference<Map<String, Object>> rcoElementTypeReference = new TypeReference<Map<String, Object>>() {};
-    try {
-      result = mapper.readValue(rcoFile, rcoElementTypeReference);
-      LOG.info("Role command order info was loaded from file: {}", rcoFile.getAbsolutePath());
-      StackRoleCommandOrder serviceRoleCommandOrder = new StackRoleCommandOrder(result);
-      roleCommandOrder.merge(serviceRoleCommandOrder, true);
-    } catch (IOException e) {
-      LOG.error(String.format("Can not read role command order info %s", rcoFile), e);
-    }
-  }
-
 }

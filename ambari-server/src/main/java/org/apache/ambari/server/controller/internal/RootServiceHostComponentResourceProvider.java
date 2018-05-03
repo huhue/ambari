@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,7 +18,6 @@
 
 package org.apache.ambari.server.controller.internal;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
@@ -35,36 +34,55 @@ import org.apache.ambari.server.controller.spi.NoSuchResourceException;
 import org.apache.ambari.server.controller.spi.Predicate;
 import org.apache.ambari.server.controller.spi.Request;
 import org.apache.ambari.server.controller.spi.Resource;
+import org.apache.ambari.server.controller.spi.Resource.Type;
 import org.apache.ambari.server.controller.spi.SystemException;
 import org.apache.ambari.server.controller.spi.UnsupportedPropertyException;
-import org.apache.ambari.server.controller.spi.Resource.Type;
 import org.apache.ambari.server.controller.utilities.PropertyHelper;
 
-public class RootServiceHostComponentResourceProvider extends
-    ReadOnlyResourceProvider {
-  
-  public static final String SERVICE_NAME_PROPERTY_ID = PropertyHelper
-      .getPropertyId("RootServiceHostComponents", "service_name");
-  public static final String HOST_NAME_PROPERTY_ID = PropertyHelper
-      .getPropertyId("RootServiceHostComponents", "host_name");
-  public static final String COMPONENT_NAME_PROPERTY_ID = PropertyHelper
-      .getPropertyId("RootServiceHostComponents", "component_name");
-  public static final String COMPONENT_VERSION_PROPERTY_ID = PropertyHelper
-      .getPropertyId("RootServiceHostComponents", "component_version");
-  public static final String COMPONENT_STATE_PROPERTY_ID = PropertyHelper
-      .getPropertyId("RootServiceHostComponents", "component_state");
-  public static final String PROPERTIES_PROPERTY_ID = PropertyHelper
-      .getPropertyId("RootServiceHostComponents", "properties");
-  
-  
-  private Set<String> pkPropertyIds = new HashSet<String>(
-      Arrays.asList(new String[] { SERVICE_NAME_PROPERTY_ID, HOST_NAME_PROPERTY_ID, COMPONENT_NAME_PROPERTY_ID }));
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
 
+public class RootServiceHostComponentResourceProvider extends ReadOnlyResourceProvider {
 
-  public RootServiceHostComponentResourceProvider(Set<String> propertyIds,
-      Map<Type, String> keyPropertyIds,
-      AmbariManagementController managementController) {
-    super(propertyIds, keyPropertyIds, managementController);
+  public static final String RESPONSE_KEY = "RootServiceHostComponents";
+
+  public static final String SERVICE_NAME = "service_name";
+  public static final String HOST_NAME = "host_name";
+  public static final String COMPONENT_NAME = "component_name";
+  public static final String COMPONENT_VERSION = "component_version";
+  public static final String COMPONENT_STATE = "component_state";
+  public static final String PROPERTIES = "properties";
+
+  public static final String SERVICE_NAME_PROPERTY_ID = RESPONSE_KEY + PropertyHelper.EXTERNAL_PATH_SEP + SERVICE_NAME;
+  public static final String HOST_NAME_PROPERTY_ID = RESPONSE_KEY + PropertyHelper.EXTERNAL_PATH_SEP + HOST_NAME;
+  public static final String COMPONENT_NAME_PROPERTY_ID = RESPONSE_KEY + PropertyHelper.EXTERNAL_PATH_SEP + COMPONENT_NAME;
+  public static final String COMPONENT_VERSION_PROPERTY_ID = RESPONSE_KEY + PropertyHelper.EXTERNAL_PATH_SEP + COMPONENT_VERSION;
+  public static final String COMPONENT_STATE_PROPERTY_ID = RESPONSE_KEY + PropertyHelper.EXTERNAL_PATH_SEP + COMPONENT_STATE;
+  public static final String PROPERTIES_PROPERTY_ID = RESPONSE_KEY + PropertyHelper.EXTERNAL_PATH_SEP + PROPERTIES;
+
+  /**
+   * The key property ids for a RootServiceHostComponent resource.
+   */
+  private static Map<Resource.Type, String> keyPropertyIds = ImmutableMap.<Resource.Type, String>builder()
+      .put(Type.RootService, SERVICE_NAME_PROPERTY_ID)
+      .put(Type.Host, HOST_NAME_PROPERTY_ID)
+      .put(Type.RootServiceComponent, COMPONENT_NAME_PROPERTY_ID)
+      .put(Type.RootServiceHostComponent, COMPONENT_NAME_PROPERTY_ID)
+      .build();
+
+  /**
+   * The property ids for a RootServiceHostComponent resource.
+   */
+  private static Set<String> propertyIds = Sets.newHashSet(
+      SERVICE_NAME_PROPERTY_ID,
+      HOST_NAME_PROPERTY_ID,
+      COMPONENT_NAME_PROPERTY_ID,
+      COMPONENT_VERSION_PROPERTY_ID,
+      COMPONENT_STATE_PROPERTY_ID,
+      PROPERTIES_PROPERTY_ID);
+
+  public RootServiceHostComponentResourceProvider(AmbariManagementController managementController) {
+    super(Type.RootServiceHostComponent, propertyIds, keyPropertyIds, managementController);
   }
 
   
@@ -73,10 +91,10 @@ public class RootServiceHostComponentResourceProvider extends
       throws SystemException, UnsupportedPropertyException,
       NoSuchResourceException, NoSuchParentResourceException {
 
-    final Set<RootServiceHostComponentRequest> requests = new HashSet<RootServiceHostComponentRequest>();
+    final Set<RootServiceHostComponentRequest> requests = new HashSet<>();
 
     if (predicate == null) {
-      requests.add(getRequest(Collections.<String, Object>emptyMap()));
+      requests.add(getRequest(Collections.emptyMap()));
     } else {
       for (Map<String, Object> propertyMap : getPropertyMaps(predicate)) {
         requests.add(getRequest(propertyMap));
@@ -92,28 +110,17 @@ public class RootServiceHostComponentResourceProvider extends
       }
     });
 
-    Set<Resource> resources = new HashSet<Resource>();
+    Set<Resource> resources = new HashSet<>();
 
     for (RootServiceHostComponentResponse response : responses) {
       Resource resource = new ResourceImpl(Resource.Type.RootServiceHostComponent);
 
-      setResourceProperty(resource, SERVICE_NAME_PROPERTY_ID,
-          response.getServiceName(), requestedIds);
-      
-      setResourceProperty(resource, HOST_NAME_PROPERTY_ID,
-          response.getHostName(), requestedIds);
-      
-      setResourceProperty(resource, COMPONENT_NAME_PROPERTY_ID,
-          response.getComponentName(), requestedIds);
-      
-      setResourceProperty(resource, COMPONENT_STATE_PROPERTY_ID,
-          response.getComponentState(), requestedIds);
-      
-      setResourceProperty(resource, COMPONENT_VERSION_PROPERTY_ID,
-          response.getComponentVersion(), requestedIds);
-      
-      setResourceProperty(resource, PROPERTIES_PROPERTY_ID,
-          response.getProperties(), requestedIds);
+      setResourceProperty(resource, SERVICE_NAME_PROPERTY_ID, response.getServiceName(), requestedIds);
+      setResourceProperty(resource, HOST_NAME_PROPERTY_ID, response.getHostName(), requestedIds);
+      setResourceProperty(resource, COMPONENT_NAME_PROPERTY_ID, response.getComponentName(), requestedIds);
+      setResourceProperty(resource, COMPONENT_STATE_PROPERTY_ID, response.getComponentState(), requestedIds);
+      setResourceProperty(resource, COMPONENT_VERSION_PROPERTY_ID, response.getComponentVersion(), requestedIds);
+      setResourceProperty(resource, PROPERTIES_PROPERTY_ID, response.getProperties(), requestedIds);
 
       resources.add(resource);
     }
@@ -129,21 +136,16 @@ public class RootServiceHostComponentResourceProvider extends
 
   @Override
   protected Set<String> getPKPropertyIds() {
-    return pkPropertyIds;
+    return new HashSet<>(keyPropertyIds.values());
   }
 
   // Get the root service host components for the given set of requests
   protected Set<RootServiceHostComponentResponse> getRootServiceHostComponents(
       Set<RootServiceHostComponentRequest> requests) throws AmbariException {
-    Set<RootServiceHostComponentResponse> response = new HashSet<RootServiceHostComponentResponse>();
+    Set<RootServiceHostComponentResponse> response = new HashSet<>();
     for (RootServiceHostComponentRequest request : requests) {
-      String serviceName = request.getServiceName();
       try {
         Set<RootServiceHostComponentResponse> rootServiceHostComponents = getRootServiceHostComponents(request);
-        for (RootServiceHostComponentResponse rootServiceHostComponentResponse : rootServiceHostComponents ) {
-          rootServiceHostComponentResponse.setServiceName(serviceName);
-        }
-
         response.addAll(rootServiceHostComponents);
       } catch (AmbariException e) {
         if (requests.size() == 1) {
@@ -163,7 +165,7 @@ public class RootServiceHostComponentResourceProvider extends
     AmbariManagementController controller = getManagementController();
     //Get all hosts of all clusters
     Set<HostResponse> hosts = HostResourceProvider.getHosts(controller,
-        new HostRequest(request.getHostName(), null, null));
+        new HostRequest(request.getHostName(), null), null);
 
     return controller.getRootServiceResponseFactory().getRootServiceHostComponent(request, hosts);
   }

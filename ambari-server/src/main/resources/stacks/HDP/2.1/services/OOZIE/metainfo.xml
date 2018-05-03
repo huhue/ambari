@@ -42,7 +42,7 @@
         </osSpecific>
 
         <osSpecific>
-          <osFamily>amazon2015,redhat6,redhat7,suse11</osFamily>
+          <osFamily>amazonlinux2,redhat6,redhat7,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>extjs-2.2-1</name>
@@ -51,13 +51,10 @@
         </osSpecific>
 
         <osSpecific>
-          <osFamily>ubuntu12</osFamily>
+          <osFamily>debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>extjs</name>
-            </package>
-            <package>
-              <name>libxml2-utils</name>
             </package>
           </packages>
         </osSpecific>
@@ -68,6 +65,7 @@
         <config-type>oozie-env</config-type>
         <config-type>oozie-log4j</config-type>
         <config-type>yarn-site</config-type>
+        <config-type>core-site</config-type>
       </configuration-dependencies>
     </service>
   </services>

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,9 +19,14 @@ package org.apache.ambari.server.state.stack.upgrade;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.apache.commons.lang.StringUtils;
+
+import com.google.common.base.Objects;
 
 /**
  * Aggregates all upgrade tasks for a HostComponent into one wrapper.
@@ -32,18 +37,21 @@ public class TaskWrapper {
   private String component;
   private Set<String> hosts; // all the hosts that all the tasks must run
   private Map<String, String> params;
+  /* FIXME a TaskWrapper really should be wrapping ONLY ONE task */
   private List<Task> tasks; // all the tasks defined for the hostcomponent
+  private Set<String> timeoutKeys = new HashSet<>();
 
   /**
-   * @param s the service name for the tasks
-   * @param c the component name for the tasks
-   * @param hosts the set of hosts that the tasks are for
-   * @param tasks an array of tasks as a convenience
+   * @param s the service name for the task
+   * @param c the component name for the task
+   * @param hosts the set of hosts that the task is for
+   * @param task a single task
    */
-  public TaskWrapper(String s, String c, Set<String> hosts, Task... tasks) {
-    this(s, c, hosts, null, Arrays.asList(tasks));
+  public TaskWrapper(String s, String c, Set<String> hosts, Task task) {
+    this(s, c, hosts, null, task);
   }
-  
+
+
   /**
    * @param s the service name for the tasks
    * @param c the component name for the tasks
@@ -67,8 +75,15 @@ public class TaskWrapper {
     component = c;
 
     this.hosts = hosts;
-    this.params = (params == null) ? new HashMap<String, String>() : params;
+    this.params = (params == null) ? new HashMap<>() : params;
     this.tasks = tasks;
+
+    // !!! FIXME there should only be one task
+    for (Task task : tasks) {
+      if (StringUtils.isNotBlank(task.timeoutConfig)) {
+        timeoutKeys.add(task.timeoutConfig);
+      }
+    }
   }
 
   /**
@@ -92,10 +107,16 @@ public class TaskWrapper {
     return hosts;
   }
 
-
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String toString() {
-    return service + ":" + component + ":" + tasks + ":" + hosts;
+    return Objects.toStringHelper(this).add("service", service)
+        .add("component", component)
+        .add("tasks", tasks)
+        .add("hosts", hosts)
+        .omitNullValues().toString();
   }
 
   /**
@@ -123,6 +144,14 @@ public class TaskWrapper {
     }
 
     return false;
+  }
+
+
+  /**
+   * @return the timeout keys for all the tasks in this wrapper.
+   */
+  public Set<String> getTimeoutKeys() {
+    return timeoutKeys;
   }
 
 }

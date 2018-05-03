@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -34,6 +34,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.persistence.EntityManager;
+
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.ExecutionCommandWrapperFactory;
@@ -46,6 +49,7 @@ import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
 import org.apache.ambari.server.orm.dao.HostRoleCommandStatusSummaryDTO;
 import org.apache.ambari.server.orm.entities.HostRoleCommandEntity;
 import org.apache.ambari.server.orm.entities.StageEntity;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -82,6 +86,10 @@ public class CalculatedStatusTest {
     s_field.setAccessible(true);
   }
 
+  @After
+  public void after() throws Exception {
+    H2DatabaseCleaner.clearDatabase(m_injector.getProvider(EntityManager.class).get());
+  }
 
   @Test
   public void testGetStatus() throws Exception {
@@ -486,7 +494,7 @@ public class CalculatedStatusTest {
 
   @Test
   public void testCalculateStatusCounts() throws Exception {
-    Collection<HostRoleStatus> hostRoleStatuses = new LinkedList<HostRoleStatus>();
+    Collection<HostRoleStatus> hostRoleStatuses = new LinkedList<>();
 
     hostRoleStatuses.add(HostRoleStatus.PENDING);
     hostRoleStatuses.add(HostRoleStatus.QUEUED);
@@ -521,7 +529,7 @@ public class CalculatedStatusTest {
 
   @Test
   public void testCountsWithRepeatHosts() throws Exception {
-    List<Stage> stages = new ArrayList<Stage>();
+    List<Stage> stages = new ArrayList<>();
 
       stages.addAll(getStages(getTaskEntities(
           HostRoleStatus.COMPLETED, HostRoleStatus.COMPLETED,
@@ -657,8 +665,39 @@ public class CalculatedStatusTest {
     assertEquals(HostRoleStatus.IN_PROGRESS, calc.getStatus());
   }
 
+  /**
+   * Tests that when there are no tasks and all counts are 0, that the returned
+   * status is {@link HostRoleStatus#COMPLETED}.
+   *
+   * @throws Exception
+   */
+  @Test
+  public void testGetCompletedStatusForNoTasks() throws Exception {
+    // no status / no tasks
+    CalculatedStatus status = CalculatedStatus.statusFromTaskEntities(
+      new ArrayList<>(), false);
+
+    assertEquals(HostRoleStatus.COMPLETED, status.getStatus());
+
+    // empty summaries
+    status = CalculatedStatus.statusFromStageSummary(
+      new HashMap<>(), new HashSet<>());
+
+    assertEquals(HostRoleStatus.COMPLETED, status.getStatus());
+
+    // generate a map of 0's - COMPLETED=0, IN_PROGRESS=0, etc
+    Map<HostRoleStatus, Integer> counts = CalculatedStatus.calculateStatusCounts(new ArrayList<>());
+    Map<HostRoleStatus, Integer> displayCounts = CalculatedStatus.calculateStatusCounts(new ArrayList<>());
+
+    HostRoleStatus hostRoleStatus = CalculatedStatus.calculateSummaryStatusOfUpgrade(counts, 0);
+    HostRoleStatus hostRoleDisplayStatus = CalculatedStatus.calculateSummaryDisplayStatus(displayCounts, 0, false);
+
+    assertEquals(HostRoleStatus.COMPLETED, hostRoleStatus);
+    assertEquals(HostRoleStatus.COMPLETED, hostRoleDisplayStatus);
+  }
+
   private Collection<HostRoleCommandEntity> getTaskEntities(HostRoleStatus... statuses) {
-    Collection<HostRoleCommandEntity> entities = new LinkedList<HostRoleCommandEntity>();
+    Collection<HostRoleCommandEntity> entities = new LinkedList<>();
 
     for (int i = 0; i < statuses.length; i++) {
       HostRoleStatus status = statuses[i];
@@ -673,7 +712,7 @@ public class CalculatedStatusTest {
 
   private Collection<StageEntity> getStageEntities(Collection<HostRoleCommandEntity> ... taskCollections) {
 
-    Collection<StageEntity> entities = new LinkedList<StageEntity>();
+    Collection<StageEntity> entities = new LinkedList<>();
 
     for (Collection<HostRoleCommandEntity> taskEntities : taskCollections) {
       StageEntity entity = new StageEntity();
@@ -687,7 +726,7 @@ public class CalculatedStatusTest {
 
   private Collection<Stage> getStages(Collection<HostRoleCommandEntity> ... taskCollections) {
 
-    Collection<Stage> entities = new LinkedList<Stage>();
+    Collection<Stage> entities = new LinkedList<>();
 
     for (Collection<HostRoleCommandEntity> taskEntities : taskCollections) {
       TestStage stage = new TestStage();
@@ -701,10 +740,10 @@ public class CalculatedStatusTest {
 
   private class TestStage extends Stage {
 
-    private final List<HostRoleCommand> hostRoleCommands = new LinkedList<HostRoleCommand>();
+    private final List<HostRoleCommand> hostRoleCommands = new LinkedList<>();
 
     private TestStage() {
-      super(1L, "", "", 1L, "", "", "", "", hostRoleCommandFactory, ecwFactory);
+      super(1L, "", "", 1L, "", "", "", hostRoleCommandFactory, ecwFactory);
     }
 
     void setHostRoleCommands(Collection<HostRoleCommandEntity> tasks) {

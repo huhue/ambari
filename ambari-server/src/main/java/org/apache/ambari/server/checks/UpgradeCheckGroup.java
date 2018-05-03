@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -75,9 +75,14 @@ public enum UpgradeCheckGroup {
   COMPONENT_VERSION(9.0f),
 
   /**
-   * A general group for related to Kerberos checks
+   * A general group for related to Kerberos checks.
    */
   KERBEROS(10.0f),
+
+  /**
+   * A general group for informational warning checks.
+   */
+  INFORMATIONAL_WARNING(100.0f),
 
   /**
    * All other checks.
@@ -94,7 +99,7 @@ public enum UpgradeCheckGroup {
    *
    * @param order
    */
-  private UpgradeCheckGroup(Float order) {
+  UpgradeCheckGroup(Float order) {
     m_order = order;
   }
 

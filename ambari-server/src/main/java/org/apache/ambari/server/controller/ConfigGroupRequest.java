@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,34 +17,39 @@
  */
 package org.apache.ambari.server.controller;
 
-import org.apache.ambari.server.state.Config;
-
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.apache.ambari.server.controller.internal.ConfigGroupResourceProvider;
+import org.apache.ambari.server.state.Config;
+
+import io.swagger.annotations.ApiModelProperty;
 
 public class ConfigGroupRequest {
   private Long id;
   private String clusterName;
   private String groupName;
   private String tag;
+  private String serviceName;
   private String description;
   private String serviceConfigVersionNote;
   private Set<String> hosts;
   private Map<String, Config> configs;
 
   public ConfigGroupRequest(Long id, String clusterName, String groupName,
-                            String tag, String description, Set<String> hosts,
-                            Map<String, Config> configs) {
+                            String tag, String serviceName, String description,
+                            Set<String> hosts, Map<String, Config> configs) {
     this.id = id;
     this.clusterName = clusterName;
     this.groupName = groupName;
     this.tag = tag;
+    this.serviceName = serviceName;
     this.description = description;
     this.hosts = hosts;
     this.configs = configs;
   }
 
+  @ApiModelProperty(name = ConfigGroupResourceProvider.CLUSTER_NAME_PROPERTY_ID)
   public String getClusterName() {
     return clusterName;
   }
@@ -53,6 +58,7 @@ public class ConfigGroupRequest {
     this.clusterName = clusterName;
   }
 
+  @ApiModelProperty(name = ConfigGroupResourceProvider.GROUP_NAME_PROPERTY_ID)
   public String getGroupName() {
     return groupName;
   }
@@ -61,6 +67,7 @@ public class ConfigGroupRequest {
     this.groupName = groupName;
   }
 
+  @ApiModelProperty(name = ConfigGroupResourceProvider.TAG_PROPERTY_ID)
   public String getTag() {
     return tag;
   }
@@ -69,6 +76,16 @@ public class ConfigGroupRequest {
     this.tag = tag;
   }
 
+  @ApiModelProperty(name = ConfigGroupResourceProvider.SERVICE_NAME_PROPERTY_ID)
+  public String getServiceName() {
+    return serviceName;
+  }
+
+  public void setServiceName(String serviceName) {
+    this.serviceName = serviceName;
+  }
+
+  @ApiModelProperty(name = ConfigGroupResourceProvider.DESCRIPTION_PROPERTY_ID)
   public String getDescription() {
     return description;
   }
@@ -77,6 +94,7 @@ public class ConfigGroupRequest {
     this.description = description;
   }
 
+  @ApiModelProperty(name = ConfigGroupResourceProvider.HOSTS_PROPERTY_ID)
   public Set<String> getHosts() {
     return hosts;
   }
@@ -85,6 +103,7 @@ public class ConfigGroupRequest {
     this.hosts = hosts;
   }
 
+  @ApiModelProperty(name = ConfigGroupResourceProvider.DESIRED_CONFIGS_PROPERTY_ID)
   public Map<String, Config> getConfigs() {
     return configs;
   }
@@ -93,6 +112,7 @@ public class ConfigGroupRequest {
     this.configs = configs;
   }
 
+  @ApiModelProperty(name = ConfigGroupResourceProvider.ID_PROPERTY_ID)
   public Long getId() {
     return id;
   }
@@ -101,6 +121,7 @@ public class ConfigGroupRequest {
     this.id = id;
   }
 
+  @ApiModelProperty(name = ConfigGroupResourceProvider.SERVICE_CONFIG_VERSION_NOTE_PROPERTY_ID)
   public String getServiceConfigVersionNote() {
     return serviceConfigVersionNote;
   }

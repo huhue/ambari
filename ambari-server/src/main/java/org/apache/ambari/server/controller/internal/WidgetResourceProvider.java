@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,8 +17,13 @@
  */
 package org.apache.ambari.server.controller.internal;
 
-import com.google.gson.Gson;
-import com.google.inject.Inject;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.ObjectNotFoundException;
 import org.apache.ambari.server.StaticallyInject;
@@ -47,12 +52,8 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import com.google.gson.Gson;
+import com.google.inject.Inject;
 
 /**
  * Resource provider for repository versions resources.
@@ -73,7 +74,8 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
   public static final String WIDGET_METRICS_PROPERTY_ID                 = PropertyHelper.getPropertyId("WidgetInfo", "metrics");
   public static final String WIDGET_VALUES_PROPERTY_ID                 = PropertyHelper.getPropertyId("WidgetInfo", "values");
   public static final String WIDGET_PROPERTIES_PROPERTY_ID                 = PropertyHelper.getPropertyId("WidgetInfo", "properties");
-  public static enum SCOPE {
+  public static final String WIDGET_TAG_PROPERTY_ID                 = PropertyHelper.getPropertyId("WidgetInfo", "tag");
+  public enum SCOPE {
     CLUSTER,
     USER
   }
@@ -99,6 +101,7 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
       add(WIDGET_METRICS_PROPERTY_ID);
       add(WIDGET_VALUES_PROPERTY_ID);
       add(WIDGET_PROPERTIES_PROPERTY_ID);
+      add(WIDGET_TAG_PROPERTY_ID);
     }
   };
 
@@ -122,7 +125,7 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
    *
    */
   public WidgetResourceProvider(AmbariManagementController managementController) {
-    super(propertyIds, keyPropertyIds, managementController);
+    super(Type.Widget, propertyIds, keyPropertyIds, managementController);
   }
 
   @Override
@@ -132,7 +135,7 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
       ResourceAlreadyExistsException,
       NoSuchParentResourceException {
 
-    Set<Resource> associatedResources = new HashSet<Resource>();
+    Set<Resource> associatedResources = new HashSet<>();
 
     for (final Map<String, Object> properties : request.getProperties()) {
       WidgetEntity widgetEntity = createResources(new Command<WidgetEntity>() {
@@ -177,7 +180,7 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
                   gson.toJson(properties.get(WIDGET_VALUES_PROPERTY_ID)) : null;
           entity.setWidgetValues(values);
 
-          Map<String, Object> widgetPropertiesMap = new HashMap<String, Object>();
+          Map<String, Object> widgetPropertiesMap = new HashMap<>();
           for (Map.Entry<String, Object> entry : properties.entrySet()) {
             if (PropertyHelper.getPropertyCategory(entry.getKey()).equals(WIDGET_PROPERTIES_PROPERTY_ID)) {
               widgetPropertiesMap.put(PropertyHelper.getPropertyName(entry.getKey()), entry.getValue());
@@ -187,6 +190,10 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
           String widgetProperties = (widgetPropertiesMap.isEmpty()) ?
                   null : gson.toJson(widgetPropertiesMap);
           entity.setProperties(widgetProperties);
+
+          if (properties.containsKey(WIDGET_TAG_PROPERTY_ID)){
+            entity.setTag(properties.get(WIDGET_TAG_PROPERTY_ID).toString());
+          }
 
           widgetDAO.create(entity);
           notifyCreate(Type.Widget, request);
@@ -205,12 +212,12 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
   @Override
   public Set<Resource> getResources(Request request, Predicate predicate)
       throws SystemException, UnsupportedPropertyException, NoSuchResourceException, NoSuchParentResourceException {
-    final Set<Resource> resources = new HashSet<Resource>();
+    final Set<Resource> resources = new HashSet<>();
     final Set<String> requestedIds = getRequestPropertyIds(request, predicate);
     final Set<Map<String, Object>> propertyMaps = getPropertyMaps(predicate);
     String author = AuthorizationHelper.getAuthenticatedName();
 
-    List<WidgetEntity> requestedEntities = new ArrayList<WidgetEntity>();
+    List<WidgetEntity> requestedEntities = new ArrayList<>();
 
     for (Map<String, Object> propertyMap: propertyMaps) {
       if (propertyMap.get(WIDGET_ID_PROPERTY_ID) != null) {
@@ -245,6 +252,7 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
       resource.setProperty(WIDGET_SCOPE_PROPERTY_ID, entity.getScope());
       setResourceProperty(resource, WIDGET_VALUES_PROPERTY_ID, entity.getWidgetValues(), requestedIds);
       setResourceProperty(resource, WIDGET_PROPERTIES_PROPERTY_ID, entity.getProperties(), requestedIds);
+      setResourceProperty(resource, WIDGET_TAG_PROPERTY_ID, entity.getTag(), requestedIds);
 
       String clusterName = null;
       try {
@@ -312,7 +320,7 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
             entity.setWidgetValues(gson.toJson(propertyMap.get(WIDGET_VALUES_PROPERTY_ID)));
           }
 
-          Map<String, Object> widgetPropertiesMap = new HashMap<String, Object>();
+          Map<String, Object> widgetPropertiesMap = new HashMap<>();
           for (Map.Entry<String, Object> entry : propertyMap.entrySet()) {
             if (PropertyHelper.getPropertyCategory(entry.getKey()).equals(WIDGET_PROPERTIES_PROPERTY_ID)) {
               widgetPropertiesMap.put(PropertyHelper.getPropertyName(entry.getKey()), entry.getValue());
@@ -321,6 +329,10 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
 
           if (!widgetPropertiesMap.isEmpty()) {
             entity.setProperties(gson.toJson(widgetPropertiesMap));
+          }
+
+          if (StringUtils.isNotBlank(ObjectUtils.toString(propertyMap.get(WIDGET_TAG_PROPERTY_ID)))) {
+            entity.setTag(propertyMap.get(WIDGET_TAG_PROPERTY_ID).toString());
           }
 
           widgetDAO.merge(entity);
@@ -337,7 +349,7 @@ public class WidgetResourceProvider extends AbstractControllerResourceProvider {
       throws SystemException, UnsupportedPropertyException, NoSuchResourceException, NoSuchParentResourceException {
     final Set<Map<String, Object>> propertyMaps = getPropertyMaps(predicate);
 
-    final List<WidgetEntity> entitiesToBeRemoved = new ArrayList<WidgetEntity>();
+    final List<WidgetEntity> entitiesToBeRemoved = new ArrayList<>();
     for (Map<String, Object> propertyMap : propertyMaps) {
       final Long id;
       try {

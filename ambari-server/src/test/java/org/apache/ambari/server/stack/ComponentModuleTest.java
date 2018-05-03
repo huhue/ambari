@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,6 +18,17 @@
 
 package org.apache.ambari.server.stack;
 
+import static org.easymock.EasyMock.createNiceMock;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 import org.apache.ambari.server.state.AutoDeployInfo;
 import org.apache.ambari.server.state.BulkCommandDefinition;
 import org.apache.ambari.server.state.ClientConfigFileDefinition;
@@ -25,18 +36,8 @@ import org.apache.ambari.server.state.CommandScriptDefinition;
 import org.apache.ambari.server.state.ComponentInfo;
 import org.apache.ambari.server.state.CustomCommandDefinition;
 import org.apache.ambari.server.state.DependencyInfo;
+import org.apache.ambari.server.state.UnlimitedKeyJCERequirement;
 import org.junit.Test;
-
-import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-
-import static org.easymock.EasyMock.createNiceMock;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
 
 /**
  * ComponentModule unit test case.
@@ -90,7 +91,7 @@ public class ComponentModuleTest {
 
   @Test
   public void testResolve_ClientConfigFiles() {
-    List<ClientConfigFileDefinition> clientConfigs = new ArrayList<ClientConfigFileDefinition>();
+    List<ClientConfigFileDefinition> clientConfigs = new ArrayList<>();
     ClientConfigFileDefinition clientConfig1 = new ClientConfigFileDefinition();
     clientConfig1.setType("type1");
     clientConfig1.setDictionaryName("dictName1");
@@ -115,7 +116,7 @@ public class ComponentModuleTest {
     assertEquals(clientConfigs, resolveComponent(info, parentInfo).getModuleInfo().getClientConfigFiles());
 
     // value set in both parent and child; child overwrites with no merge
-    List<ClientConfigFileDefinition> clientConfigs2 = new ArrayList<ClientConfigFileDefinition>();
+    List<ClientConfigFileDefinition> clientConfigs2 = new ArrayList<>();
     ClientConfigFileDefinition clientConfig3 = new ClientConfigFileDefinition();
     clientConfig3.setType("type1");
     clientConfig3.setDictionaryName("dictName1");
@@ -155,11 +156,14 @@ public class ComponentModuleTest {
     String cardinality = "foo";
 
     ComponentInfo info = new ComponentInfo();
-    ComponentInfo parentInfo = new ComponentInfo();
+    // parent is null, child cardinality is null
+    assertEquals("0+", resolveComponent(info, null).getModuleInfo().getCardinality());
 
+    ComponentInfo parentInfo = new ComponentInfo();
+    info = new ComponentInfo();
     // parent has value set, child value is null
     parentInfo.setCardinality(cardinality);
-    assertEquals("0+", resolveComponent(info, parentInfo).getModuleInfo().getCardinality());
+    assertEquals("foo", resolveComponent(info, parentInfo).getModuleInfo().getCardinality());
 
     // child has value set, parent value is null
     info.setCardinality(cardinality);
@@ -171,6 +175,31 @@ public class ComponentModuleTest {
     info.setCardinality(cardinality2);
     parentInfo.setCardinality(cardinality);
     assertEquals(cardinality2, resolveComponent(info, parentInfo).getModuleInfo().getCardinality());
+  }
+
+  @Test
+  public void testResolve_TimelineAppId() {
+    String timelineAppId = "app";
+
+    ComponentInfo info = new ComponentInfo();
+    assertEquals(null, resolveComponent(info, null).getModuleInfo().getTimelineAppid());
+
+    ComponentInfo parentInfo = new ComponentInfo();
+    info = new ComponentInfo();
+    // parent has value set, child value is null
+    parentInfo.setTimelineAppid(timelineAppId);
+    assertEquals(timelineAppId, resolveComponent(info, parentInfo).getModuleInfo().getTimelineAppid());
+
+    // child has value set, parent value is null
+    info.setTimelineAppid(timelineAppId);
+    parentInfo.setTimelineAppid(null);
+    assertEquals(timelineAppId, resolveComponent(info, parentInfo).getModuleInfo().getTimelineAppid());
+
+    // value set in both parent and child; child overwrites
+    String timelineAppId2 = "app2";
+    info.setTimelineAppid(timelineAppId2);
+    parentInfo.setTimelineAppid(timelineAppId);
+    assertEquals(timelineAppId2, resolveComponent(info, parentInfo).getModuleInfo().getTimelineAppid());
   }
 
   @Test
@@ -200,7 +229,7 @@ public class ComponentModuleTest {
 
   @Test
   public void testResolve_Dependencies() {
-    List<DependencyInfo> dependencies = new ArrayList<DependencyInfo>();
+    List<DependencyInfo> dependencies = new ArrayList<>();
     DependencyInfo dependency1 = new DependencyInfo();
     dependency1.setName("service/one");
     DependencyInfo dependency2 = new DependencyInfo();
@@ -222,7 +251,7 @@ public class ComponentModuleTest {
 
     // value set in both parent and child; merge parent and child
     //todo: currently there is no way to remove an inherited dependency
-    List<DependencyInfo> dependencies2 = new ArrayList<DependencyInfo>();
+    List<DependencyInfo> dependencies2 = new ArrayList<>();
     DependencyInfo dependency3 = new DependencyInfo();
     dependency3.setName("service/two");
     DependencyInfo dependency4 = new DependencyInfo();
@@ -242,7 +271,7 @@ public class ComponentModuleTest {
 
   @Test
   public void testResolve_CustomCommands() throws Exception {
-    List<CustomCommandDefinition> commands = new ArrayList<CustomCommandDefinition>();
+    List<CustomCommandDefinition> commands = new ArrayList<>();
     CustomCommandDefinition command1 = new CustomCommandDefinition();
     setPrivateField(command1, "name", "one");
     CustomCommandDefinition command2 = new CustomCommandDefinition();
@@ -264,7 +293,7 @@ public class ComponentModuleTest {
 
     // value set in both parent and child; merge parent and child
     //todo: currently there is no way to remove an inherited command
-    List<CustomCommandDefinition> commands2 = new ArrayList<CustomCommandDefinition>();
+    List<CustomCommandDefinition> commands2 = new ArrayList<>();
     CustomCommandDefinition command3 = new CustomCommandDefinition();
     // override command 2
     setPrivateField(command3, "name", "two");
@@ -288,7 +317,7 @@ public class ComponentModuleTest {
   // merged if any config dependency is specified in the child.  So, the merged result is either the child
   // dependencies or if null, the parent dependencies.
   public void testResolve_ConfigDependencies() {
-    List<String> dependencies = new ArrayList<String>();
+    List<String> dependencies = new ArrayList<>();
     String dependency1 = "one";
     String dependency2 = "two";
     dependencies.add(dependency1);
@@ -307,7 +336,7 @@ public class ComponentModuleTest {
     assertEquals(dependencies, resolveComponent(info, parentInfo).getModuleInfo().getConfigDependencies());
 
     // value set in both parent and child; merge parent and child
-    List<String> dependencies2 = new ArrayList<String>();
+    List<String> dependencies2 = new ArrayList<>();
     String dependency3 = "two";
     String dependency4 = "four";
     dependencies2.add(dependency3);
@@ -327,7 +356,7 @@ public class ComponentModuleTest {
   // in that the collections aren't merged if any "client to update configs" is specified in the child.
   // So, the merged result is either the child collection or if null, the parent collection.
   public void testResolve_ClientToUpdateConfigs() {
-    List<String> clientsToUpdate = new ArrayList<String>();
+    List<String> clientsToUpdate = new ArrayList<>();
     String client1 = "one";
     String client2 = "two";
     clientsToUpdate.add(client1);
@@ -346,7 +375,7 @@ public class ComponentModuleTest {
     assertEquals(clientsToUpdate, resolveComponent(info, parentInfo).getModuleInfo().getClientsToUpdateConfigs());
 
     // value set in both parent and child; merge parent and child
-    List<String> clientsToUpdate2 = new ArrayList<String>();
+    List<String> clientsToUpdate2 = new ArrayList<>();
     String client3 = "two";
     String client4 = "four";
     clientsToUpdate2.add(client3);
@@ -445,6 +474,40 @@ public class ComponentModuleTest {
   }
 
   @Test
+  public void testResolve_UnlimitedKeyJCERequiredInheritance(){
+    List<ComponentInfo> components = createComponentInfo(2);
+    ComponentInfo info = components.get(0);
+    ComponentInfo parentInfo = components.get(1);
+
+    //parent has it, child doesn't
+    parentInfo.setUnlimitedKeyJCERequired(UnlimitedKeyJCERequirement.ALWAYS);
+    assertSame(UnlimitedKeyJCERequirement.ALWAYS, resolveComponent(info, parentInfo).getModuleInfo().getUnlimitedKeyJCERequired());
+  }
+
+  @Test
+  public void testResolve_UnlimitedKeyJCERequired(){
+    List<ComponentInfo> components = createComponentInfo(2);
+    ComponentInfo info = components.get(0);
+    ComponentInfo parentInfo = components.get(1);
+
+    //parent doesn't have it, child has it
+    info.setUnlimitedKeyJCERequired(UnlimitedKeyJCERequirement.NEVER);
+    assertSame(UnlimitedKeyJCERequirement.NEVER, resolveComponent(info, parentInfo).getModuleInfo().getUnlimitedKeyJCERequired());
+  }
+
+  @Test
+  public void testResolve_UnlimitedKeyJCERequiredOverwrite(){
+    List<ComponentInfo> components = createComponentInfo(2);
+    ComponentInfo info = components.get(0);
+    ComponentInfo parentInfo = components.get(1);
+
+    //parent has it, child overwrites it
+    parentInfo.setUnlimitedKeyJCERequired(UnlimitedKeyJCERequirement.KERBEROS_ENABLED);
+    info.setUnlimitedKeyJCERequired(UnlimitedKeyJCERequirement.ALWAYS);
+    assertSame(UnlimitedKeyJCERequirement.ALWAYS, resolveComponent(info, parentInfo).getModuleInfo().getUnlimitedKeyJCERequired());
+  }
+
+  @Test
   public void testResolve_Reassignable(){
     List<ComponentInfo> components = createComponentInfo(2);
     ComponentInfo info = components.get(0);
@@ -478,8 +541,70 @@ public class ComponentModuleTest {
     assertSame("true", resolveComponent(info, parentInfo).getModuleInfo().getReassignAllowed());
   }
 
+  /**
+   * Test that versionAdvertised is resolved correctly.
+   */
+  @Test
+  public void testResolve_VersionAdvertised() {
+    List<ComponentInfo> components = createComponentInfo(2);
+    ComponentInfo info = components.get(0);
+    ComponentInfo parentInfo = components.get(1);
+
+    // Test cases where the current Component Info explicitly sets the value.
+
+    // 1. Chain of versionAdvertised is: true (parent) -> true (current) => true
+    parentInfo.setVersionAdvertisedField(new Boolean(true));
+    parentInfo.setVersionAdvertised(true);
+    info.setVersionAdvertisedField(new Boolean(true));
+    assertEquals(true, resolveComponent(info, parentInfo).getModuleInfo().isVersionAdvertised());
+
+    // 2. Chain of versionAdvertised is: true (parent) -> false (current) => false
+    parentInfo.setVersionAdvertisedField(new Boolean(true));
+    parentInfo.setVersionAdvertised(true);
+    info.setVersionAdvertisedField(new Boolean(false));
+    assertEquals(false, resolveComponent(info, parentInfo).getModuleInfo().isVersionAdvertised());
+
+    // 3. Chain of versionAdvertised is: false (parent) -> true (current) => true
+    parentInfo.setVersionAdvertisedField(new Boolean(false));
+    parentInfo.setVersionAdvertised(false);
+    info.setVersionAdvertisedField(new Boolean(true));
+    assertEquals(true, resolveComponent(info, parentInfo).getModuleInfo().isVersionAdvertised());
+
+    // 4. Chain of versionAdvertised is: null (parent) -> true (current) => true
+    parentInfo.setVersionAdvertisedField(null);
+    parentInfo.setVersionAdvertised(false);
+    info.setVersionAdvertisedField(new Boolean(true));
+    assertEquals(true, resolveComponent(info, parentInfo).getModuleInfo().isVersionAdvertised());
+
+    // Test cases where current Component Info is null so it should inherit from parent.
+
+    // 5. Chain of versionAdvertised is: true (parent) -> null (current) => true
+    parentInfo.setVersionAdvertisedField(new Boolean(true));
+    parentInfo.setVersionAdvertised(true);
+    info.setVersionAdvertisedField(null);
+    assertEquals(true, resolveComponent(info, parentInfo).getModuleInfo().isVersionAdvertised());
+
+    // 6. Chain of versionAdvertised is: true (parent) -> inherit (current) => true
+    parentInfo.setVersionAdvertisedField(new Boolean(true));
+    parentInfo.setVersionAdvertised(true);
+    info.setVersionAdvertisedField(null);
+    assertEquals(true, resolveComponent(info, parentInfo).getModuleInfo().isVersionAdvertised());
+
+    // 7. Chain of versionAdvertised is: false (parent) -> null (current) => false
+    parentInfo.setVersionAdvertisedField(new Boolean(false));
+    parentInfo.setVersionAdvertised(false);
+    info.setVersionAdvertisedField(null);
+    assertEquals(false, resolveComponent(info, parentInfo).getModuleInfo().isVersionAdvertised());
+
+    // 8. Chain of versionAdvertised is: false (parent) -> inherit (current) => false
+    parentInfo.setVersionAdvertisedField(new Boolean(false));
+    parentInfo.setVersionAdvertised(false);
+    info.setVersionAdvertisedField(null);
+    assertEquals(false, resolveComponent(info, parentInfo).getModuleInfo().isVersionAdvertised());
+  }
+
   private List<ComponentInfo> createComponentInfo(int count){
-    List<ComponentInfo> result = new ArrayList<ComponentInfo>();
+    List<ComponentInfo> result = new ArrayList<>();
     if(count > 0) {
       for(int i = 0; i < count; i++){
         result.add(new ComponentInfo());
@@ -490,12 +615,14 @@ public class ComponentModuleTest {
 
   private ComponentModule resolveComponent(ComponentInfo info, ComponentInfo parentInfo) {
     info.setName("FOO");
-    parentInfo.setName("FOO");
-
     ComponentModule component = new ComponentModule(info);
-    ComponentModule parentComponent = new ComponentModule(parentInfo);
+    ComponentModule parentComponent = null;
+    if (parentInfo != null) {
+      parentInfo.setName("FOO");
+      parentComponent = new ComponentModule(parentInfo);
+    }
 
-    component.resolve(parentComponent, Collections.<String, StackModule>emptyMap(), Collections.<String, ServiceModule>emptyMap());
+    component.resolve(parentComponent, Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap());
 
     return component;
   }

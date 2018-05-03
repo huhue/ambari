@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,14 +17,15 @@
  */
 package org.apache.ambari.server.utils;
 
-import com.google.common.collect.ImmutableSet;
 import java.util.Arrays;
 import java.util.Set;
+
 import javax.servlet.http.HttpServletRequest;
 
-import org.apache.ambari.server.api.services.Request;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+
+import com.google.common.collect.ImmutableSet;
 
 /**
  * The purpose of this helper is to get remote address from an HTTP request
@@ -50,6 +51,9 @@ public class RequestUtils {
     if (isRemoteAddressUnknown(ip)) {
       ip = request.getRemoteAddr();
     }
+    if (containsMultipleRemoteAddresses(ip)) {
+       ip = ip.substring(0, ip.indexOf(","));
+    }
     return ip;
   }
 
@@ -73,6 +77,13 @@ public class RequestUtils {
    */
   private static boolean isRemoteAddressUnknown(String ip) {
     return ip == null || ip.length() == 0 || "unknown".equalsIgnoreCase(ip);
+  }
+
+  /**
+   * Checks if ip contains multiple IP addresses
+   */
+  private static boolean containsMultipleRemoteAddresses(String ip) {
+    return ip != null && ip.indexOf(",") > 0;
   }
 
   /**

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -24,11 +24,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.ambari.annotations.Experimental;
+import org.apache.ambari.annotations.ExperimentalFeature;
+import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.RoleCommand;
+import org.apache.ambari.server.actionmanager.ExecutionCommandWrapper;
+import org.apache.ambari.server.state.Cluster;
+import org.apache.ambari.server.state.UpgradeContext.UpgradeSummary;
 import org.apache.ambari.server.utils.StageUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.google.gson.annotations.SerializedName;
 
 
@@ -36,80 +44,166 @@ import com.google.gson.annotations.SerializedName;
  * Execution commands are scheduled by action manager, and these are
  * persisted in the database for recovery.
  */
+@JsonInclude(JsonInclude.Include.NON_EMPTY)
 public class ExecutionCommand extends AgentCommand {
 
-  private static Log LOG = LogFactory.getLog(ExecutionCommand.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ExecutionCommand.class);
 
   public ExecutionCommand() {
     super(AgentCommandType.EXECUTION_COMMAND);
   }
 
+  @com.fasterxml.jackson.annotation.JsonProperty("clusterId")
+  private String clusterId;
+
   @SerializedName("clusterName")
+  @com.fasterxml.jackson.annotation.JsonProperty("clusterName")
   private String clusterName;
 
   @SerializedName("requestId")
+  @com.fasterxml.jackson.annotation.JsonProperty("requestId")
   private long requestId;
 
   @SerializedName("stageId")
+  @JsonIgnore
   private long stageId;
 
   @SerializedName("taskId")
+  @com.fasterxml.jackson.annotation.JsonProperty("taskId")
   private long taskId;
 
   @SerializedName("commandId")
+  @com.fasterxml.jackson.annotation.JsonProperty("commandId")
   private String commandId;
 
   @SerializedName("hostname")
+  @JsonIgnore
   private String hostname;
 
   @SerializedName("role")
+  @com.fasterxml.jackson.annotation.JsonProperty("role")
   private String role;
 
   @SerializedName("hostLevelParams")
-  private Map<String, String> hostLevelParams = new HashMap<String, String>();
+  @JsonIgnore
+  private Map<String, String> hostLevelParams = new HashMap<>();
 
   @SerializedName("roleParams")
+  @com.fasterxml.jackson.annotation.JsonProperty("roleParams")
   private Map<String, String> roleParams = null;
 
   @SerializedName("roleCommand")
+  @com.fasterxml.jackson.annotation.JsonProperty("roleCommand")
   private RoleCommand roleCommand;
 
   @SerializedName("clusterHostInfo")
   private Map<String, Set<String>> clusterHostInfo =
-      new HashMap<String, Set<String>>();
+    new HashMap<>();
 
   @SerializedName("configurations")
+  @JsonIgnore
   private Map<String, Map<String, String>> configurations;
 
   @SerializedName("configuration_attributes")
+  @JsonIgnore
   private Map<String, Map<String, Map<String, String>>> configurationAttributes;
 
   @SerializedName("configurationTags")
+  @JsonIgnore
   private Map<String, Map<String, String>> configurationTags;
 
-  @SerializedName("forceRefreshConfigTags")
-  private Set<String> forceRefreshConfigTags = new HashSet<String>();
-
   @SerializedName("forceRefreshConfigTagsBeforeExecution")
-  private Set<String> forceRefreshConfigTagsBeforeExecution = new HashSet<String>();
+  @JsonIgnore
+  private boolean forceRefreshConfigTagsBeforeExecution = false;
 
   @SerializedName("commandParams")
-  private Map<String, String> commandParams = new HashMap<String, String>();
+  @com.fasterxml.jackson.annotation.JsonProperty("commandParams")
+  private Map<String, String> commandParams = new HashMap<>();
 
   @SerializedName("serviceName")
+  @com.fasterxml.jackson.annotation.JsonProperty("serviceName")
   private String serviceName;
 
   @SerializedName("serviceType")
+  @JsonIgnore
   private String serviceType;
 
   @SerializedName("componentName")
+  @JsonIgnore
   private String componentName;
 
   @SerializedName("kerberosCommandParams")
-  private List<Map<String, String>> kerberosCommandParams = new ArrayList<Map<String, String>>();
+  @com.fasterxml.jackson.annotation.JsonProperty("kerberosCommandParams")
+  private List<Map<String, String>> kerberosCommandParams = new ArrayList<>();
 
   @SerializedName("localComponents")
-  private Set<String> localComponents = new HashSet<String>();
+  @JsonIgnore
+  private Set<String> localComponents = new HashSet<>();
+
+  @SerializedName("availableServices")
+  @JsonIgnore
+  private Map<String, String> availableServices = new HashMap<>();
+
+  /**
+   * "true" or "false" indicating whether this
+   * service is enabled for credential store use.
+   */
+  @SerializedName("credentialStoreEnabled")
+  @JsonIgnore
+  private String credentialStoreEnabled;
+
+  /**
+   * Map of config type to list of password properties
+   *   <pre>
+   *     {@code
+   *       {
+   *         "config_type1" :
+   *           {
+   *             "password_alias_name1:type1":"password_value_name1",
+   *             "password_alias_name2:type2":"password_value_name2",
+   *                 :
+   *           },
+   *         "config_type2" :
+   *           {
+   *             "password_alias_name1:type1":"password_value_name1",
+   *             "password_alias_name2:type2":"password_value_name2",
+   *                 :
+   *           },
+   *                 :
+   *       }
+   *     }
+   *   </pre>
+   */
+  @SerializedName("configuration_credentials")
+  @JsonIgnore
+  private Map<String, Map<String, String>> configurationCredentials;
+
+
+  /**
+   * Provides information regarding the content of repositories.
+   */
+  @SerializedName("repositoryFile")
+  private CommandRepository commandRepository;
+
+  @SerializedName("componentVersionMap")
+  private Map<String, Map<String, String>> componentVersionMap = new HashMap<>();
+
+  @SerializedName("upgradeSummary")
+  private UpgradeSummary upgradeSummary;
+
+  @SerializedName("roleParameters")
+  private Map<String, Object> roleParameters;
+
+  @SerializedName("useLatestConfigs")
+  private Boolean useLatestConfigs = null;
+
+  public void setConfigurationCredentials(Map<String, Map<String, String>> configurationCredentials) {
+    this.configurationCredentials = configurationCredentials;
+  }
+
+  public Map<String, Map<String, String>> getConfigurationCredentials() {
+    return configurationCredentials;
+  }
 
   public String getCommandId() {
     return commandId;
@@ -178,6 +272,10 @@ public class ExecutionCommand extends AgentCommand {
     return roleParams;
   }
 
+  /**
+   * Sets the roleParams for the command.  Consider instead using {@link #setRoleParameters}
+   * @param roleParams
+   */
   public void setRoleParams(Map<String, String> roleParams) {
     this.roleParams = roleParams;
   }
@@ -229,27 +327,16 @@ public class ExecutionCommand extends AgentCommand {
   public void setConfigurations(Map<String, Map<String, String>> configurations) {
     this.configurations = configurations;
   }
-  /**
-   * @return Returns the set of config-types that have to be propagated to actual-config of component of given custom command, if command is successfully finished.
-   */
-  public Set<String> getForceRefreshConfigTags() {
-    return forceRefreshConfigTags;
-  }
-
-  public void setForceRefreshConfigTags(Set<String> forceRefreshConfigTags) {
-    this.forceRefreshConfigTags = forceRefreshConfigTags;
-  }
 
   /**
-   * Comma separated list of config-types whose tags have be refreshed
-   * at runtime before being executed. If all config-type tags have to be
-   * refreshed, "*" can be specified.
+   * Gets whether configuration tags shoudl be refreshed right before the
+   * command is scheduled.
    */
-  public Set<String> getForceRefreshConfigTagsBeforeExecution() {
+  public boolean getForceRefreshConfigTagsBeforeExecution() {
     return forceRefreshConfigTagsBeforeExecution;
   }
 
-  public void setForceRefreshConfigTagsBeforeExecution(Set<String> forceRefreshConfigTagsBeforeExecution) {
+  public void setForceRefreshConfigTagsBeforeExecution(boolean forceRefreshConfigTagsBeforeExecution) {
     this.forceRefreshConfigTagsBeforeExecution = forceRefreshConfigTagsBeforeExecution;
   }
 
@@ -286,11 +373,32 @@ public class ExecutionCommand extends AgentCommand {
   }
 
   public String getServiceType() {
-	return serviceType;
+    return serviceType;
   }
 
   public void setServiceType(String serviceType) {
-	this.serviceType = serviceType;
+    this.serviceType = serviceType;
+  }
+
+  /**
+   * Get a value indicating whether this service is enabled
+   * for credential store use.
+   *
+   * @return "true" or "false", any other value is
+   * considered as "false"
+   */
+  public String getCredentialStoreEnabled() {
+    return credentialStoreEnabled;
+  }
+
+  /**
+   * Set a value indicating whether this service is enabled
+   * for credential store use.
+   *
+   * @param credentialStoreEnabled
+   */
+  public void setCredentialStoreEnabled(String credentialStoreEnabled) {
+    this.credentialStoreEnabled = credentialStoreEnabled;
   }
 
   public String getComponentName() {
@@ -331,31 +439,107 @@ public class ExecutionCommand extends AgentCommand {
     kerberosCommandParams =  params;
   }
 
+  public String getClusterId() {
+    return clusterId;
+  }
+
+  public void setClusterId(String clusterId) {
+    this.clusterId = clusterId;
+  }
+
+  /**
+   * Gets the repository file which was set on this command. The repository can
+   * be set either by the creator of the command or by the
+   * {@link ExecutionCommandWrapper} when it is about to execute the command.
+   *
+   * @return the repository file that is to be written.
+   * @see #setRepositoryFile(CommandRepository)
+   */
+  public CommandRepository getRepositoryFile() {
+    return commandRepository;
+  }
+
+  /**
+   * Sets the {@link CommandRepository} which will be sent down to the agent
+   * instructing it on which repository file to create on the host. In most
+   * cases, it is not necessary to set this file since the
+   * {@link ExecutionCommandWrapper} will set it in the event that it is
+   * missing. In fact, it is only appropriate to set this file in the following
+   * cases:
+   * <ul>
+   * <li>When distributing a repository to hosts in preparation for upgrade.
+   * This is because the service/component desired stack is not pointing to the
+   * new repository yet</li>
+   * <li>If the command does not contain a host or service/component></li>
+   * </ul>
+   *
+   * @param repository
+   *          the command repository instance.
+   */
+  public void setRepositoryFile(CommandRepository repository) {
+    commandRepository = repository;
+  }
+
+  /**
+   * Gets the object-based role parameters for the command.
+   */
+  public Map<String, Object> getRoleParameters() {
+    return roleParameters;
+  }
+
+  /**
+   * Sets the role parameters for the command.  This is preferred over {@link #setRoleParams(Map)},
+   * as this form will pass values as structured data, as opposed to unstructured, escaped json.
+   *
+   * @param params
+   */
+  public void setRoleParameters(Map<String, Object> params) {
+    roleParameters = params;
+  }
+
+
+  public Boolean getUseLatestConfigs() {
+    return useLatestConfigs;
+  }
+
+  public void setUseLatestConfigs(Boolean useLatestConfigs) {
+    this.useLatestConfigs = useLatestConfigs;
+  }
+
   /**
    * Contains key name strings. These strings are used inside maps
    * incapsulated inside command.
    */
-  public static interface KeyNames {
+  public interface KeyNames {
     String COMMAND_TIMEOUT = "command_timeout";
     String SCRIPT = "script";
     String SCRIPT_TYPE = "script_type";
     String SERVICE_PACKAGE_FOLDER = "service_package_folder";
     String HOOKS_FOLDER = "hooks_folder";
+    String CUSTOM_FOLDER = "custom_folder";
     String STACK_NAME = "stack_name";
     String SERVICE_TYPE = "service_type";
     String STACK_VERSION = "stack_version";
+    @Deprecated
+    @Experimental(feature=ExperimentalFeature.PATCH_UPGRADES)
     String SERVICE_REPO_INFO = "service_repo_info";
     String PACKAGE_LIST = "package_list";
     String JDK_LOCATION = "jdk_location";
     String JAVA_HOME = "java_home";
+    String GPL_LICENSE_ACCEPTED = "gpl_license_accepted";
+    String AMBARI_JAVA_HOME = "ambari_java_home";
+    String AMBARI_JDK_NAME = "ambari_jdk_name";
+    String AMBARI_JCE_NAME = "ambari_jce_name";
+    String AMBARI_JAVA_VERSION = "ambari_java_version";
     String JAVA_VERSION = "java_version";
     String JDK_NAME = "jdk_name";
     String JCE_NAME = "jce_name";
+    String UNLIMITED_KEY_JCE_REQUIRED = "unlimited_key_jce_required";
     String MYSQL_JDBC_URL = "mysql_jdbc_url";
     String ORACLE_JDBC_URL = "oracle_jdbc_url";
     String DB_DRIVER_FILENAME = "db_driver_filename";
     String CLIENTS_TO_UPDATE_CONFIGS = "clientsToUpdateConfigs";
-    String REPO_INFO = "repo_info";
+
     String DB_NAME = "db_name";
     String GLOBAL = "global";
     String AMBARI_DB_RCA_URL = "ambari_db_rca_url";
@@ -363,22 +547,21 @@ public class ExecutionCommand extends AgentCommand {
     String AMBARI_DB_RCA_USERNAME = "ambari_db_rca_username";
     String AMBARI_DB_RCA_PASSWORD = "ambari_db_rca_password";
     String COMPONENT_CATEGORY = "component_category";
-    String REFRESH_ADITIONAL_COMPONENT_TAGS = "forceRefreshConfigTags";
     String USER_LIST = "user_list";
     String GROUP_LIST = "group_list";
+    String USER_GROUPS = "user_groups";
     String NOT_MANAGED_HDFS_PATH_LIST = "not_managed_hdfs_path_list";
-    String VERSION = "version";
     String REFRESH_TOPOLOGY = "refresh_topology";
     String HOST_SYS_PREPPED = "host_sys_prepped";
     String MAX_DURATION_OF_RETRIES = "max_duration_for_retries";
     String COMMAND_RETRY_ENABLED = "command_retry_enabled";
     String AGENT_STACK_RETRY_ON_UNAVAILABILITY = "agent_stack_retry_on_unavailability";
     String AGENT_STACK_RETRY_COUNT = "agent_stack_retry_count";
+    String LOG_OUTPUT = "log_output";
 
     /**
-     * Comma separated list of config-types whose tags have be refreshed
-     * at runtime before being executed. If all config-type tags have to be
-     * refreshed, "*" can be specified.
+     * A boolean indicating whether configuration tags should be refreshed
+     * before sending the command.
      */
     String REFRESH_CONFIG_TAGS_BEFORE_EXECUTION = "forceRefreshConfigTagsBeforeExecution";
 
@@ -388,6 +571,8 @@ public class ExecutionCommand extends AgentCommand {
     /**
      * The key indicating that the package_version string is available
      */
+    @Deprecated
+    @Experimental(feature=ExperimentalFeature.PATCH_UPGRADES)
     String PACKAGE_VERSION = "package_version";
 
     /**
@@ -402,6 +587,70 @@ public class ExecutionCommand extends AgentCommand {
      * The agent will return this value back in its response so the repository
      * can be looked up and possibly have its version updated.
      */
+    @Deprecated
+    @Experimental(feature=ExperimentalFeature.PATCH_UPGRADES)
     String REPO_VERSION_ID = "repository_version_id";
+    String CLUSTER_NAME = "cluster_name";
+
+    /**
+     * The version of the component to send down with the command. Normally,
+     * this is simply the repository version of the component. However, during
+     * upgrades, this value may change depending on the progress of the upgrade
+     * and the type/direction.
+     */
+    @Experimental(
+        feature = ExperimentalFeature.PATCH_UPGRADES,
+        comment = "Change this to reflect the component version")
+    String VERSION = "version";
+
+
+    /**
+     * When installing packages, includes what services will be included in the upgrade
+     */
+    String CLUSTER_VERSION_SUMMARY = "cluster_version_summary";
+  }
+
+  /**
+   * @return
+   */
+  public Map<String, Map<String, String>> getComponentVersionMap() {
+    return componentVersionMap;
+  }
+
+  /**
+   * Used to set a map of {service -> { component -> version}}. This is
+   * necessary when performing an upgrade to correct build paths of required
+   * binaries. This method will only set the version information for a component
+   * if:
+   * <ul>
+   * <li>The component advertises a version</li>
+   * <li>The repository for the component has been resolved and the version can
+   * be trusted</li>
+   * </ul>
+   *
+   * @param cluster
+   *          the cluster from which to build the map
+   */
+  public void setComponentVersions(Cluster cluster) throws AmbariException {
+    componentVersionMap = cluster.getComponentVersionMap();
+  }
+
+  /**
+   * Sets the upgrade summary if there is an active upgrade in the cluster.
+   *
+   * @param upgradeSummary
+   *          the upgrade or {@code null} for none.
+   */
+  public void setUpgradeSummary(UpgradeSummary upgradeSummary) {
+    this.upgradeSummary = upgradeSummary;
+  }
+
+  /**
+   * Gets the upgrade summary if there is an active upgrade in the cluster.
+   *
+   * @return the upgrade or {@code null} for none.
+   */
+  public UpgradeSummary getUpgradeSummary() {
+    return upgradeSummary;
   }
 }

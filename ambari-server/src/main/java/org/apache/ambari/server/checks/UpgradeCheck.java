@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -22,6 +22,9 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
+
+import org.apache.ambari.server.state.RepositoryType;
+import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
 
 import com.google.inject.ScopeAnnotation;
 import com.google.inject.Singleton;
@@ -57,10 +60,24 @@ public @interface UpgradeCheck {
   float order() default 1.0f;
 
   /**
-   * Gets whether the pre-upgrade check is required.
-   * By default, a pre-upgrade check needs to be declared in the upgrade pack. This flag will override that setting.
+   * Gets the upgrade types for which an upgrade check is required. By default,
+   * a pre-upgrade check needs to be declared in the upgrade pack. This flag
+   * will override that setting.
+   * <p/>
+   * Leaving this blank assumes that the check is not required.
    *
-   * @return  flag state, or {@code true} if not specified
+   * @return the upgrade types which do not need the check to be explicitely
+   *         defined in the upgrade pack or an empty array for none.
    */
-  boolean required() default false;
+  UpgradeType[] required() default {};
+
+
+  /**
+   * The valid orchestration repository type that this check if valid for. By
+   * default, a check is valid for all orchestration types.
+   *
+   * @return the repository types that the check is valid for.
+   */
+  RepositoryType[] orchestration() default { RepositoryType.STANDARD, RepositoryType.PATCH,
+      RepositoryType.MAINT, RepositoryType.SERVICE };
 }

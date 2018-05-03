@@ -17,13 +17,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+# Python Imports
 import os
-from resource_management import *
+
+# Local Imports
+from oozie import copy_atlas_hive_hook_to_dfs_share_lib
+
+# Resource Managemente Imports
+from resource_management.core import shell, sudo
 from resource_management.core.shell import as_user
+from resource_management.core.logger import Logger
+from resource_management.core.resources.service import Service
+from resource_management.core.resources.system import Execute, File, Directory
+from resource_management.libraries.functions.format import format
 from resource_management.libraries.functions.show_logs import show_logs
 from resource_management.libraries.providers.hdfs_resource import WebHDFSUtil
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
 from ambari_commons import OSConst
+from resource_management.libraries.functions import namenode_ha_utils
+
+from resource_management.core import Logger
 
 @OsFamilyFuncImpl(os_family=OSConst.WINSRV_FAMILY)
 def oozie_service(action='start', upgrade_type=None):
@@ -62,17 +75,28 @@ def oozie_service(action = 'start', upgrade_type=None):
   
   if action == 'start':
     start_cmd = format("cd {oozie_tmp_dir} && {oozie_home}/bin/oozie-start.sh")
-    
+    path_to_jdbc = params.target
+
     if params.jdbc_driver_name == "com.mysql.jdbc.Driver" or \
        params.jdbc_driver_name == "com.microsoft.sqlserver.jdbc.SQLServerDriver" or \
        params.jdbc_driver_name == "org.postgresql.Driver" or \
        params.jdbc_driver_name == "oracle.jdbc.driver.OracleDriver":
-      db_connection_check_command = format("{java_home}/bin/java -cp {check_db_connection_jar}:{target} org.apache.ambari.server.DBConnectionVerification '{oozie_jdbc_connection_url}' {oozie_metastore_user_name} {oozie_metastore_user_passwd!p} {jdbc_driver_name}")
+
+      if not params.jdbc_driver_jar:
+        path_to_jdbc = format("{oozie_libext_dir}/") + \
+                       params.default_connectors_map[params.jdbc_driver_name] if params.jdbc_driver_name in params.default_connectors_map else None
+        if not os.path.isfile(path_to_jdbc):
+          path_to_jdbc = format("{oozie_libext_dir}/") + "*"
+          error_message = "Error! Sorry, but we can't find jdbc driver with default name " + params.default_connectors_map[params.jdbc_driver_name] + \
+                " in oozie lib dir. So, db connection check can fail. Please run 'ambari-server setup --jdbc-db={db_name} --jdbc-driver={path_to_jdbc} on server host.'"
+          Logger.error(error_message)
+
+      db_connection_check_command = format("{java_home}/bin/java -cp {check_db_connection_jar}:{path_to_jdbc} org.apache.ambari.server.DBConnectionVerification '{oozie_jdbc_connection_url}' {oozie_metastore_user_name} {oozie_metastore_user_passwd!p} {jdbc_driver_name}")
     else:
       db_connection_check_command = None
 
     if upgrade_type is None:
-      if not os.path.isfile(params.target) and params.jdbc_driver_name == "org.postgresql.Driver":
+      if not os.path.isfile(path_to_jdbc) and params.jdbc_driver_name == "org.postgresql.Driver":
         print format("ERROR: jdbc file {target} is unavailable. Please, follow next steps:\n" \
           "1) Download postgresql-9.0-801.jdbc4.jar.\n2) Create needed directory: mkdir -p {oozie_home}/libserver/\n" \
           "3) Copy postgresql-9.0-801.jdbc4.jar to newly created dir: cp /path/to/jdbc/postgresql-9.0-801.jdbc4.jar " \
@@ -81,6 +105,7 @@ def oozie_service(action = 'start', upgrade_type=None):
         exit(1)
 
       if db_connection_check_command:
+        sudo.chmod(params.check_db_connection_jar, 0755)
         Execute( db_connection_check_command, 
                  tries=5, 
                  try_sleep=10,
@@ -96,14 +121,27 @@ def oozie_service(action = 'start', upgrade_type=None):
         Execute(kinit_if_needed,
                 user = params.oozie_user,
         )
-      
-      
-      if params.host_sys_prepped:
-        print "Skipping creation of oozie sharelib as host is sys prepped"
+
+      nameservices = namenode_ha_utils.get_nameservices(params.hdfs_site)
+      nameservice = None if not nameservices else nameservices[-1]
+
+      if params.sysprep_skip_copy_oozie_share_lib_to_hdfs:
+        Logger.info("Skipping creation of oozie sharelib as host is sys prepped")
+        # Copy current hive-site to hdfs:/user/oozie/share/lib/spark/
+        params.HdfsResource(format("{hdfs_share_dir}/lib/spark/hive-site.xml"),
+                            action="create_on_execute",
+                            type = 'file',
+                            mode=0444,
+                            owner=params.oozie_user,
+                            group=params.user_group,
+                            source=format("{hive_conf_dir}/hive-site.xml"),
+                            )
+        params.HdfsResource(None, action="execute")
+
         hdfs_share_dir_exists = True # skip time-expensive hadoop fs -ls check
       elif WebHDFSUtil.is_webhdfs_available(params.is_webhdfs_enabled, params.default_fs):
         # check with webhdfs is much faster than executing hadoop fs -ls. 
-        util = WebHDFSUtil(params.hdfs_site, params.oozie_user, params.security_enabled)
+        util = WebHDFSUtil(params.hdfs_site, nameservice, params.oozie_user, params.security_enabled)
         list_status = util.run_command(params.hdfs_share_dir, 'GETFILESTATUS', method='GET', ignore_status_codes=['404'], assertable_result=False)
         hdfs_share_dir_exists = ('FileStatus' in list_status)
       else:
@@ -129,12 +167,19 @@ def oozie_service(action = 'start', upgrade_type=None):
       # start oozie
       Execute( start_cmd, environment=environment, user = params.oozie_user,
         not_if = no_op_test )
+
+      copy_atlas_hive_hook_to_dfs_share_lib(upgrade_type, params.upgrade_direction)
     except:
       show_logs(params.oozie_log_dir, params.oozie_user)
       raise
 
   elif action == 'stop':
-    stop_cmd  = format("cd {oozie_tmp_dir} && {oozie_home}/bin/oozie-stop.sh")
+    Directory(params.oozie_tmp_dir,
+              owner=params.oozie_user,
+              create_parents = True,
+    )
+
+    stop_cmd  = format("cd {oozie_tmp_dir} && {oozie_home}/bin/oozied.sh stop 60 -force")
 
     try:
       # stop oozie

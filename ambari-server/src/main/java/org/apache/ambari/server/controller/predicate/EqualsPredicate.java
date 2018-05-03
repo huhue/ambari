@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -39,6 +39,21 @@ public class EqualsPredicate<T> extends ComparisonPredicate<T> {
         propertyValue != null && compareValueTo(propertyValue) == 0;
   }
 
+  /**
+   * Case insensitive equality support for string types
+   *
+   * @param resource
+   * @return
+     */
+  public boolean evaluateIgnoreCase(Resource resource) {
+    Object propertyValue  = resource.getPropertyValue(getPropertyId());
+    Object predicateValue = getValue();
+
+    return predicateValue == null ?
+            propertyValue == null :
+            propertyValue != null && compareValueToIgnoreCase(propertyValue) == 0;
+  }
+
   @Override
   public String getOperator() {
     return "=";
@@ -46,6 +61,6 @@ public class EqualsPredicate<T> extends ComparisonPredicate<T> {
 
   @Override
   public ComparisonPredicate<T> copy(String propertyId) {
-    return new EqualsPredicate<T>(propertyId, getValue());
+    return new EqualsPredicate<>(propertyId, getValue());
   }
 }

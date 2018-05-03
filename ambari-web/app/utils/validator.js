@@ -62,6 +62,14 @@ module.exports = {
   },
 
   /**
+   * validate filename
+   */
+  isValidFileName: function(value){
+    var filenameRegex = /^[0-9a-zA-Z_-]+\.[a-zA-Z]+$/;
+    return filenameRegex.test(value);
+  },
+
+  /**
    * defines if config value looks like link to other config
    * @param value
    * @returns {boolean}
@@ -180,11 +188,13 @@ module.exports = {
 
   /**
    * validate key of configurations
+   * allow spaces as prefix and suffix
+   *
    * @param value
    * @return {Boolean}
    */
   isValidConfigKey: function(value) {
-    var configKeyRegex = /^[0-9a-z_\-\.\*]+$/i;
+    var configKeyRegex = /^\s*[0-9a-z_\-\.\/\*]+\s*$/i;
     return configKeyRegex.test(value);
   },
 
@@ -254,7 +264,7 @@ module.exports = {
       return true;
     };
     if (/^[\?\|\*\!,]/.test(value)) return false;
-    return /^((\.\*?)?([\w\s\[\]\/\?\-_,\|\*\!\{\}]*)?)+(\.\*?)?$/g.test(value) && (checkPair(['[',']'])) && (checkPair(['{','}']));
+    return /^((\.\*?)?([\w\s\[\]\/\?\-_,\|\*\!\{\}\(\)]*)?)+(\.\*?)?$/g.test(value) && (checkPair(['[',']'])) && (checkPair(['{','}']));
   },
 
   /**
@@ -269,8 +279,9 @@ module.exports = {
   },
 
   isValidRackId: function(path) {
+    var _path = '' + path;
     // See app/message.js:hostPopup.setRackId.invalid
-    return /^\/[/.\w-]+$/.test(path);
+    return /^\/[/.\w-]+$/.test(_path) && _path.length < 255;
   },
 
   /**
@@ -289,8 +300,8 @@ module.exports = {
    * @returns {boolean}
    */
   isValidBaseUrl: function (value) {
-    var remotePattern = /^(?:(?:https?|ftp):\/{2})(?:\S+(?::\S*)?@)?(?:(?:(?:[\w\-.]))*)(?::[0-9]+)?(?:\/\S*)?$/,
-      localPattern = /^file:\/{2,3}([a-zA-Z][:|]\/){0,1}[\w~!*'();@&=\/\\\-+$,?%#.\[\]]+$/;
+    var remotePattern = /^$|^(?:(?:https?|ftp):\/{2})(?:\S+(?::\S*)?@)?(?:(?:(?:[\w\-.]))*)(?::[0-9]+)?(?:\/\S*)?$/,
+      localPattern = /^$|^file:\/{2,3}([a-zA-Z][:|]\/){0,1}[\w~!*'();@&=\/\\\-+$,?%#.\[\]]+$/;
     return remotePattern.test(value) || localPattern.test(value);
   },
 
@@ -312,5 +323,31 @@ module.exports = {
   isValidWidgetDescription: function(value) {
     var widgetDescriptionRegex = /^[\s0-9a-z_\-%]+$/i;
     return widgetDescriptionRegex.test(value);
-  }
+  },
+
+  /**
+   * Validate alert name
+   * @param {string} value
+   * @returns {boolean}
+   */
+  isValidAlertName: function(value) {
+    var alertNameRegex = /^[\s0-9a-z_\-%\(\)]+$/i;
+    return alertNameRegex.test(value);
+  },
+
+  /**
+   * Validate ldaps URL
+   * @param {string} value
+   * @returns {boolean}
+   */
+  isValidLdapsURL: function(value) {
+    var ldapsUrlRegex = /^(ldaps):\/\/(((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:)*@)?(((\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5]))|((([a-z]|\d|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(([a-z]|\d|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])*([a-z]|\d|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])))\.)+(([a-z]|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(([a-z]|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])*([a-z]|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])))\.?)(:\d*)?)(\/((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)+(\/(([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)*)*)?)?(\?((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)|[\uE000-\uF8FF]|\/|\?)*)?(\#((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)|\/|\?)*)?$/i;
+    return ldapsUrlRegex.test(value);
+  },
+
+  isValidNameServiceId: function (value) {
+    var nameSarviceIdRegex = /^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])$/;
+    return nameSarviceIdRegex.test(value);
+  },
+
 };

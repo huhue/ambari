@@ -35,9 +35,10 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
   selectedService: null,
   stepConfigs: [],
   serverConfigData: {},
-  haConfig: $.extend(true, {}, require('data/HDP2/ha_properties').haConfig),
+  haConfig: $.extend(true, {}, require('data/configs/wizards/ha_properties').haConfig),
   once: false,
   isLoaded: false,
+  isNextDisabled: Em.computed.not('isLoaded'),
   versionLoaded: true,
   hideDependenciesInfoBar: true,
 
@@ -60,7 +61,7 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
   },
 
   loadConfigsTags: function () {
-    App.ajax.send({
+    return App.ajax.send({
       name: 'config.tags',
       sender: this,
       success: 'onLoadConfigsTags',
@@ -74,6 +75,7 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
     var hdfsSiteTag = data.Clusters.desired_configs['hdfs-site'].tag;
     var coreSiteTag = data.Clusters.desired_configs['core-site'].tag;
     var zkSiteTag = data.Clusters.desired_configs['zoo.cfg'].tag;
+
     urlParams.push('(type=hdfs-site&tag=' + hdfsSiteTag + ')');
     urlParams.push('(type=core-site&tag=' + coreSiteTag + ')');
     urlParams.push('(type=zoo.cfg&tag=' + zkSiteTag  + ')');
@@ -104,6 +106,110 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
       urlParams.push('(type=hdfs-client&tag=' + hdfsClientTag + ')');
       this.set("hdfsClientTag", {name : "hdfsClientTag", value : hdfsClientTag});
     }
+    if(App.Service.find().someProperty('serviceName', 'RANGER')) {
+      var rangerEnvTag = data.Clusters.desired_configs['ranger-env'].tag;
+      urlParams.push('(type=ranger-env&tag=' + rangerEnvTag  + ')');
+      this.set("rangerEnvTag", {name : "rangerEnvTag", value : rangerEnvTag});
+      if('ranger-hdfs-plugin-properties' in data.Clusters.desired_configs) {
+        var rangerHdfsPluginPropertiesTag = data.Clusters.desired_configs['ranger-hdfs-plugin-properties'].tag;
+        urlParams.push('(type=ranger-hdfs-plugin-properties&tag=' + rangerHdfsPluginPropertiesTag + ')');
+        this.set("rangerHdfsPluginPropertiesTag", {
+          name: "rangerHdfsPluginPropertiesTag",
+          value: rangerHdfsPluginPropertiesTag
+        });
+      }
+      if('ranger-hdfs-audit' in data.Clusters.desired_configs) {
+        var rangerHdfsAuditTag = data.Clusters.desired_configs['ranger-hdfs-audit'].tag;
+        urlParams.push('(type=ranger-hdfs-audit&tag=' + rangerHdfsAuditTag + ')');
+        this.set("rangerHdfsAuditTag", {name: "rangerHdfsAuditTag", value: rangerHdfsAuditTag});
+      }
+      if('ranger-yarn-audit' in data.Clusters.desired_configs) {
+        var yarnAuditTag = data.Clusters.desired_configs['ranger-yarn-audit'].tag;
+        urlParams.push('(type=ranger-yarn-audit&tag=' + yarnAuditTag + ')');
+        this.set("yarnAuditTag", {name: "yarnAuditTag", value: yarnAuditTag});
+      }
+      if (App.Service.find().someProperty('serviceName', 'HBASE')) {
+        if('ranger-hbase-audit' in data.Clusters.desired_configs) {
+          var rangerHbaseAuditTag = data.Clusters.desired_configs['ranger-hbase-audit'].tag;
+          urlParams.push('(type=ranger-hbase-audit&tag=' + rangerHbaseAuditTag + ')');
+          this.set("rangerHbaseAuditTag", {name: "rangerHbaseAuditTag", value: rangerHbaseAuditTag});
+        }
+        if('ranger-hbase-plugin-properties' in data.Clusters.desired_configs) {
+          var rangerHbasePluginPropertiesTag = data.Clusters.desired_configs['ranger-hbase-plugin-properties'].tag;
+          urlParams.push('(type=ranger-hbase-plugin-properties&tag=' + rangerHbasePluginPropertiesTag + ')');
+          this.set("rangerHbasePluginPropertiesTag", {
+            name: "rangerHbasePluginPropertiesTag",
+            value: rangerHbasePluginPropertiesTag
+          });
+        }
+      }
+      if (App.Service.find().someProperty('serviceName', 'KAFKA')) {
+        if('ranger-kafka-audit' in data.Clusters.desired_configs) {
+          var rangerKafkaAuditTag = data.Clusters.desired_configs['ranger-kafka-audit'].tag;
+          urlParams.push('(type=ranger-kafka-audit&tag=' + rangerKafkaAuditTag + ')');
+          this.set("rangerKafkaAuditTag", {name: "rangerKafkaAuditTag", value: rangerKafkaAuditTag});
+        }
+      }
+      if (App.Service.find().someProperty('serviceName', 'KNOX')) {
+        if('ranger-knox-audit' in data.Clusters.desired_configs) {
+          var rangerKnoxAuditTag = data.Clusters.desired_configs['ranger-knox-audit'].tag;
+          urlParams.push('(type=ranger-knox-audit&tag=' + rangerKnoxAuditTag + ')');
+          this.set("rangerKnoxAuditTag", {name: "rangerKnoxAuditTag", value: rangerKnoxAuditTag});
+        }
+        if('ranger-knox-plugin-properties' in data.Clusters.desired_configs) {
+          var rangerKnoxPluginPropertiesTag = data.Clusters.desired_configs['ranger-knox-plugin-properties'].tag;
+          urlParams.push('(type=ranger-knox-plugin-properties&tag=' + rangerKnoxPluginPropertiesTag + ')');
+          this.set("rangerKnoxPluginPropertiesTag", {
+            name: "rangerKnoxPluginPropertiesTag",
+            value: rangerKnoxPluginPropertiesTag
+          });
+        }
+      }
+      if (App.Service.find().someProperty('serviceName', 'STORM')) {
+        if('ranger-storm-audit' in data.Clusters.desired_configs) {
+          var rangerStormAuditTag = data.Clusters.desired_configs['ranger-storm-audit'].tag;
+          urlParams.push('(type=ranger-storm-audit&tag=' + rangerStormAuditTag + ')');
+          this.set("rangerStormAuditTag", {name: "rangerStormAuditTag", value: rangerStormAuditTag});
+        }
+        if('ranger-storm-plugin-properties' in data.Clusters.desired_configs) {
+          var rangerStormPluginPropertiesTag = data.Clusters.desired_configs['ranger-storm-plugin-properties'].tag;
+          urlParams.push('(type=ranger-storm-plugin-properties&tag=' + rangerStormPluginPropertiesTag + ')');
+          this.set("rangerStormPluginPropertiesTag", {
+            name: "rangerStormPluginPropertiesTag",
+            value: rangerStormPluginPropertiesTag
+          });
+        }
+      }
+      if (App.Service.find().someProperty('serviceName', 'ATLAS')) {
+        if('ranger-atlas-audit' in data.Clusters.desired_configs) {
+          var rangerAtlasAuditTag = data.Clusters.desired_configs['ranger-atlas-audit'].tag;
+          urlParams.push('(type=ranger-atlas-audit&tag=' + rangerAtlasAuditTag + ')');
+          this.set("rangerAtlasAuditTag", {name: "rangerAtlasAuditTag", value: rangerAtlasAuditTag});
+        }
+      }
+      if (App.Service.find().someProperty('serviceName', 'HIVE')) {
+        if('ranger-hive-audit' in data.Clusters.desired_configs) {
+          var rangerHiveAuditTag = data.Clusters.desired_configs['ranger-hive-audit'].tag;
+          urlParams.push('(type=ranger-hive-audit&tag=' + rangerHiveAuditTag + ')');
+          this.set("rangerHiveAuditTag", {name: "rangerHiveAuditTag", value: rangerHiveAuditTag});
+        }
+        if('ranger-hive-plugin-properties' in data.Clusters.desired_configs) {
+          var rangerHivePluginPropertiesTag = data.Clusters.desired_configs['ranger-hive-plugin-properties'].tag;
+          urlParams.push('(type=ranger-hive-plugin-properties&tag=' + rangerHivePluginPropertiesTag + ')');
+          this.set("rangerHivePluginPropertiesTag", {
+            name: "rangerHivePluginPropertiesTag",
+            value: rangerHivePluginPropertiesTag
+          });
+        }
+      }
+      if (App.Service.find().someProperty('serviceName', 'RANGER_KMS')) {
+        if('ranger-kms-audit' in data.Clusters.desired_configs) {
+          var rangerKMSAuditTag = data.Clusters.desired_configs['ranger-kms-audit'].tag;
+          urlParams.push('(type=ranger-kms-audit&tag=' + rangerKMSAuditTag + ')');
+          this.set("rangerKMSAuditTag", {name: "rangerKMSAuditTag", value: rangerKMSAuditTag});
+        }
+      }
+    }
     App.ajax.send({
       name: 'admin.get.all_configurations',
       sender: this,
@@ -116,8 +222,8 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
   },
 
   onLoadConfigs: function (data) {
-    this.set('serverConfigData',data);
-    this.removeConfigs(this.get('configsToRemove'), this.get('serverConfigData'));
+    this.set('serverConfigData', data);
+    this.removeConfigs(this.get('configsToRemove'), data);
     this.tweakServiceConfigs(this.get('haConfig.configs'));
     this.renderServiceConfigs(this.get('haConfig'));
     this.set('isLoaded', true);
@@ -135,8 +241,8 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
     var configsFromServer = this.get('serverConfigData.items');
     ret.namespaceId = this.get('content.nameServiceId');
     ret.serverConfigs = configsFromServer;
-    var hdfsConfigs = configsFromServer.findProperty('type','hdfs-site').properties;
-    var zkConfigs = configsFromServer.findProperty('type','zoo.cfg').properties;
+    var hdfsConfigs = configsFromServer.findProperty('type', 'hdfs-site').properties;
+    var zkConfigs = configsFromServer.findProperty('type', 'zoo.cfg').properties;
 
     var dfsHttpA = hdfsConfigs['dfs.namenode.http-address'];
     ret.nnHttpPort = dfsHttpA ? dfsHttpA.split(':')[1] : 50070;
@@ -166,7 +272,7 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
     return localDB;
   },
 
-  tweakServiceConfigs: function(configs) {
+  tweakServiceConfigs: function (configs) {
     var localDB = this._prepareLocalDB();
     var dependencies = this._prepareDependencies();
 
@@ -184,8 +290,8 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
    * @param configs - configuration object
    * @returns {Object}
    */
-  removeConfigs:function (configsToRemove, configs) {
-    Em.keys(configsToRemove).forEach(function(site){
+  removeConfigs: function (configsToRemove, configs) {
+    Em.keys(configsToRemove).forEach(function (site) {
       var siteConfigs = configs.items.findProperty('type', site);
       if (siteConfigs) {
         configsToRemove[site].forEach(function (property) {
@@ -215,7 +321,7 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
 
     this.get('stepConfigs').pushObject(serviceConfig);
     this.set('selectedService', this.get('stepConfigs').objectAt(0));
-    this.once = true;
+    this.set('once', true);
   },
 
   /**
@@ -229,9 +335,5 @@ App.HighAvailabilityWizardStep3Controller = Em.Controller.extend({
       componentConfig.configs.pushObject(serviceConfigProperty);
       serviceConfigProperty.set('isEditable', serviceConfigProperty.get('isReconfigurable'));
     }, this);
-  },
-
-  isNextDisabled: Em.computed.not('isLoaded')
-
+  }
 });
-

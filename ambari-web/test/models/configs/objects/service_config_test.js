@@ -21,55 +21,84 @@ var App = require('app');
 require('models/configs/objects/service_config');
 
 var serviceConfig,
-  configs = [
-      Em.Object.create({
+    configs = [
+      App.ServiceConfigProperty.create({
         'name': 'p1',
         'isVisible': true,
         'hiddenBySection': false,
+        'hiddenBySubSection': false,
         'isRequiredByAgent': true,
         'isValid': true,
         'isValidOverride': true
       }),
-      Em.Object.create({
+      App.ServiceConfigProperty.create({
         'name': 'p2',
         'isVisible': false,
         'hiddenBySection': false,
+        'hiddenBySubSection': false,
         'isRequiredByAgent': true,
         'isValid': true,
         'isValidOverride': true
       }),
-      Em.Object.create({
+      App.ServiceConfigProperty.create({
         'name': 'p3',
         'isVisible': true,
         'hiddenBySection': true,
+        'hiddenBySubSection': true,
         'isRequiredByAgent': true,
         'isValid': true,
         'isValidOverride': true
       }),
-      Em.Object.create({
+      App.ServiceConfigProperty.create({
         'name': 'p4',
         'isVisible': true,
         'hiddenBySection': false,
+        'hiddenBySubSection': false,
         'isRequiredByAgent': true,
         'isValid': false,
         'isValidOverride': true
       }),
-      Em.Object.create({
+      App.ServiceConfigProperty.create({
         'name': 'p5',
         'isVisible': true,
         'hiddenBySection': false,
+        'hiddenBySubSection': false,
         'isRequiredByAgent': true,
         'isValid': true,
         'isValidOverride': false
       }),
-    Em.Object.create({
-      'name': 'p6',
-      'isVisible': true,
-      'hiddenBySection': false,
-      'isRequiredByAgent': false,
-      'isValid': true,
-      'isValidOverride': false
-    })
+      App.ServiceConfigProperty.create({
+        'name': 'p6',
+        'isVisible': true,
+        'hiddenBySection': false,
+        'hiddenBySubSection': false,
+        'isRequiredByAgent': false,
+        'isRequired': false,
+        'isValid': true,
+        'isValidOverride': false
+      }),
+      App.ServiceConfigProperty.create({
+        'name': 'p7',
+        'isVisible': true,
+        'hiddenBySection': false,
+        'hiddenBySubSection': false,
+        'isRequiredByAgent': false,
+        'isValid': true,
+        'isRequired': true,
+        'isValidOverride': false
+      }),
+      App.ServiceConfigProperty.create({
+        'name': 'p8',
+        'isVisible': false,
+        'hiddenBySection': false,
+        'hiddenBySubSection': false,
+        'isRequiredByAgent': false,
+        'isValid': true,
+        'isRequired': true,
+        'isValidOverride': true,
+        'value': 'Undefined',
+        'displayType': 'label'
+      })
   ];
 
 describe('App.ServiceConfig', function () {
@@ -82,14 +111,17 @@ describe('App.ServiceConfig', function () {
 
   describe('#activeProperties', function() {
     it('returns collection of properties that should be shown', function() {
-      expect(serviceConfig.get('activeProperties').mapProperty('name')).to.be.eql(['p1','p4','p5']);
+      serviceConfig.setActivePropertiesOnce();
+      expect(serviceConfig.get('activeProperties').mapProperty('name')).to.be.eql(['p1','p4','p5','p7', 'p8']);
     });
   });
 
   describe('#configsWithErrors', function() {
     it('returns collection of properties with errors', function() {
-      expect(serviceConfig.get('configsWithErrors').mapProperty('name')).to.be.eql(['p4', 'p5']);
-    })
+      serviceConfig.set('activeProperties', configs);
+      serviceConfig.setConfigsWithErrorsOnce();
+      expect(serviceConfig.get('configsWithErrors').mapProperty('name')).to.be.eql(['p4', 'p5', 'p6', 'p7']);
+    });
   });
 
   describe('#errorCount', function() {

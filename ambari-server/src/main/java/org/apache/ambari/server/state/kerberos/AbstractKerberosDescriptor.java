@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,8 +18,13 @@
 
 package org.apache.ambari.server.state.kerberos;
 
-import java.util.HashMap;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+
+import org.apache.commons.lang.StringUtils;
 
 /**
  * AbstractKerberosDescriptor is the base class for all Kerberos*Descriptor and associated classes.
@@ -28,6 +33,8 @@ import java.util.Map;
  * It also provides utility and helper methods.
  */
 public abstract class AbstractKerberosDescriptor {
+
+  static final String KEY_NAME = "name";
 
   /**
    * An AbstractKerberosDescriptor serving as the parent (or container) for this
@@ -65,11 +72,11 @@ public abstract class AbstractKerberosDescriptor {
    * @return a Map of date representing this AbstractKerberosDescriptor implementation
    */
   public Map<String, Object> toMap() {
-    HashMap<String, Object> dataMap = new HashMap<String, Object>();
+    TreeMap<String, Object> dataMap = new TreeMap<>();
     String name = getName();
 
     if (name != null) {
-      dataMap.put("name", name);
+      dataMap.put(KEY_NAME, name);
     }
 
     return dataMap;
@@ -151,6 +158,38 @@ public abstract class AbstractKerberosDescriptor {
   }
 
   /**
+   * Safely retrieves the requested value (converted to a Boolean) from the supplied Map
+   * <p/>
+   * The found value will be converted to a Boolean using {@link Boolean#valueOf(String)}.
+   * If not found, <code>null</code> will be returned
+   *
+   * @param map a Map containing the relevant data
+   * @param key a String declaring the item to retrieve
+   * @return a Boolean representing the requested data; or null if not found
+   * @see Boolean#valueOf(String)
+   * @see #getBooleanValue(Map, String, Boolean)
+   */
+  protected static Boolean getBooleanValue(Map<?, ?> map, String key) {
+    return getBooleanValue(map, key, null);
+  }
+
+  /**
+   * Safely retrieves the requested value (converted to a Boolean) from the supplied Map
+   * <p/>
+   * The found value will be converted to a Boolean using {@link Boolean#valueOf(String)}.
+   *
+   * @param map          a Map containing the relevant data
+   * @param key          a String declaring the item to retrieve
+   * @param defaultValue a Boolean value to return if the data is not found
+   * @return a Boolean representing the requested data; or the specified default value if not found
+   * @see Boolean#valueOf(String)
+   */
+  protected static Boolean getBooleanValue(Map<?, ?> map, String key, Boolean defaultValue) {
+    String value = getStringValue(map, key);
+    return (StringUtils.isEmpty(value)) ? defaultValue : Boolean.valueOf(value);
+  }
+
+  /**
    * Gets the requested AbstractKerberosDescriptor implementation using a type name and a relevant
    * descriptor name.
    * <p/>
@@ -160,7 +199,7 @@ public abstract class AbstractKerberosDescriptor {
    * @param name a String indicating the name of the requested descriptor
    * @return a AbstractKerberosDescriptor representing the requested descriptor or null if not found
    */
-  protected AbstractKerberosDescriptor getDescriptor(KerberosDescriptorType type, String name) {
+  protected AbstractKerberosDescriptor getDescriptor(Type type, String name) {
     return null;
   }
 
@@ -179,6 +218,18 @@ public abstract class AbstractKerberosDescriptor {
     }
 
     return root;
+  }
+
+  public static <T> Collection<T> nullToEmpty(Collection<T> collection) {
+    return collection == null ? Collections.emptyList() : collection;
+  }
+
+  public static <T> List<T> nullToEmpty(List<T> list) {
+    return list == null ? Collections.emptyList() : list;
+  }
+
+  public static <K, V> Map<K, V> nullToEmpty(Map<K, V> collection) {
+    return collection == null ? Collections.emptyMap() : collection;
   }
 
   @Override
@@ -204,6 +255,70 @@ public abstract class AbstractKerberosDescriptor {
       );
     } else {
       return false;
+    }
+  }
+
+  /**
+   * Calculate the path to this identity descriptor for logging purposes.
+   * Examples:
+   * <ul>
+   * <li>/</li>
+   * <li>/SERVICE</li>
+   * <li>/SERVICE/COMPONENT</li>
+   * <li>/SERVICE/COMPONENT/identity_name</li>
+   * </ul>
+   *
+   * @return a path
+   */
+  public String getPath() {
+    //
+    StringBuilder path = new StringBuilder();
+    AbstractKerberosDescriptor current = this;
+    while (current != null && (current.getName() != null)) {
+      path.insert(0, current.getName());
+      path.insert(0, '/');
+      current = current.getParent();
+    }
+
+    return path.toString();
+  }
+
+  /**
+   * An enumeration of the different Kerberos (sub)descriptors for internal use.
+   */
+  public enum Type {
+    SERVICE("service", "services"),
+    COMPONENT("component", "components"),
+    IDENTITY("identity", "identities"),
+    PRINCIPAL("principal", "principals"),
+    KEYTAB("keytab", "keytabs"),
+    CONFIGURATION("configuration", "configurations"),
+    AUTH_TO_LOCAL_PROPERTY("auth_to_local_property", "auth_to_local_properties");
+
+    private final String descriptorName;
+    private final String descriptorPluralName;
+
+    Type(String descriptorName, String descriptorPluralName) {
+      this.descriptorName = descriptorName;
+      this.descriptorPluralName = descriptorPluralName;
+    }
+
+    /**
+     * Gets the identifying name for this Type
+     *
+     * @return a String declaring the identifying name for this Type
+     */
+    public String getDescriptorName() {
+      return descriptorName;
+    }
+
+    /**
+     * Gets the identifying name for a group of this Type
+     *
+     * @return a String declaring the identifying name for a group of this Type
+     */
+    public String getDescriptorPluralName() {
+      return descriptorPluralName;
     }
   }
 }

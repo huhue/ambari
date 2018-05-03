@@ -29,7 +29,6 @@ from resource_management.core.resources.system import File, Execute
 from resource_management.core.resources.service import Service
 from resource_management.core.exceptions import Fail
 from resource_management.core.shell import as_user
-from resource_management.libraries.functions.hive_check import check_thrift_port_sasl
 from resource_management.libraries.functions import get_user_call_output
 from resource_management.libraries.functions.show_logs import show_logs
 from resource_management.libraries.functions import StackFeature
@@ -55,16 +54,17 @@ def hive_service(name, action='start', upgrade_type=None):
 def hive_service(name, action='start', upgrade_type=None):
 
   import params
+  import status_params
 
   if name == 'metastore':
-    pid_file = format("{hive_pid_dir}/{hive_metastore_pid}")
+    pid_file = status_params.hive_metastore_pid
     cmd = format("{start_metastore_path} {hive_log_dir}/hive.out {hive_log_dir}/hive.err {pid_file} {hive_server_conf_dir} {hive_log_dir}")
   elif name == 'hiveserver2':
-    pid_file = format("{hive_pid_dir}/{hive_pid}")
+    pid_file = status_params.hive_pid
     cmd = format("{start_hiveserver2_path} {hive_log_dir}/hive-server2.out {hive_log_dir}/hive-server2.err {pid_file} {hive_server_conf_dir} {hive_log_dir}")
 
 
-    if params.security_enabled and params.current_version and check_stack_feature(StackFeature.HIVE_SERVER2_KERBERIZED_ENV, params.current_version):
+    if params.security_enabled and check_stack_feature(StackFeature.HIVE_SERVER2_KERBERIZED_ENV, params.version_for_stack_feature_checks):
       hive_kinit_cmd = format("{kinit_path_local} -kt {hive_server2_keytab} {hive_principal}; ")
       Execute(hive_kinit_cmd, user=params.hive_user)
 
@@ -76,8 +76,6 @@ def hive_service(name, action='start', upgrade_type=None):
       check_fs_root(params.hive_server_conf_dir, params.execute_path)
 
     daemon_cmd = cmd
-    hadoop_home = params.hadoop_home
-    hive_bin = "hive"
 
     # upgrading hiveserver2 (rolling_restart) means that there is an existing,
     # de-registering hiveserver2; the pid will still exist, but the new
@@ -85,31 +83,29 @@ def hive_service(name, action='start', upgrade_type=None):
     if upgrade_type == UPGRADE_TYPE_ROLLING:
       process_id_exists_command = None
 
-      if params.version and params.stack_root:
-        import os
-        hadoop_home = format("{stack_root}/{version}/hadoop")
-        hive_bin = os.path.join(params.hive_bin, hive_bin)
-      
-    Execute(daemon_cmd, 
+    Execute(daemon_cmd,
       user = params.hive_user,
-      environment = { 'HADOOP_HOME': hadoop_home, 'JAVA_HOME': params.java64_home, 'HIVE_BIN': hive_bin },
+      environment = { 'JAVA_HOME': params.java64_home, 'HIVE_CMD': params.hive_cmd },
       path = params.execute_path,
       not_if = process_id_exists_command)
 
     if params.hive_jdbc_driver == "com.mysql.jdbc.Driver" or \
        params.hive_jdbc_driver == "org.postgresql.Driver" or \
        params.hive_jdbc_driver == "oracle.jdbc.driver.OracleDriver":
-      
-      db_connection_check_command = format(
-        "{java64_home}/bin/java -cp {check_db_connection_jar}:{target_hive} org.apache.ambari.server.DBConnectionVerification '{hive_jdbc_connection_url}' {hive_metastore_user_name} {hive_metastore_user_passwd!p} {hive_jdbc_driver}")
-      
-      try:
-        Execute(db_connection_check_command,
-              path='/usr/sbin:/sbin:/usr/local/bin:/bin:/usr/bin', tries=5, try_sleep=10)
-      except:
-        show_logs(params.hive_log_dir, params.hive_user)
-        raise
-        
+
+      validation_called = False
+
+      if params.hive_jdbc_target is not None:
+        validation_called = True
+        validate_connection(params.hive_jdbc_target, params.hive_lib)
+      if params.hive2_jdbc_target is not None:
+        validation_called = True
+        validate_connection(params.hive2_jdbc_target, params.hive_server2_hive2_lib)
+
+      if not validation_called:
+        emessage = "ERROR! DB connection check should be executed at least one time!"
+        Logger.error(emessage)
+
   elif action == 'stop':
 
     daemon_kill_cmd = format("{sudo} kill {pid}")
@@ -139,8 +135,36 @@ def hive_service(name, action='start', upgrade_type=None):
          action = "delete"
     )
 
+def validate_connection(target_path_to_jdbc, hive_lib_path):
+  import params
+
+  path_to_jdbc = target_path_to_jdbc
+  if not params.jdbc_jar_name:
+    path_to_jdbc = format("{hive_lib_path}/") + \
+                   params.default_connectors_map[params.hive_jdbc_driver] if params.hive_jdbc_driver in params.default_connectors_map else None
+    if not os.path.isfile(path_to_jdbc):
+      path_to_jdbc = format("{hive_lib_path}/") + "*"
+      error_message = "Error! Sorry, but we can't find jdbc driver with default name " + params.default_connectors_map[params.hive_jdbc_driver] + \
+                      " in hive lib dir. So, db connection check can fail. Please run 'ambari-server setup --jdbc-db={db_name} --jdbc-driver={path_to_jdbc} on server host.'"
+      Logger.error(error_message)
+
+  db_connection_check_command = format(
+    "{java64_home}/bin/java -cp {check_db_connection_jar}:{path_to_jdbc} org.apache.ambari.server.DBConnectionVerification '{hive_jdbc_connection_url}' {hive_metastore_user_name} {hive_metastore_user_passwd!p} {hive_jdbc_driver}")
+
+  try:
+    Execute(db_connection_check_command,
+            path='/usr/sbin:/sbin:/usr/local/bin:/bin:/usr/bin', tries=5, try_sleep=10)
+  except:
+    show_logs(params.hive_log_dir, params.hive_user)
+    raise
+
+
 def check_fs_root(conf_dir, execution_path):
   import params
+
+  if not params.manage_hive_fsroot:
+    Logger.info("Skipping fs root check as cluster-env/manage_hive_fsroot is disabled")
+    return
 
   if not params.fs_root.startswith("hdfs://"):
     Logger.info("Skipping fs root check as fs_root does not start with hdfs://")

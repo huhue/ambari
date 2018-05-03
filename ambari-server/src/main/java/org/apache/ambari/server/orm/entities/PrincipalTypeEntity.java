@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,7 +18,15 @@
 
 package org.apache.ambari.server.orm.entities;
 
-import javax.persistence.*;
+import javax.persistence.Column;
+import javax.persistence.Entity;
+import javax.persistence.GeneratedValue;
+import javax.persistence.GenerationType;
+import javax.persistence.Id;
+import javax.persistence.NamedQueries;
+import javax.persistence.NamedQuery;
+import javax.persistence.Table;
+import javax.persistence.TableGenerator;
 
 /**
  * Represents a principal type.
@@ -30,6 +38,9 @@ import javax.persistence.*;
     , pkColumnValue = "principal_type_id_seq"
     , initialValue = 100
 )
+@NamedQueries({
+    @NamedQuery(name = "PrincipalTypeEntity.findByName", query = "SELECT p FROM PrincipalTypeEntity p WHERE p.name = :name")
+})
 public class PrincipalTypeEntity {
 
   /**
@@ -37,19 +48,17 @@ public class PrincipalTypeEntity {
    */
   public static final int USER_PRINCIPAL_TYPE  = 1;
   public static final int GROUP_PRINCIPAL_TYPE = 2;
-  public static final int CLUSTER_ADMINISTRATOR_PRINCIPAL_TYPE = 3;
-  public static final int CLUSTER_OPERATOR_PRINCIPAL_TYPE = 4;
-  public static final int CLUSTER_USER_PRINCIPAL_TYPE = 5;
-  public static final int SERVICE_ADMINISTRATOR_PRINCIPAL_TYPE = 6;
-  public static final int SERVICE_OPERATOR_PRINCIPAL_TYPE = 7;
+  public static final int ROLE_PRINCIPAL_TYPE = 8;
 
-  public static final String USER_PRINCIPAL_TYPE_NAME  = "USER";
-  public static final String GROUP_PRINCIPAL_TYPE_NAME = "GROUP";
-  public static final String CLUSTER_ADMINISTRATOR_PRINCIPAL_TYPE_NAME = "ALL.CLUSTER.ADMINISTRATOR";
-  public static final String CLUSTER_OPERATOR_PRINCIPAL_TYPE_NAME = "ALL.CLUSTER.OPERATOR";
-  public static final String CLUSTER_USER_PRINCIPAL_TYPE_NAME = "ALL.CLUSTER.USER";
-  public static final String SERVICE_ADMINISTRATOR_PRINCIPAL_TYPE_NAME = "ALL.SERVICE.ADMINISTRATOR";
-  public static final String SERVICE_OPERATOR_PRINCIPAL_TYPE_NAME = "ALL.SERVICE.OPERATOR";
+  public static final String USER_PRINCIPAL_TYPE_NAME  = PrincipalType.USER.toString();
+  public static final String GROUP_PRINCIPAL_TYPE_NAME = PrincipalType.GROUP.toString();
+  public static final String ROLE_PRINCIPAL_TYPE_NAME = PrincipalType.ROLE.toString();
+
+  public enum PrincipalType {
+    USER,
+    GROUP,
+    ROLE;
+  }
 
   /**
    * The type id.

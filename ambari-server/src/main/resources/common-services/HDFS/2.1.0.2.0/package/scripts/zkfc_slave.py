@@ -27,34 +27,58 @@ from resource_management.core.exceptions import Fail
 from resource_management.core.resources.system import Directory
 from resource_management.core.resources.service import Service
 from resource_management.core import shell
+from resource_management.libraries.functions import stack_select
+from resource_management.libraries.functions.constants import StackFeature
 from resource_management.libraries.functions.check_process_status import check_process_status
-from resource_management.libraries.functions.security_commons import build_expectations
-from resource_management.libraries.functions.security_commons import cached_kinit_executor
-from resource_management.libraries.functions.security_commons import get_params_from_filesystem
-from resource_management.libraries.functions.security_commons import validate_security_config_properties
-from resource_management.libraries.functions.security_commons import FILE_TYPE_XML
+from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.script import Script
+from resource_management.core.resources.zkmigrator import ZkMigrator
+from resource_management.core.resources.system import Execute
+from resource_management.core.exceptions import Fail, ComponentIsNotRunning
+from resource_management.core.resources.system import Execute
+
 
 class ZkfcSlave(Script):
   def install(self, env):
     import params
     env.set_params(params)
     self.install_packages(env)
-
-  def configure(self, env):
+    
+  def configure(env):
+    ZkfcSlave.configure_static(env)
+    
+  @staticmethod
+  def configure_static(env):
     import params
     env.set_params(params)
     hdfs("zkfc_slave")
+    utils.set_up_zkfc_security(params)
     pass
+
+  def format(self, env):
+    import params
+    env.set_params(params)
+
+    utils.set_up_zkfc_security(params)
+
+    Execute("hdfs zkfc -formatZK -nonInteractive",
+            returns=[0, 2], # Returns 0 on success ; Returns 2 if zkfc is already formatted
+            user=params.hdfs_user,
+            logoutput=True
+    )
 
 @OsFamilyImpl(os_family=OsFamilyImpl.DEFAULT)
 class ZkfcSlaveDefault(ZkfcSlave):
 
   def start(self, env, upgrade_type=None):
+    ZkfcSlaveDefault.start_static(env, upgrade_type)
+    
+  @staticmethod
+  def start_static(env, upgrade_type=None):
     import params
 
     env.set_params(params)
-    self.configure(env)
+    ZkfcSlave.configure_static(env)
     Directory(params.hadoop_pid_dir_prefix,
               mode=0755,
               owner=params.hdfs_user,
@@ -75,8 +99,12 @@ class ZkfcSlaveDefault(ZkfcSlave):
       action="start", name="zkfc", user=params.hdfs_user, create_pid_dir=True,
       create_log_dir=True
     )
-
+  
   def stop(self, env, upgrade_type=None):
+    ZkfcSlaveDefault.stop_static(env, upgrade_type)
+
+  @staticmethod
+  def stop_static(env, upgrade_type=None):
     import params
 
     env.set_params(params)
@@ -87,53 +115,23 @@ class ZkfcSlaveDefault(ZkfcSlave):
 
 
   def status(self, env):
+    ZkfcSlaveDefault.status_static(env)
+    
+  @staticmethod
+  def status_static(env):
     import status_params
     env.set_params(status_params)
     check_process_status(status_params.zkfc_pid_file)
 
-  def security_status(self, env):
-    import status_params
-    env.set_params(status_params)
-    props_value_check = {"hadoop.security.authentication": "kerberos",
-                         "hadoop.security.authorization": "true"}
-    props_empty_check = ["hadoop.security.auth_to_local"]
-    props_read_check = None
-    core_site_expectations = build_expectations('core-site', props_value_check, props_empty_check,
-                                                props_read_check)
-    hdfs_expectations = {}
-    hdfs_expectations.update(core_site_expectations)
+  def disable_security(self, env):
+    import params
 
-    security_params = get_params_from_filesystem(status_params.hadoop_conf_dir,
-                                                   {'core-site.xml': FILE_TYPE_XML})
-    result_issues = validate_security_config_properties(security_params, hdfs_expectations)
-    if 'core-site' in security_params and 'hadoop.security.authentication' in security_params['core-site'] and \
-        security_params['core-site']['hadoop.security.authentication'].lower() == 'kerberos':
-      if not result_issues:  # If all validations passed successfully
-        if status_params.hdfs_user_principal or status_params.hdfs_user_keytab:
-          try:
-            cached_kinit_executor(status_params.kinit_path_local,
-                                  status_params.hdfs_user,
-                                  status_params.hdfs_user_keytab,
-                                  status_params.hdfs_user_principal,
-                                  status_params.hostname,
-                                  status_params.tmp_dir)
-            self.put_structured_out({"securityState": "SECURED_KERBEROS"})
-          except Exception as e:
-            self.put_structured_out({"securityState": "ERROR"})
-            self.put_structured_out({"securityStateErrorInfo": str(e)})
-        else:
-          self.put_structured_out(
-            {"securityIssuesFound": "hdfs principal and/or keytab file is not specified"})
-          self.put_structured_out({"securityState": "UNSECURED"})
-      else:
-        issues = []
-        for cf in result_issues:
-          issues.append("Configuration file %s did not pass the validation. Reason: %s" % (cf, result_issues[cf]))
-        self.put_structured_out({"securityIssuesFound": ". ".join(issues)})
-        self.put_structured_out({"securityState": "UNSECURED"})
-    else:
-      self.put_structured_out({"securityState": "UNSECURED"})
-      
+    if not params.stack_supports_zk_security:
+      return
+
+    zkmigrator = ZkMigrator(params.ha_zookeeper_quorum, params.java_exec, params.java_home, params.jaas_file, params.hdfs_user)
+    zkmigrator.set_acls(params.zk_namespace if params.zk_namespace.startswith('/') else '/' + params.zk_namespace, 'world:anyone:crdwa')
+
   def get_log_folder(self):
     import params
     return params.hdfs_log_dir
@@ -141,6 +139,17 @@ class ZkfcSlaveDefault(ZkfcSlave):
   def get_user(self):
     import params
     return params.hdfs_user
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.zkfc_pid_file]
+
+  def pre_upgrade_restart(self, env, upgrade_type=None):
+    Logger.info("Executing Stack Upgrade pre-restart")
+    import params
+    env.set_params(params)
+    if check_stack_feature(StackFeature.ZKFC_VERSION_ADVERTISED, params.version_for_stack_feature_checks):
+      stack_select.select_packages(params.version)
 
 def initialize_ha_zookeeper(params):
   try:
@@ -161,6 +170,7 @@ def initialize_ha_zookeeper(params):
   except Exception as ex:
     Logger.error('HA state initialization in ZooKeeper threw an exception. Reason %s' %(str(ex)))
   return False
+
 
 @OsFamilyImpl(os_family=OSConst.WINSRV_FAMILY)
 class ZkfcSlaveWindows(ZkfcSlave):

@@ -27,7 +27,9 @@ import os
 class TestFlumeHandler(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "FLUME/1.4.0.2.0/package"
   STACK_VERSION = "2.0.6"
-  
+
+  CONFIG_OVERRIDES = {"serviceName":"FLUME", "role":"FLUME_HANDLER"}
+
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/flume_handler.py",
                        classname = "FlumeHandler",
@@ -122,7 +124,7 @@ class TestFlumeHandler(RMFTestCase):
                        target = RMFTestCase.TARGET_COMMON_SERVICES)
 
     self.assertTrue(glob_mock.called)
-    await_flume_process_termination_mock.assert_called_with('/var/run/flume/a1.pid')
+    await_flume_process_termination_mock.assert_called_with('/var/run/flume/a1.pid', try_count=10)
 
     self.assertTrue(set_desired_mock.called)
     self.assertTrue(set_desired_mock.call_args[0][0] == 'INSTALLED')
@@ -239,6 +241,7 @@ class TestFlumeHandler(RMFTestCase):
                               '/var/log/flume',
                               owner = 'flume',
                               group = 'hadoop',
+                              create_parents = True,
                               cd_access = 'a', 
                               mode=0755
     )
@@ -256,7 +259,7 @@ class TestFlumeHandler(RMFTestCase):
 
     self.assertResourceCalled('File',
       '/etc/flume/conf/a1/log4j.properties',
-      content = Template('log4j.properties.j2', agent_name = 'a1'),
+      content = InlineTemplate(self.getConfig()['configurations']['flume-log4j']['content'],agent_name='a1'),
       owner='flume',
       mode = 0644)
 
@@ -292,6 +295,7 @@ class TestFlumeHandler(RMFTestCase):
                               '/var/log/flume',
                               owner = 'flume',
                               group = 'hadoop',
+                              create_parents = True,
                               cd_access = 'a',
                               mode=0755)
 
@@ -309,7 +313,7 @@ class TestFlumeHandler(RMFTestCase):
     self.assertResourceCalled('File',
       '/etc/flume/conf/a1/log4j.properties',
       owner='flume',
-      content = Template('log4j.properties.j2', agent_name = 'a1'),
+      content = InlineTemplate(self.getConfig()['configurations']['flume-log4j']['content'],agent_name='a1'),
       mode = 0644)
     self.assertResourceCalled('File',
       '/etc/flume/conf/a1/ambari-meta.json',
@@ -333,7 +337,7 @@ class TestFlumeHandler(RMFTestCase):
     self.assertResourceCalled('File',
       '/etc/flume/conf/b1/log4j.properties',
       owner='flume',
-      content = Template('log4j.properties.j2', agent_name = 'b1'),
+      content = InlineTemplate(self.getConfig()['configurations']['flume-log4j']['content'],agent_name='b1'),
       mode = 0644)
     self.assertResourceCalled('File',
       '/etc/flume/conf/b1/ambari-meta.json',
@@ -419,7 +423,7 @@ class TestFlumeHandler(RMFTestCase):
                        target = RMFTestCase.TARGET_COMMON_SERVICES)
 
     self.assertTrue(glob_mock.called)
-    await_flume_process_termination_mock.assert_called_with('/var/run/flume/b1.pid')
+    await_flume_process_termination_mock.assert_called_with('/var/run/flume/b1.pid', try_count=10)
 
     self.assertResourceCalled('File', '/var/run/flume/b1.pid', action = ['delete'])
 
@@ -463,6 +467,7 @@ class TestFlumeHandler(RMFTestCase):
                               owner = 'flume',
                               cd_access = 'a',
                               group = 'hadoop',
+                              create_parents = True,
                               mode=0755)
 
     self.assertResourceCalled('Directory',
@@ -479,7 +484,7 @@ class TestFlumeHandler(RMFTestCase):
     self.assertResourceCalled('File',
       '/etc/flume/conf/a1/log4j.properties',
       owner='flume',
-      content = Template('log4j.properties.j2', agent_name = 'a1'),
+      content = InlineTemplate(self.getConfig()['configurations']['flume-log4j']['content'],agent_name='a1'),
       mode = 0644)
 
     self.assertResourceCalled('File',
@@ -516,6 +521,7 @@ class TestFlumeHandler(RMFTestCase):
                               '/var/log/flume',
                               owner = 'flume',
                               group = 'hadoop',
+                              create_parents = True,
                               cd_access = 'a', 
                               mode=0755)
 
@@ -532,7 +538,7 @@ class TestFlumeHandler(RMFTestCase):
 
     self.assertResourceCalled('File',
       '/usr/hdp/current/flume-server/conf/a1/log4j.properties',
-      content = Template('log4j.properties.j2', agent_name = 'a1'),
+      content = InlineTemplate(self.getConfig()['configurations']['flume-log4j']['content'],agent_name='a1'),
       owner='flume',
       mode = 0644)
 
@@ -556,6 +562,7 @@ class TestFlumeHandler(RMFTestCase):
                        classname = "FlumeHandler",
                        command = "pre_upgrade_restart",
                        config_file="flume_22.json",
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES)
 

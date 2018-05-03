@@ -6,7 +6,6 @@
           "fedora",
           "centos",
           "oraclelinux",
-          "amazon",
           "ascendos",
           "xenserver",
           "oel",
@@ -22,13 +21,34 @@
           7
         ]
       },
+      "redhat-ppc": {
+        "extends" : "redhat",
+        "distro": [
+          "redhat-ppc",
+          "centos-ppc"
+        ],
+        "versions": [
+          6,
+          7
+        ]
+      },
+      "amazonlinux": {
+        "extends" : "redhat",
+        "distro": [
+          "amazonlinux"
+        ],
+        "versions": [
+          2
+        ]
+      },
       "debian": {
         "extends" : "ubuntu",
         "distro": [
           "debian"
         ],
         "versions": [
-          7
+          7,
+          9
         ]
       },
       "ubuntu": {
@@ -37,7 +57,8 @@
         ],
         "versions": [
           12,
-          14
+          14,
+          16
         ]
       },
       "suse": {
@@ -65,7 +86,6 @@
       }
     },
     "aliases": {
-      "amazon2015": "amazon6",
-      "amazon2016": "amazon6"
+      "suse11sp3": "suse11"
     }
 }

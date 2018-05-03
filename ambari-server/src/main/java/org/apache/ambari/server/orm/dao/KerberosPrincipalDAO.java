@@ -19,16 +19,18 @@
 package org.apache.ambari.server.orm.dao;
 
 
+import java.util.List;
+
+import javax.persistence.EntityManager;
+import javax.persistence.TypedQuery;
+
+import org.apache.ambari.server.orm.RequiresSession;
+import org.apache.ambari.server.orm.entities.KerberosPrincipalEntity;
+
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
 import com.google.inject.persist.Transactional;
-import org.apache.ambari.server.orm.RequiresSession;
-import org.apache.ambari.server.orm.entities.KerberosPrincipalEntity;
-
-import javax.persistence.EntityManager;
-import javax.persistence.TypedQuery;
-import java.util.List;
 
 
 /**
@@ -42,12 +44,6 @@ public class KerberosPrincipalDAO {
    */
   @Inject
   Provider<EntityManager> entityManagerProvider;
-
-  /**
-   * Kerberos Principal Host DAO
-   */
-  @Inject
-  private KerberosPrincipalHostDAO kerberosPrincipalHostDAO;
 
   /**
    * Make an instance managed and persistent.
@@ -92,9 +88,6 @@ public class KerberosPrincipalDAO {
     if(kerberosPrincipalEntity != null) {
       EntityManager entityManager = entityManagerProvider.get();
       String principalName = kerberosPrincipalEntity.getPrincipalName();
-
-      // Remove child entities...
-      kerberosPrincipalHostDAO.removeByPrincipal(principalName);
 
       kerberosPrincipalEntity = find(principalName);
       if (kerberosPrincipalEntity != null) {
@@ -159,4 +152,11 @@ public class KerberosPrincipalDAO {
     return find(principalName) != null;
   }
 
+  public void remove(List<KerberosPrincipalEntity> entities) {
+    if (entities != null) {
+      for (KerberosPrincipalEntity entity : entities) {
+        remove(entity);
+      }
+    }
+  }
 }

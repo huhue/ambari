@@ -19,10 +19,11 @@ limitations under the License.
 '''
 
 import socket
-import subprocess
+from ambari_commons import subprocess32
 import urllib2
 import logging
 import traceback
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +49,23 @@ def hostname(config):
   try:
     scriptname = config.get('agent', 'hostname_script')
     try:
-      osStat = subprocess.Popen([scriptname], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      osStat = subprocess32.Popen([scriptname], stdout=subprocess32.PIPE, stderr=subprocess32.PIPE)
       out, err = osStat.communicate()
       if (0 == osStat.returncode and 0 != len(out.strip())):
         cached_hostname = out.strip()
+        logger.info("Read hostname '{0}' using agent:hostname_script '{1}'".format(cached_hostname, scriptname))
       else:
+        logger.warn("Execution of '{0}' failed with exit code {1}. err='{2}'\nout='{3}'".format(scriptname, osStat.returncode, err.strip(), out.strip()))
         cached_hostname = socket.getfqdn()
+        logger.info("Read hostname '{0}' using socket.getfqdn() as '{1}' failed".format(cached_hostname, scriptname))
     except:
       cached_hostname = socket.getfqdn()
+      logger.warn("Unexpected error while retrieving hostname: '{0}', defaulting to socket.getfqdn()".format(sys.exc_info()))
+      logger.info("Read hostname '{0}' using socket.getfqdn().".format(cached_hostname))
   except:
     cached_hostname = socket.getfqdn()
+    logger.info("agent:hostname_script configuration not defined thus read hostname '{0}' using socket.getfqdn().".format(cached_hostname))
+
   cached_hostname = cached_hostname.lower()
   return cached_hostname
 
@@ -72,7 +80,7 @@ def public_hostname(config):
   try:
     if config.has_option('agent', 'public_hostname_script'):
       scriptname = config.get('agent', 'public_hostname_script')
-      output = subprocess.Popen(scriptname, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+      output = subprocess32.Popen(scriptname, stdout=subprocess32.PIPE, stderr=subprocess32.PIPE, shell=True)
       out, err = output.communicate()
       if (0 == output.returncode and 0 != len(out.strip())):
         cached_public_hostname = out.strip().lower()
@@ -109,7 +117,7 @@ def server_hostnames(config):
   if config.has_option('server', 'hostname_script'):
     scriptname = config.get('server', 'hostname_script')
     try:
-      osStat = subprocess.Popen([scriptname], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      osStat = subprocess32.Popen([scriptname], stdout=subprocess32.PIPE, stderr=subprocess32.PIPE)
       out, err = osStat.communicate()
       if (0 == osStat.returncode and 0 != len(out.strip())):
         cached_server_hostnames = arrayFromCsvString(out)

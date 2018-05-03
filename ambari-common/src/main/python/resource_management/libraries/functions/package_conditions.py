@@ -19,18 +19,30 @@ limitations under the License.
 Ambari Agent
 
 """
-__all__ = ["is_lzo_enabled", "should_install_phoenix", "should_install_ams_collector", "should_install_ams_grafana",
-           "should_install_mysql", "should_install_mysl_connector", "should_install_ranger_tagsync"]
+__all__ = ["should_install_phoenix", "should_install_ams_collector", "should_install_ams_grafana",
+           "should_install_mysql", "should_install_ranger_tagsync"]
 
 import os
 from resource_management.libraries.script import Script
+from resource_management.libraries.functions import StackFeature
 from resource_management.libraries.functions.default import default
+from resource_management.libraries.functions.stack_features import check_stack_feature
+from resource_management.libraries.functions.version import format_stack_version
 
-def should_install_lzo():
-  config = Script.get_config()
-  io_compression_codecs = default("/configurations/core-site/io.compression.codecs", None)
-  lzo_enabled = io_compression_codecs is not None and "com.hadoop.compression.lzo" in io_compression_codecs.lower()
-  return lzo_enabled
+def _has_local_components(config, components, indicator_function = any):
+  if 'role' not in config:
+    return False
+  if config['role'] == 'install_packages':
+    # When installing new stack version for upgrade, all packages on a host are installed by install_packages.
+    # Check if
+    if 'localComponents' not in config:
+      return False
+    return indicator_function([component in config['localComponents'] for component in components])
+  else:
+    return config['role'] in components
+
+def _has_applicable_local_component(config, components):
+  return _has_local_components(config, components, any)
 
 def should_install_phoenix():
   phoenix_hosts = default('/clusterHostInfo/phoenix_query_server_hosts', [])
@@ -40,50 +52,63 @@ def should_install_phoenix():
 
 def should_install_ams_collector():
   config = Script.get_config()
-  return 'role' in config and config['role'] == "METRICS_COLLECTOR"
+  return _has_applicable_local_component(config, ["METRICS_COLLECTOR"])
 
 def should_install_ams_grafana():
   config = Script.get_config()
-  return 'role' in config and config['role'] == "METRICS_GRAFANA"
+  return _has_applicable_local_component(config, ["METRICS_GRAFANA"])
 
-def should_install_logsearch_solr():
+def should_install_infra_solr():
   config = Script.get_config()
-  return 'role' in config and config['role'] == "LOGSEARCH_SOLR"
+  return _has_applicable_local_component(config, ["INFRA_SOLR"])
 
-def should_install_logsearch_solr_client():
+def should_install_infra_solr_client():
   config = Script.get_config()
-  return 'role' in config and config['role'] == "LOGSEARCH_SOLR_CLIENT"
+  return _has_applicable_local_component(config, ['INFRA_SOLR_CLIENT', 'ATLAS_SERVER', 'RANGER_ADMIN', 'LOGSEARCH_SERVER'])
 
 def should_install_logsearch_portal():
   config = Script.get_config()
-  return 'role' in config and config['role'] == "LOGSEARCH_SERVER"
+  return _has_applicable_local_component(config, ["LOGSEARCH_SERVER"])
 
 def should_install_mysql():
   config = Script.get_config()
   hive_database = config['configurations']['hive-env']['hive_database']
   hive_use_existing_db = hive_database.startswith('Existing')
 
-  if hive_use_existing_db or 'role' in config and config['role'] != "MYSQL_SERVER":
+  if hive_use_existing_db:
     return False
-  return True
+  return _has_applicable_local_component(config, "MYSQL_SERVER")
 
-def should_install_mysl_connector():
-  mysql_jdbc_driver_jar = "/usr/share/java/mysql-connector-java.jar"
-  return not os.path.exists(mysql_jdbc_driver_jar)
+def should_install_mysql_connector():
+  config = Script.get_config()
+  hive_database = config['configurations']['hive-env']['hive_database']
+  hive_use_existing_db = hive_database.startswith('Existing')
+
+  if hive_use_existing_db:
+    return False
+  return _has_applicable_local_component(config, ["MYSQL_SERVER", "HIVE_METASTORE", "HIVE_SERVER", "HIVE_SERVER_INTERACTIVE"])
 
 def should_install_hive_atlas():
   atlas_hosts = default('/clusterHostInfo/atlas_server_hosts', [])
   has_atlas = len(atlas_hosts) > 0
   return has_atlas
 
-def should_install_kerberos_server():
+def should_install_falcon_atlas_hook():
   config = Script.get_config()
-  return 'role' in config and config['role'] != "KERBEROS_CLIENT"
+  stack_version_unformatted = config['clusterLevelParams']['stack_version']
+  stack_version_formatted = format_stack_version(stack_version_unformatted)
+  if check_stack_feature(StackFeature.FALCON_ATLAS_SUPPORT_2_3, stack_version_formatted) \
+      or check_stack_feature(StackFeature.FALCON_ATLAS_SUPPORT, stack_version_formatted):
+    return _has_applicable_local_component(config, ['FALCON_SERVER'])
+  return False
 
 def should_install_ranger_tagsync():
   config = Script.get_config()
   ranger_tagsync_hosts = default("/clusterHostInfo/ranger_tagsync_hosts", [])
-  ranger_tagsync_enabled = default('/configurations/ranger-tagsync-site/ranger.tagsync.enabled', False)
   has_ranger_tagsync = len(ranger_tagsync_hosts) > 0
 
-  return has_ranger_tagsync or ranger_tagsync_enabled
+  return has_ranger_tagsync
+
+def should_install_rpcbind():
+  config = Script.get_config()
+  return _has_applicable_local_component(config, ["NFS_GATEWAY"])

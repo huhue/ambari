@@ -39,7 +39,7 @@ App.alertGroupsMapper = App.QuickDataMapper.create({
     }
   },
 
-  map: function (json) {
+  map: function (json, ignoreDelete) {
     if(Em.isNone(App.cache['previousAlertGroupsFullMap'])) {
       App.cache['previousAlertGroupsFullMap'] = {};
     }
@@ -101,16 +101,17 @@ App.alertGroupsMapper = App.QuickDataMapper.create({
 
       }, this);
 
-      groupsToDelete.forEach(function(groupId) {
-        self.deleteRecord(App.AlertGroup.find(groupId));
-      });
+      if (!ignoreDelete) {
+        groupsToDelete.forEach(function(groupId) {
+          self.deleteRecord(App.AlertGroup.find(groupId));
+        });
+      }
 
       App.cache['previousAlertGroupsMap'] = alertDefinitionsGroupsMap;
       App.cache['previousAlertGroupsFullMap'] = groupsMap;
       App.cache['alertNotificationsGroupsMap'] = alertNotificationsGroupsMap;
       // initial load takes much more time than others, but it's OK (all data should be saved first time)
-      App.store.loadMany(this.get('model'), alertGroups);
-      App.store.commit();
+      App.store.safeLoadMany(this.get('model'), alertGroups);
       console.timeEnd('App.alertGroupsMapper execution time');
     }
   }

@@ -17,8 +17,6 @@
  */
 package org.apache.ambari.server.orm.entities;
 
-import org.apache.ambari.server.controller.spi.Resource;
-
 import javax.persistence.Basic;
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -42,7 +40,9 @@ import javax.persistence.TableGenerator;
 @NamedQueries({
     @NamedQuery(name = "requestOperationLevelByHostId", query =
         "SELECT requestOperationLevel FROM RequestOperationLevelEntity requestOperationLevel " +
-            "WHERE requestOperationLevel.hostId=:hostId")
+            "WHERE requestOperationLevel.hostId=:hostId"),
+    @NamedQuery(name = "RequestOperationLevelEntity.removeByRequestIds",
+        query = "DELETE FROM RequestOperationLevelEntity requestOperationLevel WHERE requestOperationLevel.requestId IN :requestIds")
 })
 public class RequestOperationLevelEntity {
 

@@ -17,31 +17,48 @@
   ~ See the License for the specific language governing permissions and
   ~ limitations under the License.
   -->
-
 <configuration>
   <property>
     <name>port</name>
     <value>3000</value>
     <description>The http port to use</description>
+    <value-attributes>
+      <type>int</type>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>protocol</name>
     <value>http</value>
     <description>Protocol (http or https)</description>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>cert_file</name>
     <value>/etc/ambari-metrics-grafana/conf/ams-grafana.crt</value>
     <description>Path to grafana certificate (.crt) file.</description>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>cert_key</name>
     <value>/etc/ambari-metrics-grafana/conf/ams-grafana.key</value>
     <description>Path to grafana certificate key (.key) file.</description>
+    <on-ambari-upgrade add="true"/>
   </property>
-
+  <property>
+    <name>ca_cert</name>
+    <value></value>
+    <description>Path to CA root certificate or bundle to be used to validate the Grafana certificate against.
+      For self signed certificates, this value can be the same as the value for 'cert_file'.
+      (If a path is not specified, the certificate validation is skipped)</description>
+    <value-attributes>
+      <empty-value-valid>true</empty-value-valid>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
+  </property>
   <property>
     <name>content</name>
+    <display-name>ams-grafana-ini template</display-name>
     <value>
 ##################### Grafana Configuration Example #####################
 #
@@ -56,7 +73,7 @@
 # Path to where grafana can store temp files, sessions, and the sqlite3 db (if that is used)
 #
 ;data = /var/lib/grafana
-data = /var/lib/ambari-metrics-grafana
+data = {{ams_grafana_data_dir}}
 #
 # Directory where grafana can store logs
 #
@@ -156,7 +173,7 @@ cert_key = {{ams_grafana_cert_key}}
 admin_user = {{ams_grafana_admin_user}}
 
 # default admin password, can be changed before first start of grafana,  or in profile settings
-admin_password = {{ams_grafana_admin_pwd}}
+;admin_password =
 
 # used for signing
 ;secret_key = SW2YcwTIb9zpOOhoPsMm
@@ -301,6 +318,6 @@ org_name = Main Org.
 ;path = /var/lib/grafana/dashboards
 path = /usr/lib/ambari-metrics-grafana/public/dashboards
     </value>
+    <on-ambari-upgrade add="true"/>
   </property>
-
 </configuration>

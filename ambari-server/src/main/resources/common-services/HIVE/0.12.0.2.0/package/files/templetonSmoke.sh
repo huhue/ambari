@@ -24,11 +24,12 @@ export ttonhost=$1
 export smoke_test_user=$2
 export templeton_port=$3
 export ttonTestScript=$4
-export smoke_user_keytab=$5
-export security_enabled=$6
-export kinit_path_local=$7
-export smokeuser_principal=$8
-export tmp_dir=$9
+export has_pig=$5
+export smoke_user_keytab=$6
+export security_enabled=$7
+export kinit_path_local=$8
+export smokeuser_principal=$9
+export tmp_dir=${10}
 export ttonurl="http://${ttonhost}:${templeton_port}/templeton/v1"
 
 if [[ $security_enabled == "true" ]]; then
@@ -56,6 +57,7 @@ if [[ "$httpExitCode" -ne "200" ]] ; then
 fi
 
 #try hcat ddl command
+/var/lib/ambari-agent/ambari-sudo.sh rm -f ${tmp_dir}/show_db.post.txt
 echo "user.name=${smoke_test_user}&exec=show databases;" > ${tmp_dir}/show_db.post.txt
 /var/lib/ambari-agent/ambari-sudo.sh chown ${smoke_test_user} ${tmp_dir}/show_db.post.txt
 cmd="${kinitcmd}curl --negotiate -u : -s -w 'http_code <%{http_code}>' -d  @${tmp_dir}/show_db.post.txt  $ttonurl/ddl 2>&1"
@@ -74,9 +76,15 @@ if [[ $security_enabled == "true" ]]; then
   exit 0
 fi
 
+if [[ $has_pig != "True" ]]; then
+  echo "Templeton Pig Smoke Tests are not run, because Pig is not installed"
+  exit 0
+fi
+
 #try pig query
 
 #create, copy post args file
+/var/lib/ambari-agent/ambari-sudo.sh rm -f ${tmp_dir}/pig_post.txt
 echo -n "user.name=${smoke_test_user}&file=/tmp/$ttonTestScript" > ${tmp_dir}/pig_post.txt
 /var/lib/ambari-agent/ambari-sudo.sh chown ${smoke_test_user} ${tmp_dir}/pig_post.txt
 

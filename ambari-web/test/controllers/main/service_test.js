@@ -87,7 +87,7 @@ describe('App.MainServiceController', function () {
     mainServiceController.destroy();
   });
 
-  App.TestAliases.testAsComputedNotEqual(getController(), 'isStartStopAllClicked', 'App.router.backgroundOperationsController.allOperationsCount', 0);
+  App.TestAliases.testAsComputedNotEqual(getController(), 'isStartStopAllClicked', 'App.router.backgroundOperationsController.runningOperationsCount', 0);
 
   describe('#isStartAllDisabled', function () {
     tests.forEach(function (test) {
@@ -116,18 +116,17 @@ describe('App.MainServiceController', function () {
   describe("#isAllServicesInstalled", function() {
 
     beforeEach(function() {
-      sinon.stub(App.StackService, 'find').returns([
-        Em.Object.create({serviceName: 'S1'})
-      ]);
+      this.mock = sinon.stub(App.ServiceSimple, 'find');
     });
     afterEach(function() {
-      App.StackService.find.restore();
+      App.ServiceSimple.find.restore();
     });
 
     it("content is null", function() {
       mainServiceController.reopen({
         'content': null
       });
+      this.mock.returns([]);
       mainServiceController.propertyDidChange('isAllServicesInstalled');
       expect(mainServiceController.get('isAllServicesInstalled')).to.be.false;
     });
@@ -136,6 +135,9 @@ describe('App.MainServiceController', function () {
       mainServiceController.reopen({
         'content': []
       });
+      this.mock.returns([
+        {serviceName: 'S1', doNotShowAndInstall: false}
+      ]);
       mainServiceController.propertyDidChange('isAllServicesInstalled');
       expect(mainServiceController.get('isAllServicesInstalled')).to.be.false;
     });
@@ -144,8 +146,22 @@ describe('App.MainServiceController', function () {
       mainServiceController.reopen({
         'content': [Em.Object.create({serviceName: 'S1'})]
       });
+      this.mock.returns([
+        {serviceName: 'S1', doNotShowAndInstall: false}
+      ]);
       mainServiceController.propertyDidChange('isAllServicesInstalled');
       expect(mainServiceController.get('isAllServicesInstalled')).to.be.true;
+    });
+    it("content doesn't match stack services", function() {
+      mainServiceController.reopen({
+        'content': [Em.Object.create({serviceName: 'S1'})]
+      });
+      this.mock.returns([
+        {serviceName: 'S1', doNotShowAndInstall: false},
+        {serviceName: 'S1', doNotShowAndInstall: false}
+      ]);
+      mainServiceController.propertyDidChange('isAllServicesInstalled');
+      expect(mainServiceController.get('isAllServicesInstalled')).to.be.false;
     });
   });
 
@@ -373,41 +389,26 @@ describe('App.MainServiceController', function () {
     beforeEach(function () {
       sinon.spy(App, 'showConfirmationPopup');
       sinon.spy(mainServiceController, 'restartHostComponents');
-      sinon.stub(App.HostComponent, 'find', function() {
+      sinon.stub(App.Service, 'find', function() {
         return [
           Em.Object.create({
-            componentName: 'componentName1',
-            hostName: 'hostName1',
-            service: {
-              serviceName: 'serviceName1',
-              displayName: 'displayName1'
-            },
-            staleConfigs: true
+            displayName: 'displayName1',
+            isRestartRequired: true
           }),
           Em.Object.create({
-            componentName: 'componentName2',
-            hostName: 'hostName2',
-            service: {
-              serviceName: 'serviceName2',
-              displayName: 'displayName2'
-            },
-            staleConfigs: true
+            displayName: 'displayName2',
+            isRestartRequired: true
           }),
           Em.Object.create({
-            componentName: 'componentName3',
-            hostName: 'hostName3',
-            service: {
-              serviceName: 'serviceName3',
-              displayName: 'displayName3'
-            },
-            staleConfigs: false
+            displayName: 'displayName3',
+            isRestartRequired: false
           })
         ];
       });
     });
 
     afterEach(function () {
-      App.HostComponent.find.restore();
+      App.Service.find.restore();
       App.showConfirmationPopup.restore();
       mainServiceController.restartHostComponents.restore();
     });
@@ -432,7 +433,7 @@ describe('App.MainServiceController', function () {
 
   });
 
-  describe("#restartAllServices()", function() {
+  describe("#stopAndStartAllServices()", function() {
 
     beforeEach(function() {
       sinon.stub(mainServiceController, 'silentStopAllServices');
@@ -442,7 +443,7 @@ describe('App.MainServiceController', function () {
     });
 
     it("silentStopAllServices should be called", function() {
-      mainServiceController.restartAllServices();
+      mainServiceController.stopAndStartAllServices();
       expect(mainServiceController.silentStopAllServices.calledOnce).to.be.true;
     });
   });
@@ -461,7 +462,8 @@ describe('App.MainServiceController', function () {
             state: 'INSTALLED'
           }
         },
-        success: 'silentStopSuccess'
+        success: 'silentStopSuccess',
+        showLoadingPopup: true
       });
     });
   });
@@ -597,7 +599,8 @@ describe('App.MainServiceController', function () {
             state: 'STARTED'
           }
         },
-        success: 'silentCallSuccessCallback'
+        success: 'silentCallSuccessCallback',
+        showLoadingPopup: true
       });
       expect(mainServiceController.get('shouldStart')).to.be.false;
     });

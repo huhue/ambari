@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -139,7 +139,7 @@ public class AlertDefinitionFactory {
       IOUtils.closeQuietly(reader);
     }
 
-    Set<AlertDefinition> definitions = new HashSet<AlertDefinition>();
+    Set<AlertDefinition> definitions = new HashSet<>();
 
     // it's OK if the service doesn't have any definitions; this can happen if
     // 2 services are defined in a single metainfo.xml and only 1 service has
@@ -190,12 +190,15 @@ public class AlertDefinitionFactory {
     definition.setHelpURL(entity.getHelpURL());
     definition.setDescription(entity.getDescription());
     definition.setUuid(entity.getHash());
+    definition.setRepeatTolerance(entity.getRepeatTolerance());
+    definition.setRepeatToleranceEnabled(entity.isRepeatToleranceEnabled());
 
     try{
       String sourceJson = entity.getSource();
       Source source = m_gson.fromJson(sourceJson, Source.class);
       definition.setSource(source);
     } catch (Exception exception) {
+      LOG.error("Alert defintion is invalid for  Id : " + entity.getDefinitionId() + " Name: "+  entity.getDefinitionName() );
       LOG.error(
           "Unable to deserialize the alert definition source during coercion",
           exception);
@@ -249,7 +252,6 @@ public class AlertDefinitionFactory {
     entity.setDefinitionName(definition.getName());
     entity.setEnabled(definition.isEnabled());
     entity.setHostIgnored(definition.isHostIgnored());
-    entity.setHash(UUID.randomUUID().toString());
     entity.setLabel(definition.getLabel());
     entity.setDescription(definition.getDescription());
     entity.setScheduleInterval(definition.getInterval());
@@ -263,21 +265,39 @@ public class AlertDefinitionFactory {
 
     entity.setScope(scope);
 
-    Source source = definition.getSource();
+    return mergeSource(definition.getSource(), entity);
+  }
+
+  /**
+   * Updates source and source type of <code>entity</code> from <code>source</code>.
+   * Also updates UUID, which must be done for any change in to the entity for it
+   * to take effect on the agents.
+   *
+   * @return the updated entity to be persisted, or null if alert source cannot be serialized to JSON
+   */
+  public AlertDefinitionEntity mergeSource(Source source, AlertDefinitionEntity entity) {
     entity.setSourceType(source.getType());
 
     try {
       String sourceJson = m_gson.toJson(source);
       entity.setSource(sourceJson);
-    } catch (Exception exception) {
-      LOG.error(
-          "Unable to serialize the alert definition source during coercion",
-          exception);
-
+    } catch (Exception e) {
+      LOG.error("Unable to serialize the alert definition source during merge", e);
       return null;
     }
 
+    assignNewUUID(entity);
+
     return entity;
+  }
+
+  /**
+   * Updates <code>entity</code> with a new UUID.
+   */
+  private static void assignNewUUID(AlertDefinitionEntity entity) {
+    if (entity != null) {
+      entity.setHash(UUID.randomUUID().toString());
+    }
   }
 
   /**

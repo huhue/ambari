@@ -19,13 +19,12 @@
  */
 -->
 <configuration>
-
   <property>
     <name>xasecure.audit.is.enabled</name>
     <value>true</value>
     <description>Is Audit enabled?</description>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.db</name>
     <value>false</value>
@@ -40,20 +39,20 @@
         <name>xasecure.audit.destination.db</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.db.jdbc.url</name>
     <value>{{audit_jdbc_url}}</value>
     <description>Audit DB JDBC URL</description>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.db.user</name>
     <value>{{xa_audit_db_user}}</value>
     <description>Audit DB JDBC User</description>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.db.password</name>
     <value>crypted</value>
@@ -62,26 +61,26 @@
     <value-attributes>
       <type>password</type>
     </value-attributes>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.db.jdbc.driver</name>
     <value>{{jdbc_driver}}</value>
     <description>Audit DB JDBC Driver</description>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.credential.provider.file</name>
     <value>jceks://file{{credential_file}}</value>
     <description>Credential file store</description>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.db.batch.filespool.dir</name>
     <value>/var/log/kafka/audit/db/spool</value>
     <description>/var/log/kafka/audit/db/spool</description>
-  </property>  
-
+    <on-ambari-upgrade add="false"/>
+  </property>
   <property>
     <name>xasecure.audit.destination.hdfs</name>
     <value>true</value>
@@ -96,8 +95,8 @@
         <name>xasecure.audit.destination.hdfs</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.hdfs.dir</name>
     <value>hdfs://NAMENODE_HOSTNAME:8020/ranger/audit</value>
@@ -108,14 +107,14 @@
         <name>xasecure.audit.destination.hdfs.dir</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.hdfs.batch.filespool.dir</name>
     <value>/var/log/kafka/audit/hdfs/spool</value>
     <description>/var/log/kafka/audit/hdfs/spool</description>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.solr</name>
     <value>false</value>
@@ -130,11 +129,11 @@
         <name>xasecure.audit.destination.solr</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.solr.urls</name>
-    <value></value>
+    <value/>
     <description>Solr URL</description>
     <value-attributes>
       <empty-value-valid>true</empty-value-valid>
@@ -145,8 +144,8 @@
         <name>ranger.audit.solr.urls</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.solr.zookeepers</name>
     <value>NONE</value>
@@ -157,14 +156,14 @@
         <name>ranger.audit.solr.zookeepers</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.destination.solr.batch.filespool.dir</name>
     <value>/var/log/kafka/audit/solr/spool</value>
     <description>/var/log/kafka/audit/solr/spool</description>
+    <on-ambari-upgrade add="false"/>
   </property>
-
   <property>
     <name>xasecure.audit.provider.summary.enabled</name>
     <value>true</value>
@@ -173,6 +172,6 @@
     <value-attributes>
       <type>boolean</type>
     </value-attributes>
-  </property>  
-
+    <on-ambari-upgrade add="false"/>
+  </property>
 </configuration>

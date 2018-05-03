@@ -21,11 +21,22 @@ require('utils/ajax/ajax');
 
 describe('App.ajax', function() {
 
+  window.performance = {
+    now: function() {
+      return 1;
+    }
+  };
+
   beforeEach(function() {
     App.ajax.send.restore();
+    sinon.stub(App.logger, 'setTimer');
     sinon.spy(App.ajax, 'send'); // no sense to test stubbed function, so going to spy on it
     App.set('apiPrefix', '/api/v1');
     App.set('clusterName', 'tdk');
+  });
+
+  afterEach(function() {
+    App.logger.setTimer.restore();
   });
 
   describe('#send', function() {
@@ -148,7 +159,7 @@ describe('App.ajax', function() {
         headers: {"X-Http-Method-Override": "GET"}
       });
     });
-    it("url has '?'", function () {
+    it("url has '?params'", function () {
       var opt = {
         type: 'GET',
         url: 'root?params',
@@ -161,8 +172,21 @@ describe('App.ajax', function() {
         data: "{\"RequestInfo\":{\"query\":\"params\"}}"
       });
     });
+    it("url has '?params&fields'", function () {
+      var opt = {
+        type: 'GET',
+        url: 'root?params&fields',
+        headers: {}
+      };
+      expect(App.ajax.fakeDoGetAsPost({}, opt)).to.eql({
+        type: 'POST',
+        url: 'root?fields&_=1',
+        headers: {"X-Http-Method-Override": "GET"},
+        data: "{\"RequestInfo\":{\"query\":\"params\"}}"
+      });
+    });
   });
-  
+
   describe('#abortRequests', function () {
 
     var xhr = {
@@ -192,6 +216,6 @@ describe('App.ajax', function() {
     it('should clear requests array', function () {
       expect(requests).to.have.length(0);
     });
-    
+
   });
 });

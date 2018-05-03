@@ -24,7 +24,7 @@
     xmllint --noout --load-trace --schema [path-to-this-file] [path-to-xml]
     </xs:documentation>
   </xs:annotation>
-  
+
   <xs:complexType name="release-type">
     <xs:all>
      <xs:element name="type" type="repo-type" />
@@ -34,27 +34,41 @@
      <xs:element name="compatible-with" type="xs:string" minOccurs="0"/>
      <xs:element name="release-notes" type="xs:string" maxOccurs="1" />
      <xs:element name="display" type="xs:string" minOccurs="0" />
+     <!-- deprecated and will be removed -->
      <xs:element name="package-version" type="xs:string" minOccurs="0" />
     </xs:all>
   </xs:complexType>
-  
+
   <xs:simpleType name="repo-type">
     <xs:restriction base="xs:string">
       <xs:enumeration value="STANDARD" />
       <xs:enumeration value="SERVICE" />
       <xs:enumeration value="PATCH" />
+      <xs:enumeration value="MAINT" />
     </xs:restriction>
   </xs:simpleType>
-  
+
   <xs:simpleType name="family-type">
     <xs:restriction base="xs:string">
       <xs:enumeration value="redhat6" />
       <xs:enumeration value="redhat7" />
+      <xs:enumeration value="redhat-ppc6" />
+      <xs:enumeration value="redhat-ppc7" />
+      <xs:enumeration value="debian6" />
       <xs:enumeration value="debian7" />
+      <xs:enumeration value="debian9" />
       <xs:enumeration value="ubuntu12" />
       <xs:enumeration value="ubuntu14" />
+      <xs:enumeration value="ubuntu16" />
       <xs:enumeration value="suse11" />
       <xs:enumeration value="suse12" />
+      <xs:enumeration value="amazonlinux2" />
+    </xs:restriction>
+  </xs:simpleType>
+  
+  <xs:simpleType name="tag-type">
+    <xs:restriction base="xs:NMTOKEN">
+      <xs:enumeration value="GPL" />
     </xs:restriction>
   </xs:simpleType>
   
@@ -79,20 +93,21 @@
           <xs:attribute name="version" type="xs:string" use="required" />
           <xs:attribute name="id" type="xs:string" use="required" />
           <xs:attribute name="version-id" type="xs:string" />
+          <xs:attribute name="release-version" type="xs:string" />
         </xs:complexType>
       </xs:element>
     </xs:sequence>
   </xs:complexType>
-  
+
   <xs:complexType name="available-services-type">
     <xs:annotation>
       <xs:documentation>
       Provides a list of services that are available to upgrade out of this repository.
       A service may include a list of components that can be upgraded.  These are specified
       (generally) for patch upgrades only.
-      
+
       A service must have an 'idref' attribute to tie it back to a service and version from
-      the 'manifest' element. 
+      the 'manifest' element.
       </xs:documentation>
     </xs:annotation>
     <xs:sequence>
@@ -107,17 +122,37 @@
     </xs:sequence>
   </xs:complexType>
   
+  <xs:complexType name="tags-type">
+    <xs:annotation>
+      <xs:documentation>
+      Tags are a way to mark a repository for special purposes.  There
+      may be logic surrounding a tag in the code, or used by agents.
+      
+      Tags are NOT meant to be random strings, they must be defined
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="tag" type="tag-type" minOccurs="0" maxOccurs="unbounded" />
+    </xs:sequence>
+  </xs:complexType>
+
   <xs:complexType name="repository-info-type">
     <xs:sequence>
       <xs:element name="os" maxOccurs="unbounded">
         <xs:complexType>
           <xs:sequence>
+            <xs:element name="package-version" minOccurs="0" />
             <xs:element name="repo" maxOccurs="unbounded">
               <xs:complexType>
                 <xs:sequence>
                   <xs:element name="baseurl" type="xs:string" />
                   <xs:element name="repoid" type="xs:string" />
                   <xs:element name="reponame" type="xs:string" />
+                  <xs:element name="distribution" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="components" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="mirrorslist" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="unique" type="xs:boolean" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="tags" type="tags-type" minOccurs="0" maxOccurs="1" />
                 </xs:sequence>
               </xs:complexType>
             </xs:element>
@@ -127,7 +162,7 @@
       </xs:element>
     </xs:sequence>
   </xs:complexType>
-  
+
   <xs:complexType name="upgrade-type">
     <xs:sequence>
       <xs:element name="configuration" maxOccurs="unbounded">
@@ -145,7 +180,7 @@
       </xs:element>
     </xs:sequence>
   </xs:complexType>
-  
+
   <xs:element name="repository-version">
     <xs:annotation>
       <xs:documentation>
@@ -172,7 +207,7 @@
       <xs:selector xpath="./manifest/service" />
       <xs:field xpath="@id" />
     </xs:key>
-    
+
     <xs:keyref name="available-services-id-keyref" refer="service-id-key">
       <xs:annotation>
         <xs:documentation>
@@ -184,5 +219,5 @@
     </xs:keyref>
 
   </xs:element>
-  
+
 </xs:schema>

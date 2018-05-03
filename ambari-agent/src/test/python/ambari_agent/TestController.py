@@ -44,7 +44,7 @@ import ambari_commons
 
 @not_for_platform(PLATFORM_WINDOWS)
 @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-class TestController(unittest.TestCase):
+class TestController:#(unittest.TestCase):
 
   logger = logging.getLogger()
 
@@ -118,10 +118,8 @@ class TestController(unittest.TestCase):
     self.assertEqual({"responseId":1}, self.controller.registerWithServer())
 
     self.controller.sendRequest.return_value = {"responseId":1, "statusCommands": "commands", "log":"", "exitstatus":"0"}
-    self.controller.addToStatusQueue = MagicMock(name="addToStatusQueue")
     self.controller.isRegistered = False
     self.assertEqual({'exitstatus': '0', 'responseId': 1, 'log': '', 'statusCommands': 'commands'}, self.controller.registerWithServer())
-    self.controller.addToStatusQueue.assert_called_with("commands")
 
     calls = []
 
@@ -147,13 +145,19 @@ class TestController(unittest.TestCase):
 
   @patch("pprint.pformat")
   def test_addToQueue(self, pformatMock):
-
     actionQueue = MagicMock()
+    updateComponents = Mock()
     self.controller.actionQueue = actionQueue
+    self.controller.updateComponents = updateComponents
+
     self.controller.addToQueue(None)
     self.assertFalse(actionQueue.put.called)
-    self.controller.addToQueue("cmd")
+    self.assertFalse(updateComponents.called)
+
+    commands = ambari_simplejson.loads('[{"clusterName":"dummy_cluster"}]')
+    self.controller.addToQueue(commands)
     self.assertTrue(actionQueue.put.called)
+    self.assertTrue(updateComponents.called)
 
 
   @patch("pprint.pformat")
@@ -168,25 +172,25 @@ class TestController(unittest.TestCase):
     process_status_commands = MagicMock(name="process_status_commands")
     self.controller.recovery_manager.process_status_commands = process_status_commands
 
-    updateComponents = Mock()
-    self.controller.updateComponents = updateComponents
+    sendRequest = MagicMock(return_value={'components':{}})
+    self.controller.sendRequest = sendRequest
     self.controller.addToStatusQueue(None)
     self.assertFalse(actionQueue.put_status.called)
-    self.assertFalse(updateComponents.called)
+    self.assertFalse(sendRequest.called)
     self.controller.addToStatusQueue(commands)
     self.assertTrue(actionQueue.put_status.called)
-    self.assertFalse(updateComponents.called)
+    self.assertFalse(sendRequest.called)
     LiveStatus_mock.SERVICES = []
     LiveStatus_mock.CLIENT_COMPONENTS = []
     LiveStatus_mock.COMPONENTS = []
     self.controller.addToStatusQueue(commands)
-    self.assertTrue(updateComponents.called)
+    self.assertTrue(sendRequest.called)
     self.assertTrue(actionQueue.put_status.called)
     self.assertTrue(process_status_commands.called)
 
 
   @patch("subprocess.Popen")
-  @patch.object(Hardware, "_chk_mount", new = MagicMock(return_value=True))
+  @patch.object(Hardware, "_chk_writable_mount", new = MagicMock(return_value=True))
   @patch.object(FacterLinux, "facterInfo", new = MagicMock(return_value={}))
   @patch.object(FacterLinux, "__init__", new = MagicMock(return_value = None))
   @patch("urllib2.build_opener")
@@ -228,7 +232,7 @@ class TestController(unittest.TestCase):
 
 
   @patch("subprocess.Popen")
-  @patch.object(Hardware, "_chk_mount", new = MagicMock(return_value=True))
+  @patch.object(Hardware, "_chk_writable_mount", new = MagicMock(return_value=True))
   @patch.object(FacterLinux, "facterInfo", new = MagicMock(return_value={}))
   @patch.object(FacterLinux, "__init__", new = MagicMock(return_value = None))
   @patch("urllib2.build_opener")
@@ -412,10 +416,25 @@ class TestController(unittest.TestCase):
                         exceptionMessage, str(e))
 
 
+  def test_getVersion(self):
+    self.controller.version = "1.2.3.4_MyAgent"
+    version = self.controller.get_version()
+    self.assertEquals('1.2.3.4', version)
+    self.controller.version = "1.2.3-MyAgent"
+    version = self.controller.get_version()
+    self.assertEquals('1.2.3', version)
+    self.controller.version = "11.2.3-MyAgent"
+    version = self.controller.get_version()
+    self.assertEquals('11.2.3', version)
+    self.controller.version = "11.2.13.10_MyAgent"
+    version = self.controller.get_version()
+    self.assertEquals('11.2.13.10', version)
+
+  @patch.object(ExitHelper, "exit")
   @patch.object(threading._Event, "wait")
   @patch("time.sleep")
   @patch("ambari_simplejson.dumps")
-  def test_heartbeatWithServer(self, dumpsMock, sleepMock, event_mock):
+  def test_heartbeatWithServer(self, dumpsMock, sleepMock, event_mock, exit_mock):
     out = StringIO.StringIO()
     sys.stdout = out
 
@@ -428,7 +447,7 @@ class TestController(unittest.TestCase):
     self.controller.sendRequest = sendRequest
 
     self.controller.responseId = 1
-    response = {"responseId":"2", "restartAgent":"false"}
+    response = {"responseId":"2", "restartAgent":False}
     sendRequest.return_value = response
 
     def one_heartbeat(*args, **kwargs):
@@ -502,14 +521,14 @@ class TestController(unittest.TestCase):
 
     # wrong responseId => restart
     self.controller.responseId = 2
-    response = {"responseId":"2", "restartAgent":"false"}
+    response = {"responseId":"2", "restartAgent":False}
 
     restartAgent = MagicMock(name="restartAgent")
     self.controller.restartAgent = restartAgent
     self.controller.DEBUG_STOP_HEARTBEATING = False
     self.controller.heartbeatWithServer()
 
-    restartAgent.assert_called_once_with()
+    restartAgent.assert_called_with()
 
     # executionCommands
     self.controller.responseId = 1
@@ -534,18 +553,18 @@ class TestController(unittest.TestCase):
     # restartAgent command
     self.controller.responseId = 1
     self.controller.DEBUG_STOP_HEARTBEATING = False
-    response["restartAgent"] = "true"
+    response["restartAgent"] = True
     restartAgent = MagicMock(name="restartAgent")
     self.controller.restartAgent = restartAgent
     self.controller.heartbeatWithServer()
 
-    restartAgent.assert_called_once_with()
+    restartAgent.assert_called_with()
 
     # actionQueue not idle
     self.controller.responseId = 1
     self.controller.DEBUG_STOP_HEARTBEATING = False
     actionQueue.isIdle.return_value = False
-    response["restartAgent"] = "false"
+    response["restartAgent"] = False
     self.controller.heartbeatWithServer()
 
 
@@ -675,10 +694,11 @@ class TestController(unittest.TestCase):
     self.controller.addToStatusQueue = Controller.Controller.addToStatusQueue
     pass
 
+  @patch.object(ExitHelper, "exit")
   @patch.object(threading._Event, "wait")
   @patch("time.sleep")
   @patch("ambari_simplejson.dumps")
-  def test_recoveryHbCmd(self, dumpsMock, sleepMock, event_mock):
+  def test_recoveryHbCmd(self, dumpsMock, sleepMock, event_mock, exit_mock):
 
     out = StringIO.StringIO()
     sys.stdout = out

@@ -31,7 +31,9 @@ from resource_management.libraries.functions import StackFeature
 from storm_yaml_utils import yaml_config_template, yaml_config
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
 from ambari_commons import OSConst
-from setup_atlas_storm import setup_atlas_storm
+from resource_management.libraries.functions.setup_atlas_hook import has_atlas_in_cluster, setup_atlas_hook, setup_atlas_jar_symlinks
+from ambari_commons.constants import SERVICE
+
 
 @OsFamilyFuncImpl(os_family=OSConst.WINSRV_FAMILY)
 def storm(name=None):
@@ -59,7 +61,8 @@ def storm(name=None):
             owner=params.storm_user,
             group=params.user_group,
             mode=0777,
-            create_parents = True
+            create_parents = True,
+            cd_access="a",
   )
 
   Directory([params.pid_dir, params.local_dir],
@@ -74,6 +77,13 @@ def storm(name=None):
             group=params.user_group,
             create_parents = True,
             cd_access="a",
+  )
+
+  File(format("{limits_conf_dir}/storm.conf"),
+       owner='root',
+       group='root',
+       mode=0644,
+       content=Template("storm.conf.j2")
   )
 
   File(format("{conf_dir}/config.yaml"),
@@ -95,7 +105,12 @@ def storm(name=None):
        content=InlineTemplate(params.storm_env_sh_template)
   )
 
-  setup_atlas_storm()
+  # Generate atlas-application.properties.xml file and symlink the hook jars
+  if params.enable_atlas_hook:
+    atlas_hook_filepath = os.path.join(params.conf_dir, params.atlas_hook_filename)
+    setup_atlas_hook(SERVICE.STORM, params.storm_atlas_application_properties, atlas_hook_filepath, params.storm_user, params.user_group)
+    storm_extlib_dir = os.path.join(params.storm_component_home_dir, "extlib")
+    setup_atlas_jar_symlinks("storm", storm_extlib_dir)
 
   if params.has_metric_collector:
     File(format("{conf_dir}/storm-metrics2.properties"),
@@ -110,9 +125,14 @@ def storm(name=None):
     # On old HDP 2.1 versions, this symlink may also exist and break EU to newer versions
     Link("/usr/lib/storm/lib/ambari-metrics-storm-sink.jar", action="delete")
 
-    Execute(format("{sudo} ln -s {metric_collector_sink_jar} {storm_lib_dir}/ambari-metrics-storm-sink.jar"),
+    if check_stack_feature(StackFeature.STORM_METRICS_APACHE_CLASSES, params.version_for_stack_feature_checks):
+      sink_jar = params.metric_collector_sink_jar
+    else:
+      sink_jar = params.metric_collector_legacy_sink_jar
+
+    Execute(format("{sudo} ln -s {sink_jar} {storm_lib_dir}/ambari-metrics-storm-sink.jar"),
             not_if=format("ls {storm_lib_dir}/ambari-metrics-storm-sink.jar"),
-            only_if=format("ls {metric_collector_sink_jar}")
+            only_if=format("ls {sink_jar}")
     )
 
   if params.storm_logs_supported:
@@ -134,11 +154,13 @@ def storm(name=None):
 
   if params.security_enabled:
     TemplateConfig(format("{conf_dir}/storm_jaas.conf"),
-                   owner=params.storm_user
+                   owner=params.storm_user,
+                   mode=0644
     )
     if params.stack_version_formatted and check_stack_feature(StackFeature.ROLLING_UPGRADE, params.stack_version_formatted):
       TemplateConfig(format("{conf_dir}/client_jaas.conf"),
-                     owner=params.storm_user
+                     owner=params.storm_user,
+                     mode=0644
       )
       minRuid = configurations['_storm.min.ruid'] if configurations.has_key('_storm.min.ruid') else ''
       
@@ -149,12 +171,21 @@ def storm(name=None):
            owner='root',
            group=params.user_group
       )
+  else:
+    File(
+      format("{conf_dir}/storm_jaas.conf"),
+      action="delete"
+    )
+    File(
+      format("{conf_dir}/client_jaas.conf"),
+      action="delete"
+    )
 
 
-'''
-Finds minimal real user UID
-'''
 def _find_real_user_min_uid():
+  """
+  Finds minimal real user UID
+  """
   with open('/etc/login.defs') as f:
     for line in f:
       if line.strip().startswith('UID_MIN') and len(line.split()) == 2 and line.split()[1].isdigit():

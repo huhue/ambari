@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,11 +18,14 @@
 
 package org.apache.ambari.server.api.handlers;
 
+import java.util.Map;
+
+import org.apache.ambari.server.api.query.Query;
 import org.apache.ambari.server.api.services.Request;
+import org.apache.ambari.server.api.services.RequestBody;
+import org.apache.ambari.server.api.services.Result;
 import org.apache.ambari.server.api.services.ResultImpl;
 import org.apache.ambari.server.api.services.ResultStatus;
-import org.apache.ambari.server.api.services.Result;
-import org.apache.ambari.server.api.query.Query;
 import org.apache.ambari.server.controller.spi.NoSuchParentResourceException;
 import org.apache.ambari.server.controller.spi.NoSuchResourceException;
 import org.apache.ambari.server.controller.spi.Predicate;
@@ -32,8 +35,6 @@ import org.apache.ambari.server.controller.spi.UnsupportedPropertyException;
 import org.apache.ambari.server.security.authorization.AuthorizationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Map;
 
 /**
  * Responsible for read requests.
@@ -53,6 +54,13 @@ public class ReadHandler implements RequestHandler {
     query.setPageRequest(request.getPageRequest());
     query.setSortRequest(request.getSortRequest());
     query.setRenderer(request.getRenderer());
+
+    // If the request body exists, copy the requstInfoProperties from it.  This map should contain
+    // the _directives_ specified in the request.
+    RequestBody body = request.getBody();
+    if(body != null) {
+      query.setRequestInfoProps(body.getRequestInfoProperties());
+    }
 
     try {
       addFieldsToQuery(request, query);

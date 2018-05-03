@@ -36,6 +36,8 @@ App.MainHostDetailsView = Em.View.extend({
     });
   }.property('content.hostComponents.@each'),
 
+  hasManyClientsWithConfigs: Em.computed.gt('clientsWithConfigs.length', 1),
+
   isActive: Em.computed.equal('controller.content.passiveState', 'OFF'),
 
   maintenance: function () {
@@ -46,19 +48,19 @@ App.MainHostDetailsView = Em.View.extend({
         {
           action: 'startAllComponents',
           liClass: this.get('controller.content.isNotHeartBeating') ? 'disabled' : 'enabled',
-          cssClass: 'icon-play',
+          cssClass: 'glyphicon glyphicon-play',
           label: this.t('hosts.host.details.startAllComponents')
         },
         {
           action: 'stopAllComponents',
           liClass: this.get('controller.content.isNotHeartBeating') ? 'disabled' : 'enabled',
-          cssClass: 'icon-stop',
+          cssClass: 'glyphicon glyphicon-stop',
           label: this.t('hosts.host.details.stopAllComponents')
         },
         {
           action: 'restartAllComponents',
           liClass: this.get('controller.content.isNotHeartBeating') ? 'disabled' : 'enabled',
-          cssClass: 'icon-repeat',
+          cssClass: 'glyphicon glyphicon-repeat',
           label: this.t('hosts.host.details.restartAllComponents')
         }
       ]);
@@ -67,7 +69,7 @@ App.MainHostDetailsView = Em.View.extend({
       result.push({
         action: 'setRackId',
         liClass: '',
-        cssClass: 'icon-gear',
+        cssClass: 'glyphicon glyphicon-cog',
         label: this.t('hosts.host.details.setRackId')
       });
       result.push({
@@ -78,14 +80,24 @@ App.MainHostDetailsView = Em.View.extend({
         label: this.t('passiveState.turn' + onOff)
       });
     }
+    if (App.get('isKerberosEnabled')){
+      var actionMap = App.HostComponentActionMap.getMap(this);
+      result.push(actionMap.REGENERATE_KEYTAB_FILE_OPERATIONS);
+    }    
     if (App.isAuthorized("HOST.ADD_DELETE_HOSTS")) {
       result.push({
         action: 'deleteHost',
         liClass: '',
-        cssClass: 'icon-remove',
+        cssClass: 'glyphicon glyphicon-remove',
         label: this.t('hosts.host.details.deleteHost')
       });
     }
+    result.push({
+      action: 'checkHost',
+      liClass: '',
+      cssClass: 'glyphicon glyphicon-check',
+      label: this.t('host.host.details.checkHost')
+    });
     return result;
   }.property('controller.content', 'isActive', 'controller.content.isNotHeartBeating'),
 

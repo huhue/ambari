@@ -26,28 +26,32 @@
     <build>3396</build>
     <compatible-with>2.3.2.[0-9]</compatible-with>
     <release-notes>http://docs.hortonworks.com/HDPDocuments/HDP2/HDP-2.3.4/</release-notes>
-    <package-version>2_3_4_0_3396</package-version>
   </release>
   
   <manifest>
     <service id="HBASE-112" name="HBASE" version="1.1.2" version-id="2_3_4_0-3396" />
+    <service id="ZOOKEEPER-346" name="ZOOKEEPER" version="3.4.6" version-id="2_3_4_0-3396" />
   </manifest>
   
   <available-services>
     <service idref="HBASE-112" />
+    <service idref="ZOOKEEPER-346" />
   </available-services>
   
   <repository-info>
     <os family="redhat6">
+      <package-version>2_3_4_0_3396</package-version>
       <repo>
         <baseurl>http://public-repo-1.hortonworks.com/HDP/centos6/2.x/updates/2.3.4.0</baseurl>
         <repoid>HDP-2.3</repoid>
         <reponame>HDP</reponame>
+        <unique>true</unique>
       </repo>
       <repo>
         <baseurl>http://public-repo-1.hortonworks.com/HDP-UTILS-1.1.0.20/repos/centos6</baseurl>
         <repoid>HDP-UTILS-1.1.0.20</repoid>
         <reponame>HDP-UTILS</reponame>
+        <unique>false</unique>
       </repo>
     </os>
   </repository-info>

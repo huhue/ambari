@@ -20,13 +20,15 @@ limitations under the License.
 
 import os
 import sys
-import subprocess
-from Controller import AGENT_AUTO_RESTART_EXIT_CODE
+from ambari_commons import subprocess32
+import signal
+
+AGENT_AUTO_RESTART_EXIT_CODE = 77
 
 if os.environ.has_key("PYTHON_BIN"):
   AGENT_SCRIPT = os.path.join(os.environ["PYTHON_BIN"],"site-packages/ambari_agent/main.py")
 else:
-  AGENT_SCRIPT = "/usr/lib/python2.6/site-packages/ambari_agent/main.py"
+  AGENT_SCRIPT = "/usr/lib/ambari-agent/lib/ambari_agent/main.py"
 if os.environ.has_key("AMBARI_PID_DIR"):
   AGENT_PID_FILE = os.path.join(os.environ["AMBARI_PID_DIR"],"ambari-agent.pid")
 else:
@@ -49,7 +51,7 @@ def main():
   mergedArgs = [PYTHON, AGENT_SCRIPT] + args
 
   while status == AGENT_AUTO_RESTART_EXIT_CODE:
-    mainProcess = subprocess.Popen(mergedArgs)
+    mainProcess = subprocess32.Popen(mergedArgs)
     mainProcess.communicate()
     status = mainProcess.returncode
     if os.path.isfile(AGENT_PID_FILE) and status == AGENT_AUTO_RESTART_EXIT_CODE:

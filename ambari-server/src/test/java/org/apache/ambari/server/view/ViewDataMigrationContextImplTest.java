@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,7 +18,22 @@
 
 package org.apache.ambari.server.view;
 
-import junit.framework.Assert;
+import static org.easymock.EasyMock.capture;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.createStrictMock;
+import static org.easymock.EasyMock.eq;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.expectLastCall;
+import static org.easymock.EasyMock.isNull;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.verify;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.ambari.server.orm.entities.ViewEntity;
 import org.apache.ambari.server.orm.entities.ViewInstanceDataEntity;
 import org.apache.ambari.server.orm.entities.ViewInstanceEntity;
@@ -30,11 +45,7 @@ import org.apache.ambari.view.migration.EntityConverter;
 import org.easymock.Capture;
 import org.junit.Test;
 
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Map;
-
-import static org.easymock.EasyMock.*;
+import junit.framework.Assert;
 
 /**
  * ViewDataMigrationContextImpl tests.
@@ -93,34 +104,27 @@ public class ViewDataMigrationContextImplTest {
     ViewEntity entity2 = getViewEntityMock(VERSION_2);
     replay(entity1, entity2);
 
-    Capture<ViewInstanceDataEntity> capturedInstanceData1 = Capture.newInstance();
-    Collection data1 = createNiceMock(Collection.class);
-    expect(data1.add(capture(capturedInstanceData1))).andReturn(true);
-    replay(data1);
-
-    Capture<ViewInstanceDataEntity> capturedInstanceData2 = Capture.newInstance();
-    Collection data2 = createStrictMock(Collection.class);
-    expect(data2.add(capture(capturedInstanceData2))).andReturn(true);
-    replay(data2);
-
     ViewInstanceEntity instanceEntity1 = getViewInstanceEntityMock(entity1);
-    expect(instanceEntity1.getData()).andReturn(data1);
+    List<ViewInstanceDataEntity> data1 = new ArrayList<>();
+    expect(instanceEntity1.getData()).andReturn(data1).anyTimes();
     ViewInstanceEntity instanceEntity2 = getViewInstanceEntityMock(entity2);
-    expect(instanceEntity2.getData()).andReturn(data2);
+    List<ViewInstanceDataEntity> data2 = new ArrayList<>();
+    expect(instanceEntity2.getData()).andReturn(data2).anyTimes();
     replay(instanceEntity1, instanceEntity2);
 
     ViewDataMigrationContextImpl context = new TestViewDataMigrationContextImpl(instanceEntity1, instanceEntity2);
     context.putOriginInstanceData("user1", "key1", "val1");
     context.putCurrentInstanceData("user2", "key2", "val2");
 
-    verify(data2);
-    Assert.assertEquals("user1", capturedInstanceData1.getValue().getUser());
-    Assert.assertEquals("key1", capturedInstanceData1.getValue().getName());
-    Assert.assertEquals("val1", capturedInstanceData1.getValue().getValue());
+    Assert.assertEquals(1, data1.size());
+    Assert.assertEquals("user1", data1.get(0).getUser());
+    Assert.assertEquals("key1", data1.get(0).getName());
+    Assert.assertEquals("val1", data1.get(0).getValue());
 
-    Assert.assertEquals("user2", capturedInstanceData2.getValue().getUser());
-    Assert.assertEquals("key2", capturedInstanceData2.getValue().getName());
-    Assert.assertEquals("val2", capturedInstanceData2.getValue().getValue());
+    Assert.assertEquals(1, data2.size());
+    Assert.assertEquals("user2", data2.get(0).getUser());
+    Assert.assertEquals("key2", data2.get(0).getName());
+    Assert.assertEquals("val2", data2.get(0).getValue());
   }
 
   @Test
@@ -215,26 +219,22 @@ public class ViewDataMigrationContextImplTest {
     dataEntity.setName("name1");
     dataEntity.setValue("value1");
     dataEntity.setUser("user1");
-    Collection data1 = Arrays.asList(dataEntity);
-
-    Capture<ViewInstanceDataEntity> capturedInstanceData = Capture.newInstance();
-    Collection data2 = createStrictMock(Collection.class);
-    expect(data2.add(capture(capturedInstanceData))).andReturn(true);
-    replay(data2);
+    Collection<ViewInstanceDataEntity> data1 = Arrays.asList(dataEntity);
+    List<ViewInstanceDataEntity> data2 = new ArrayList<>();
 
     ViewInstanceEntity instanceEntity1 = getViewInstanceEntityMock(entity1);
-    expect(instanceEntity1.getData()).andReturn(data1);
+    expect(instanceEntity1.getData()).andReturn(data1).anyTimes();
     ViewInstanceEntity instanceEntity2 = getViewInstanceEntityMock(entity2);
-    expect(instanceEntity2.getData()).andReturn(data2);
+    expect(instanceEntity2.getData()).andReturn(data2).anyTimes();
     replay(instanceEntity1, instanceEntity2);
 
     ViewDataMigrationContextImpl context = new TestViewDataMigrationContextImpl(instanceEntity1, instanceEntity2);
     context.copyAllInstanceData();
 
-    verify(data2);
-    Assert.assertEquals("user1", capturedInstanceData.getValue().getUser());
-    Assert.assertEquals("name1", capturedInstanceData.getValue().getName());
-    Assert.assertEquals("value1", capturedInstanceData.getValue().getValue());
+    Assert.assertEquals(1, data2.size());
+    Assert.assertEquals("user1", data2.get(0).getUser());
+    Assert.assertEquals("name1", data2.get(0).getName());
+    Assert.assertEquals("value1", data2.get(0).getValue());
   }
 
   @Test
@@ -295,8 +295,8 @@ public class ViewDataMigrationContextImplTest {
     ViewInstanceDataEntity dataEntity2User2 = new ViewInstanceDataEntity();
     dataEntity2User2.setName("key2");
     dataEntity2User2.setUser("user2");
-    Collection data2 = Arrays.asList(dataEntityUser2, dataEntity2User2);
-    Collection data1 = Arrays.asList(dataEntityUser1, dataEntityUser2, dataEntity2User2);
+    Collection<ViewInstanceDataEntity> data2 = Arrays.asList(dataEntityUser2, dataEntity2User2);
+    Collection<ViewInstanceDataEntity> data1 = Arrays.asList(dataEntityUser1, dataEntityUser2, dataEntity2User2);
 
     ViewInstanceEntity instanceEntity1 = getViewInstanceEntityMock(entity1);
     expect(instanceEntity1.getData()).andReturn(data1);

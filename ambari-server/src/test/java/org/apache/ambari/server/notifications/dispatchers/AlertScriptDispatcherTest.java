@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -59,6 +59,8 @@ import junit.framework.Assert;
 public class AlertScriptDispatcherTest {
 
   private static final String SCRIPT_CONFIG_VALUE = "/foo/script.py";
+
+  private static final String DISPATCH_PROPERTY_SCRIPT_DIRECTORY_KEY = "notification.dispatch.alert.script.directory";
 
   private Injector m_injector;
 
@@ -167,7 +169,7 @@ public class AlertScriptDispatcherTest {
     notification.CallbackIds = Collections.singletonList(UUID.randomUUID().toString());
 
     // put the custom config value
-    notification.DispatchProperties = new HashMap<String, String>();
+    notification.DispatchProperties = new HashMap<>();
     notification.DispatchProperties.put(AlertScriptDispatcher.DISPATCH_PROPERTY_SCRIPT_CONFIG_KEY,
         customScriptKey);
 
@@ -188,6 +190,71 @@ public class AlertScriptDispatcherTest {
     EasyMock.verify(callback, dispatcher);
     PowerMock.verifyAll();
   }
+
+  /**
+   * Tests the invocation of method getScriptLocation().
+   */
+  @Test
+  public void testGetScriptLocation() throws Exception {
+    AlertScriptDispatcher dispatcher = (AlertScriptDispatcher) m_dispatchFactory.getDispatcher(TargetType.ALERT_SCRIPT.name());
+    m_injector.injectMembers(dispatcher);
+
+    DispatchCallback callback = EasyMock.createNiceMock(DispatchCallback.class);
+    AlertNotification notification = new AlertNotification();
+    notification.Callback = callback;
+    notification.CallbackIds = Collections.singletonList(UUID.randomUUID().toString());
+    notification.DispatchProperties = new HashMap();
+
+    //1.ambari.dispatch-property.script.filename is not set in notification
+    Assert.assertEquals(dispatcher.getScriptLocation(notification),null);
+
+    //2.ambari.dispatch-property.script.filename is set in notification,but notification.dispatch.alert.script.directory not in ambari.properties
+    final String filename = "foo.py";
+    notification.DispatchProperties.put(AlertScriptDispatcher.DISPATCH_PROPERTY_SCRIPT_FILENAME_KEY,filename);
+    Assert.assertEquals(dispatcher.getScriptLocation(notification),"/var/lib/ambari-server/resources/scripts/foo.py");
+
+    //3.both properties are set
+    final String scriptDirectory = "/var/lib/ambari-server/resources/scripts/foo";
+    m_configuration.setProperty(DISPATCH_PROPERTY_SCRIPT_DIRECTORY_KEY,scriptDirectory);
+    Assert.assertEquals(dispatcher.getScriptLocation(notification),"/var/lib/ambari-server/resources/scripts/foo/foo.py");
+  }
+
+
+  /**
+   * Tests that we will pickup the correct script when script filename is specified on the notification
+   */
+  @Test
+  public void testCustomScriptConfigurationByScriptFilename() throws Exception {
+    final String filename = "foo.py";
+    final String scriptDirectory = "/var/lib/ambari-server/resources/scripts/foo";
+    m_configuration.setProperty(DISPATCH_PROPERTY_SCRIPT_DIRECTORY_KEY,scriptDirectory);
+
+    DispatchCallback callback = EasyMock.createNiceMock(DispatchCallback.class);
+    AlertNotification notification = new AlertNotification();
+    notification.Callback = callback;
+    notification.CallbackIds = Collections.singletonList(UUID.randomUUID().toString());
+
+    notification.DispatchProperties = new HashMap();
+    notification.DispatchProperties.put(AlertScriptDispatcher.DISPATCH_PROPERTY_SCRIPT_FILENAME_KEY,filename);
+
+    callback.onSuccess(notification.CallbackIds);
+    EasyMock.expectLastCall().once();
+
+    AlertScriptDispatcher dispatcher = (AlertScriptDispatcher) m_dispatchFactory.getDispatcher(TargetType.ALERT_SCRIPT.name());
+    m_injector.injectMembers(dispatcher);
+
+    ProcessBuilder powerMockProcessBuilder = m_injector.getInstance(ProcessBuilder.class);
+    EasyMock.expect(dispatcher.getProcessBuilder(dispatcher.getScriptLocation(notification), notification)).andReturn(
+            powerMockProcessBuilder).once();
+
+    EasyMock.replay(callback, dispatcher);
+
+    dispatcher.dispatch(notification);
+
+    EasyMock.verify(callback, dispatcher);
+    PowerMock.verifyAll();
+  }
+
 
   /**
    * Tests that a process with an error code of 255 causes the failure callback
@@ -237,6 +304,8 @@ public class AlertScriptDispatcherTest {
     final String ALERT_SERVICE_NAME = "FOO_SERVICE";
     final String ALERT_TEXT = "Did you know, \"Quotes are hard!!!\"";
     final String ALERT_TEXT_ESCAPED = "Did you know, \\\"Quotes are hard\\!\\!\\!\\\"";
+    final String ALERT_HOST = "mock_host";
+    final long ALERT_TIMESTAMP = 1111111l;
 
     DispatchCallback callback = EasyMock.createNiceMock(DispatchCallback.class);
     AlertNotification notification = new AlertNotification();
@@ -253,6 +322,9 @@ public class AlertScriptDispatcherTest {
     history.setAlertText(ALERT_TEXT);
     history.setAlertState(AlertState.OK);
     history.setServiceName(ALERT_SERVICE_NAME);
+    history.setHostName(ALERT_HOST);
+    history.setAlertTimestamp(ALERT_TIMESTAMP);
+
 
     AlertInfo alertInfo = new AlertInfo(history);
     notification.setAlertInfo(alertInfo);
@@ -272,9 +344,30 @@ public class AlertScriptDispatcherTest {
     buffer.append("\"").append(ALERT_DEFINITION_LABEL).append("\"").append(" ");
     buffer.append(ALERT_SERVICE_NAME).append(" ");
     buffer.append(AlertState.OK).append(" ");
-    buffer.append("\"").append(ALERT_TEXT_ESCAPED).append("\"");
+    buffer.append("\"").append(ALERT_TEXT_ESCAPED).append("\"").append(" ");
+    buffer.append(ALERT_TIMESTAMP).append(" ");
+    buffer.append(ALERT_HOST);
 
     Assert.assertEquals(buffer.toString(), commands.get(2));
+
+    //if hostname is null
+    history.setHostName(null);
+    alertInfo = new AlertInfo(history);
+    notification.setAlertInfo(alertInfo);
+
+    processBuilder = dispatcher.getProcessBuilder(SCRIPT_CONFIG_VALUE, notification);
+    commands = processBuilder.command();
+    buffer = new StringBuilder();
+    buffer.append(SCRIPT_CONFIG_VALUE).append(" ");
+    buffer.append(ALERT_DEFINITION_NAME).append(" ");
+    buffer.append("\"").append(ALERT_DEFINITION_LABEL).append("\"").append(" ");
+    buffer.append(ALERT_SERVICE_NAME).append(" ");
+    buffer.append(AlertState.OK).append(" ");
+    buffer.append("\"").append(ALERT_TEXT_ESCAPED).append("\"").append(" ");
+    buffer.append(ALERT_TIMESTAMP).append(" ");
+    buffer.append("");
+    Assert.assertEquals(buffer.toString(), commands.get(2));
+
   }
 
   /**

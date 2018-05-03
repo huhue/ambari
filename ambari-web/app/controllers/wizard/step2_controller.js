@@ -167,7 +167,7 @@ App.WizardStep2Controller = Em.Controller.extend({
    * is Submit button disabled
    * @type {bool}
    */
-  isSubmitDisabled: Em.computed.or('hostsError', 'sshKeyError', 'sshUserError', 'sshPortError', 'agentUserError'),
+  isSubmitDisabled: Em.computed.or('hostsError', 'sshKeyError', 'sshUserError', 'sshPortError', 'agentUserError', 'App.router.btnClickInProgress'),
 
   installedHostNames: function () {
     var installedHostsName = [];
@@ -410,6 +410,8 @@ App.WizardStep2Controller = Em.Controller.extend({
     var self = this;
     return App.ModalPopup.show({
       header: Em.I18n.t('common.warning'),
+      primary: Em.I18n.t('common.continue'),
+      primaryClass: 'btn-warning',
       onPrimary: function () {
         this.hide();
         self.proceedNext(true);
@@ -557,6 +559,8 @@ App.WizardStep2Controller = Em.Controller.extend({
 
     this.set('content.hosts', $.extend(hosts, this.getHostInfo()));
     this.setAmbariJavaHome();
-  }
+  },
+
+  isAddHostWizard: Em.computed.equal('content.controllerName', 'addHostController')
 
 });

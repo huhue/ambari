@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -21,8 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import junit.framework.Assert;
-
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.controller.RequestScheduleResponse;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
@@ -43,8 +42,9 @@ import org.junit.Test;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 import com.google.inject.persist.Transactional;
+
+import junit.framework.Assert;
 
 public class RequestExecutionTest {
   private Injector injector;
@@ -74,14 +74,11 @@ public class RequestExecutionTest {
     Assert.assertNotNull(clusters.getHost("h1"));
     Assert.assertNotNull(clusters.getHost("h2"));
     Assert.assertNotNull(clusters.getHost("h3"));
-    clusters.getHost("h1").persist();
-    clusters.getHost("h2").persist();
-    clusters.getHost("h3").persist();
   }
 
   @After
   public void teardown() throws Exception {
-    injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
   @Transactional
@@ -93,7 +90,7 @@ public class RequestExecutionTest {
     batchSettings.setTaskFailureToleranceLimit(10);
     batches.setBatchSettings(batchSettings);
 
-    List<BatchRequest> batchRequests = new ArrayList<BatchRequest>();
+    List<BatchRequest> batchRequests = new ArrayList<>();
     BatchRequest batchRequest1 = new BatchRequest();
     batchRequest1.setOrderId(10L);
     batchRequest1.setType(BatchRequest.Type.DELETE);
@@ -120,7 +117,7 @@ public class RequestExecutionTest {
     requestExecution.setDescription("Test Schedule");
 
     requestExecution.persist();
-
+    cluster.addRequestExecution(requestExecution);
     return requestExecution;
   }
 
@@ -175,7 +172,7 @@ public class RequestExecutionTest {
     // Remove host and add host
     Batch batches = new Batch();
 
-    List<BatchRequest> batchRequests = new ArrayList<BatchRequest>();
+    List<BatchRequest> batchRequests = new ArrayList<>();
     BatchRequest batchRequest1 = new BatchRequest();
     batchRequest1.setOrderId(10L);
     batchRequest1.setType(BatchRequest.Type.PUT);
@@ -270,8 +267,7 @@ public class RequestExecutionTest {
     Assert.assertNotNull(requestExecution);
 
     Long id = requestExecution.getId();
-
-    requestExecution.delete();
+    cluster.deleteRequestExecution(id);
 
     Assert.assertNull(requestScheduleDAO.findById(id));
     Assert.assertNull(cluster.getAllRequestExecutions().get(id));

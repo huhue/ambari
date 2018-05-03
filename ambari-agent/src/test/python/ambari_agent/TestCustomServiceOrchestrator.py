@@ -28,6 +28,7 @@ from unittest import TestCase
 import threading
 import tempfile
 import time
+import traceback
 from threading import Thread
 
 from mock.mock import MagicMock, patch
@@ -43,8 +44,10 @@ from ambari_agent.FileCache import FileCache
 from ambari_agent.PythonExecutor import PythonExecutor
 from ambari_commons import OSCheck
 from only_for_platform import get_platform, os_distro_value, PLATFORM_WINDOWS
+from ambari_agent.InitializerModule import InitializerModule
+from ambari_agent.ConfigurationBuilder import ConfigurationBuilder
 
-class TestCustomServiceOrchestrator(TestCase):
+class TestCustomServiceOrchestrator:#(TestCase):
 
 
   def setUp(self):
@@ -54,90 +57,13 @@ class TestCustomServiceOrchestrator(TestCase):
     # generate sample config
     tmpdir = tempfile.gettempdir()
     exec_tmp_dir = os.path.join(tmpdir, 'tmp')
-    self.config = ConfigParser.RawConfigParser()
-    self.config.get = AmbariConfig().get
+    self.config = AmbariConfig()
+    self.config.config = ConfigParser.RawConfigParser()
     self.config.add_section('agent')
     self.config.set('agent', 'prefix', tmpdir)
     self.config.set('agent', 'cache_dir', "/cachedir")
     self.config.add_section('python')
     self.config.set('python', 'custom_actions_dir', tmpdir)
-
-
-  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-  @patch.object(FileCache, "__init__")
-  def test_add_reg_listener_to_controller(self, FileCache_mock):
-    FileCache_mock.return_value = None
-    dummy_controller = MagicMock()
-    config = AmbariConfig().getConfig()
-    tempdir = tempfile.gettempdir()
-    config.set('agent', 'prefix', tempdir)
-    CustomServiceOrchestrator(config, dummy_controller)
-    self.assertTrue(dummy_controller.registration_listeners.append.called)
-
-
-  @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
-  @patch.object(CustomServiceOrchestrator, 'decompressClusterHostInfo')
-  @patch("ambari_agent.hostname.public_hostname")
-  @patch("os.path.isfile")
-  @patch("os.unlink")
-  @patch.object(FileCache, "__init__")
-  def test_dump_command_to_json(self, FileCache_mock, unlink_mock,
-                                isfile_mock, hostname_mock,
-                                decompress_cluster_host_info_mock):
-    FileCache_mock.return_value = None
-    hostname_mock.return_value = "test.hst"
-    command = {
-      'commandType': 'EXECUTION_COMMAND',
-      'role': u'DATANODE',
-      'roleCommand': u'INSTALL',
-      'commandId': '1-1',
-      'taskId': 3,
-      'clusterName': u'cc',
-      'serviceName': u'HDFS',
-      'configurations':{'global' : {}},
-      'configurationTags':{'global' : { 'tag': 'v1' }},
-      'clusterHostInfo':{'namenode_host' : ['1'],
-                         'slave_hosts'   : ['0', '1'],
-                         'all_hosts'     : ['h1.hortonworks.com', 'h2.hortonworks.com'],
-                         'all_ping_ports': ['8670:0,1']},
-      'hostLevelParams':{}
-    }
-    
-    decompress_cluster_host_info_mock.return_value = {'namenode_host' : ['h2.hortonworks.com'],
-                         'slave_hosts'   : ['h1.hortonworks.com', 'h2.hortonworks.com'],
-                         'all_hosts'     : ['h1.hortonworks.com', 'h2.hortonworks.com'],
-                         'all_ping_ports': ['8670', '8670']}
-    
-    config = AmbariConfig()
-    tempdir = tempfile.gettempdir()
-    config.set('agent', 'prefix', tempdir)
-    dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(config, dummy_controller)
-    isfile_mock.return_value = True
-    # Test dumping EXECUTION_COMMAND
-    json_file = orchestrator.dump_command_to_json(command)
-    self.assertTrue(os.path.exists(json_file))
-    self.assertTrue(os.path.getsize(json_file) > 0)
-    if get_platform() != PLATFORM_WINDOWS:
-      self.assertEqual(oct(os.stat(json_file).st_mode & 0777), '0600')
-    self.assertTrue(json_file.endswith("command-3.json"))
-    self.assertTrue(decompress_cluster_host_info_mock.called)
-    os.unlink(json_file)
-    # Test dumping STATUS_COMMAND
-    command['commandType']='STATUS_COMMAND'
-    decompress_cluster_host_info_mock.reset_mock()
-    json_file = orchestrator.dump_command_to_json(command)
-    self.assertTrue(os.path.exists(json_file))
-    self.assertTrue(os.path.getsize(json_file) > 0)
-    if get_platform() != PLATFORM_WINDOWS:
-      self.assertEqual(oct(os.stat(json_file).st_mode & 0777), '0600')
-    self.assertTrue(json_file.endswith("status_command.json"))
-    self.assertFalse(decompress_cluster_host_info_mock.called)
-    os.unlink(json_file)
-    # Testing side effect of dump_command_to_json
-    self.assertEquals(command['public_hostname'], "test.hst")
-    self.assertEquals(command['agentConfigParams']['agent']['parallel_execution'], 0)
-    self.assertTrue(unlink_mock.called)
 
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
@@ -163,17 +89,19 @@ class TestCustomServiceOrchestrator(TestCase):
                          'slave_hosts'   : ['0', '1'],
                          'all_racks'   : [u'/default-rack:0'],
                          'ambari_server_host' : 'a.b.c',
+                         'ambari_server_port' : '123',
+                         'ambari_server_use_ssl' : 'false',
                          'all_ipv4_ips'   : [u'192.168.12.101:0'],
                          'all_hosts'     : ['h1.hortonworks.com', 'h2.hortonworks.com'],
                          'all_ping_ports': ['8670:0,1']},
       'hostLevelParams':{}
     }
 
-    config = AmbariConfig()
     tempdir = tempfile.gettempdir()
-    config.set('agent', 'prefix', tempdir)
-    dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(config, dummy_controller)
+    initializer_module = InitializerModule()
+    initializer_module.init()
+    initializer_module.config.set('agent', 'prefix', tempdir)
+    orchestrator = CustomServiceOrchestrator(initializer_module)
     isfile_mock.return_value = True
     # Test dumping EXECUTION_COMMAND
     json_file = orchestrator.dump_command_to_json(command)
@@ -192,8 +120,7 @@ class TestCustomServiceOrchestrator(TestCase):
     self.assertTrue(json_file.endswith("command-3.json"))
     os.unlink(json_file)
     # Testing side effect of dump_command_to_json
-    self.assertEquals(command['public_hostname'], "test.hst")
-    self.assertEquals(command['agentConfigParams']['agent']['parallel_execution'], 0)
+    self.assertNotEquals(command['clusterHostInfo'], {})
     self.assertTrue(unlink_mock.called)
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
@@ -202,8 +129,10 @@ class TestCustomServiceOrchestrator(TestCase):
   def test_resolve_script_path(self, FileCache_mock, exists_mock):
     FileCache_mock.return_value = None
     dummy_controller = MagicMock()
-    config = AmbariConfig().getConfig()
-    orchestrator = CustomServiceOrchestrator(config, dummy_controller)
+    config = AmbariConfig()
+    initializer_module = InitializerModule()
+    initializer_module.init()
+    orchestrator = CustomServiceOrchestrator(initializer_module)
     # Testing existing path
     exists_mock.return_value = True
     path = orchestrator.\
@@ -218,7 +147,8 @@ class TestCustomServiceOrchestrator(TestCase):
     except AgentException:
       pass # Expected
 
-
+  @patch.object(ConfigurationBuilder, "get_configuration")
+  @patch.object(FileCache, "get_custom_resources_subdir")
   @patch.object(CustomServiceOrchestrator, "resolve_script_path")
   @patch.object(CustomServiceOrchestrator, "resolve_hook_script_path")
   @patch.object(FileCache, "get_host_scripts_base_dir")
@@ -232,14 +162,18 @@ class TestCustomServiceOrchestrator(TestCase):
                       get_hook_base_dir_mock, get_service_base_dir_mock, 
                       get_host_scripts_base_dir_mock, 
                       resolve_hook_script_path_mock, 
-                      resolve_script_path_mock):
+                      resolve_script_path_mock,
+                      get_custom_resources_subdir_mock, get_configuration_mock):
     
     FileCache_mock.return_value = None
     command = {
+      'commandType' : 'EXECUTION_COMMAND',
       'role' : 'REGION_SERVER',
-      'hostLevelParams' : {
+      'clusterLevelParams' : {
         'stack_name' : 'HDP',
         'stack_version' : '2.0.7',
+      },
+      'ambariLevelParams': {
         'jdk_location' : 'some_location'
       },
       'commandParams': {
@@ -249,8 +183,10 @@ class TestCustomServiceOrchestrator(TestCase):
         'service_package_folder' : 'HBASE'
       },
       'taskId' : '3',
-      'roleCommand': 'INSTALL'
+      'roleCommand': 'INSTALL',
+      'clusterId': '-1',
     }
+    get_configuration_mock.return_value = command
     
     get_host_scripts_base_dir_mock.return_value = "/host_scripts"
     get_service_base_dir_mock.return_value = "/basedir/"
@@ -258,8 +194,9 @@ class TestCustomServiceOrchestrator(TestCase):
     resolve_hook_script_path_mock.return_value = \
       ('/hooks_dir/prefix-command/scripts/hook.py',
        '/hooks_dir/prefix-command')
-    dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(self.config, dummy_controller)
+    initializer_module = InitializerModule()
+    initializer_module.init()
+    orchestrator = CustomServiceOrchestrator(initializer_module)
     unix_process_id = 111
     orchestrator.commands_in_progress = {command['taskId']: unix_process_id}
     get_hook_base_dir_mock.return_value = "/hooks/"
@@ -273,6 +210,23 @@ class TestCustomServiceOrchestrator(TestCase):
     self.assertEqual(ret['exitcode'], 0)
     self.assertTrue(run_file_mock.called)
     self.assertEqual(run_file_mock.call_count, 3)
+
+    # running a status command
+    run_file_mock.reset_mock()
+    def return_traceback(*args, **kwargs):
+      return {
+        'stderr': traceback.format_exc(),
+        'stdout': '',
+        'exitcode': 0,
+      }
+    run_file_mock.side_effect = return_traceback
+
+    status_command = dict(command)
+    status_command['commandType'] = 'STATUS_COMMAND'
+    del status_command['taskId']
+    del status_command['roleCommand']
+    ret = orchestrator.runCommand(status_command, "out.txt", "err.txt")
+    self.assertEqual('None\n', ret['stderr'])
 
     run_file_mock.reset_mock()
 
@@ -307,6 +261,7 @@ class TestCustomServiceOrchestrator(TestCase):
 
     pass
 
+  @patch.object(ConfigurationBuilder, "get_configuration")
   @patch("ambari_commons.shell.kill_process_with_children")
   @patch.object(CustomServiceOrchestrator, "resolve_script_path")
   @patch.object(CustomServiceOrchestrator, "resolve_hook_script_path")
@@ -321,13 +276,15 @@ class TestCustomServiceOrchestrator(TestCase):
                       get_hook_base_dir_mock, get_service_base_dir_mock,
                       get_host_scripts_base_dir_mock,
                       resolve_hook_script_path_mock, resolve_script_path_mock,
-                      kill_process_with_children_mock):
+                      kill_process_with_children_mock, get_configuration_mock):
     FileCache_mock.return_value = None
     command = {
       'role' : 'REGION_SERVER',
-      'hostLevelParams' : {
+      'clusterLevelParams' : {
         'stack_name' : 'HDP',
-        'stack_version' : '2.0.7',
+        'stack_version' : '2.0.7'
+      },
+      'ambariLevelParams': {
         'jdk_location' : 'some_location'
       },
       'commandParams': {
@@ -337,17 +294,20 @@ class TestCustomServiceOrchestrator(TestCase):
         'service_package_folder' : 'HBASE'
       },
       'taskId' : '3',
-      'roleCommand': 'INSTALL'
+      'roleCommand': 'INSTALL',
+      'clusterId': '-1'
     }
-    
+    get_configuration_mock.return_value = command
+        
     get_host_scripts_base_dir_mock.return_value = "/host_scripts"
     get_service_base_dir_mock.return_value = "/basedir/"
     resolve_script_path_mock.return_value = "/basedir/scriptpath"
     resolve_hook_script_path_mock.return_value = \
       ('/hooks_dir/prefix-command/scripts/hook.py',
        '/hooks_dir/prefix-command')
-    dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(self.config, dummy_controller)
+    initializer_module = InitializerModule()
+    initializer_module.init()
+    orchestrator = CustomServiceOrchestrator(initializer_module)
     unix_process_id = 111
     orchestrator.commands_in_progress = {command['taskId']: unix_process_id}
     get_hook_base_dir_mock.return_value = "/hooks/"
@@ -372,8 +332,8 @@ class TestCustomServiceOrchestrator(TestCase):
     ret = async_result.get()
 
     self.assertEqual(ret['exitcode'], 1)
-    self.assertEquals(ret['stdout'], 'killed\nCommand aborted. reason')
-    self.assertEquals(ret['stderr'], 'killed\nCommand aborted. reason')
+    self.assertEquals(ret['stdout'], 'killed\nCommand aborted. Reason: \'reason\'')
+    self.assertEquals(ret['stderr'], 'killed\nCommand aborted. Reason: \'reason\'')
 
     self.assertTrue(kill_process_with_children_mock.called)
     self.assertFalse(command['taskId'] in orchestrator.commands_in_progress.keys())
@@ -386,6 +346,7 @@ class TestCustomServiceOrchestrator(TestCase):
       pass
 
   @patch.object(OSCheck, "os_distribution", new = MagicMock(return_value = os_distro_value))
+  @patch.object(ConfigurationBuilder, "get_configuration")
   @patch.object(CustomServiceOrchestrator, "get_py_executor")
   @patch("ambari_commons.shell.kill_process_with_children")
   @patch.object(FileCache, "__init__")
@@ -393,7 +354,7 @@ class TestCustomServiceOrchestrator(TestCase):
   @patch.object(CustomServiceOrchestrator, "resolve_hook_script_path")
   def test_cancel_backgound_command(self, resolve_hook_script_path_mock,
                                     resolve_script_path_mock, FileCache_mock, kill_process_with_children_mock,
-                                    get_py_executor_mock):
+                                    get_py_executor_mock, get_configuration_mock):
     FileCache_mock.return_value = None
     FileCache_mock.cache_dir = MagicMock()
     resolve_hook_script_path_mock.return_value = None
@@ -403,10 +364,14 @@ class TestCustomServiceOrchestrator(TestCase):
     cfg.set('agent', 'prefix', '.')
     cfg.set('agent', 'cache_dir', 'background_tasks')
 
-    actionQueue = ActionQueue(cfg, dummy_controller)
+    initializer_module = InitializerModule()
+    initializer_module.init()
+    
+    actionQueue = ActionQueue(initializer_module)
+    orchestrator = CustomServiceOrchestrator(initializer_module)
 
-    dummy_controller.actionQueue = actionQueue
-    orchestrator = CustomServiceOrchestrator(cfg, dummy_controller)
+    initializer_module.actionQueue = actionQueue
+    
     orchestrator.file_cache = MagicMock()
     def f (a, b):
       return ""
@@ -433,12 +398,14 @@ class TestCustomServiceOrchestrator(TestCase):
 
     actionQueue.on_background_command_complete_callback = TestActionQueue.wraped(actionQueue.on_background_command_complete_callback, command_complete_w, None)
     execute_command = copy.deepcopy(TestActionQueue.TestActionQueue.background_command)
+    get_configuration_mock.return_value = execute_command
+    
     actionQueue.put([execute_command])
     actionQueue.processBackgroundQueueSafeEmpty()
 
     time.sleep(.1)
 
-    orchestrator.cancel_command(19,'')
+    orchestrator.cancel_command(19,'reason')
     self.assertTrue(kill_process_with_children_mock.called)
     kill_process_with_children_mock.assert_called_with(33)
 
@@ -455,6 +422,7 @@ class TestCustomServiceOrchestrator(TestCase):
     self.assertEqual(runningCommand['status'], ActionQueue.FAILED_STATUS)
 
 
+  @patch.object(ConfigurationBuilder, "get_configuration")
   @patch.object(AmbariConfig, "get")
   @patch.object(CustomServiceOrchestrator, "dump_command_to_json")
   @patch.object(PythonExecutor, "run_file")
@@ -462,7 +430,7 @@ class TestCustomServiceOrchestrator(TestCase):
   @patch.object(FileCache, "get_custom_actions_base_dir")
   def test_runCommand_custom_action(self, get_custom_actions_base_dir_mock,
                                     FileCache_mock,
-                                    run_file_mock, dump_command_to_json_mock, ambari_config_get):
+                                    run_file_mock, dump_command_to_json_mock, ambari_config_get, get_configuration_mock):
     ambari_config_get.return_value = "0"
     FileCache_mock.return_value = None
     get_custom_actions_base_dir_mock.return_value = "some path"
@@ -473,13 +441,22 @@ class TestCustomServiceOrchestrator(TestCase):
         'script_type': 'PYTHON',
         'script': 'some_custom_action.py',
         'command_timeout': '600',
+      },
+      'ambariLevelParams': {
         'jdk_location' : 'some_location'
       },
       'taskId' : '3',
-      'roleCommand': 'ACTIONEXECUTE'
+      'roleCommand': 'ACTIONEXECUTE',
+      'clusterId': '-1',
     }
-    dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(self.config, dummy_controller)
+    get_configuration_mock.return_value = command
+    
+    initializer_module = InitializerModule()
+    initializer_module.config = self.config
+    initializer_module.init()
+    
+    
+    orchestrator = CustomServiceOrchestrator(initializer_module)
     unix_process_id = 111
     orchestrator.commands_in_progress = {command['taskId']: unix_process_id}
     # normal run case
@@ -501,7 +478,9 @@ class TestCustomServiceOrchestrator(TestCase):
   def test_resolve_hook_script_path(self, FileCache_mock, isfile_mock):
     FileCache_mock.return_value = None
     dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(self.config, dummy_controller)
+    initializer_module = InitializerModule()
+    initializer_module.init()
+    orchestrator = CustomServiceOrchestrator(initializer_module)
     # Testing None param
     res1 = orchestrator.resolve_hook_script_path(None, "prefix", "command",
                                             "script_type")
@@ -531,7 +510,9 @@ class TestCustomServiceOrchestrator(TestCase):
       'configurations':{}
     }
     dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(self.config, dummy_controller)
+    initializer_module = InitializerModule()
+    initializer_module.init()
+    orchestrator = CustomServiceOrchestrator(initializer_module)
     # Test alive case
     runCommand_mock.return_value = {
       "exitcode" : 0
@@ -547,58 +528,8 @@ class TestCustomServiceOrchestrator(TestCase):
     status = orchestrator.requestComponentStatus(status_command)
     self.assertEqual(runCommand_mock.return_value, status)
 
-  @patch.object(CustomServiceOrchestrator, "runCommand")
-  @patch.object(FileCache, "__init__")
-  def test_requestComponentSecurityState(self, FileCache_mock, runCommand_mock):
-    FileCache_mock.return_value = None
-    status_command = {
-      "serviceName" : 'HDFS',
-      "commandType" : "STATUS_COMMAND",
-      "clusterName" : "",
-      "componentName" : "DATANODE",
-      'configurations':{}
-    }
-    dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(self.config, dummy_controller)
-    # Test securityState
-    runCommand_mock.return_value = {
-      'exitcode' : 0,
-      'structuredOut' : {'securityState': 'UNSECURED'}
-    }
 
-    status = orchestrator.requestComponentSecurityState(status_command)
-    self.assertEqual('UNSECURED', status)
-
-    # Test case where exit code indicates failure
-    runCommand_mock.return_value = {
-      "exitcode" : 1
-    }
-    status = orchestrator.requestComponentSecurityState(status_command)
-    self.assertEqual('UNKNOWN', status)
-
-  @patch.object(FileCache, "__init__")
-  def test_requestComponentSecurityState_realFailure(self, FileCache_mock):
-    '''
-    Tests the case where the CustomServiceOrchestrator attempts to call a service's security_status
-    method, but fails to do so because the script or method was not found.
-    :param FileCache_mock:
-    :return:
-    '''
-    FileCache_mock.return_value = None
-    status_command = {
-      "serviceName" : 'BOGUS_SERVICE',
-      "commandType" : "STATUS_COMMAND",
-      "clusterName" : "",
-      "componentName" : "DATANODE",
-      'configurations':{}
-    }
-    dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(self.config, dummy_controller)
-
-    status = orchestrator.requestComponentSecurityState(status_command)
-    self.assertEqual('UNKNOWN', status)
-
-
+  @patch.object(ConfigurationBuilder, "get_configuration")
   @patch.object(CustomServiceOrchestrator, "get_py_executor")
   @patch.object(CustomServiceOrchestrator, "dump_command_to_json")
   @patch.object(FileCache, "__init__")
@@ -606,7 +537,7 @@ class TestCustomServiceOrchestrator(TestCase):
   def test_runCommand_background_action(self, get_custom_actions_base_dir_mock,
                                     FileCache_mock,
                                     dump_command_to_json_mock,
-                                    get_py_executor_mock):
+                                    get_py_executor_mock, get_configuration_mock):
     FileCache_mock.return_value = None
     get_custom_actions_base_dir_mock.return_value = "some path"
     _, script = tempfile.mkstemp()
@@ -616,16 +547,20 @@ class TestCustomServiceOrchestrator(TestCase):
         'script_type': 'PYTHON',
         'script': 'some_custom_action.py',
         'command_timeout': '600',
+      },
+      'ambariLevelParams': {
         'jdk_location' : 'some_location'
       },
+      'clusterId': '-1',
       'taskId' : '13',
       'roleCommand': 'ACTIONEXECUTE',
       'commandType': 'BACKGROUND_EXECUTION_COMMAND',
       '__handle': BackgroundCommandExecutionHandle({'taskId': '13'}, 13,
                                                    MagicMock(), MagicMock())
     }
-    dummy_controller = MagicMock()
-    orchestrator = CustomServiceOrchestrator(self.config, dummy_controller)
+    initializer_module = InitializerModule()
+    initializer_module.init()
+    orchestrator = CustomServiceOrchestrator(initializer_module)
 
     import TestActionQueue
     pyex = PythonExecutor(orchestrator.tmp_dir, orchestrator.config)

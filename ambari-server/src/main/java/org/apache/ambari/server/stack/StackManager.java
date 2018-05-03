@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,30 +19,46 @@
 package org.apache.ambari.server.stack;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Set;
+import java.util.TreeMap;
 
 import javax.annotation.Nullable;
+import javax.xml.XMLConstants;
+import javax.xml.transform.stream.StreamSource;
+import javax.xml.validation.Schema;
+import javax.xml.validation.SchemaFactory;
+import javax.xml.validation.Validator;
 
 import org.apache.ambari.server.AmbariException;
-import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.controller.AmbariManagementHelper;
 import org.apache.ambari.server.metadata.ActionMetadata;
+import org.apache.ambari.server.orm.dao.ExtensionDAO;
+import org.apache.ambari.server.orm.dao.ExtensionLinkDAO;
 import org.apache.ambari.server.orm.dao.MetainfoDAO;
 import org.apache.ambari.server.orm.dao.StackDAO;
+import org.apache.ambari.server.orm.entities.ExtensionEntity;
+import org.apache.ambari.server.orm.entities.ExtensionLinkEntity;
 import org.apache.ambari.server.orm.entities.StackEntity;
+import org.apache.ambari.server.state.ExtensionInfo;
 import org.apache.ambari.server.state.ServiceInfo;
 import org.apache.ambari.server.state.StackInfo;
 import org.apache.ambari.server.state.stack.OsFamily;
 import org.apache.ambari.server.state.stack.ServiceMetainfoXml;
+import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.xml.sax.SAXException;
 
-import com.google.inject.Inject;
 import com.google.inject.assistedinject.Assisted;
-
+import com.google.inject.assistedinject.AssistedInject;
 
 /**
  * Manages all stack related behavior including parsing of stacks and providing access to
@@ -50,6 +66,7 @@ import com.google.inject.assistedinject.Assisted;
  */
 public class StackManager {
 
+  public static final String PROPERTY_SCHEMA_PATH = "configuration-schema.xsd";
   /**
    * Delimiter used for parent path string
    * Example:
@@ -64,6 +81,13 @@ public class StackManager {
   public static final String COMMON_SERVICES = "common-services";
 
   /**
+   * Prefix used for extension services parent path string
+   */
+  public static final String EXTENSIONS = "extensions";
+
+  public static final String METAINFO_FILE_NAME = "metainfo.xml";
+
+  /**
    * Provides access to non-stack server functionality
    */
   private StackContext stackContext;
@@ -76,7 +100,17 @@ public class StackManager {
   /**
    * Map of stack id to stack info
    */
-  private Map<String, StackInfo> stackMap = new HashMap<String, StackInfo>();
+  protected NavigableMap<String, StackInfo> stackMap = new TreeMap<>();
+  protected Map<String, ServiceModule> commonServiceModules;
+  protected Map<String, StackModule> stackModules;
+  protected Map<String, ExtensionModule> extensionModules;
+
+  /**
+   * Map of extension id to extension info
+   */
+  private Map<String, ExtensionInfo> extensionMap = new HashMap<>();
+
+  private AmbariManagementHelper helper;
 
   /**
    * Constructor. Initialize stack manager.
@@ -85,6 +119,8 @@ public class StackManager {
    *          stack root directory
    * @param commonServicesRoot
    *          common services root directory
+   * @param extensionRoot
+   *          extensions root directory
    * @param osFamily
    *          the OS family read from resources
    * @param metaInfoDAO
@@ -93,36 +129,78 @@ public class StackManager {
    *          action meta data automatically injected
    * @param stackDao
    *          stack DAO automatically injected
+   * @param extensionDao
+   *          extension DAO automatically injected
+   * @param linkDao
+   *          extension link DAO automatically injected
+   * @param helper
+   *          Ambari management helper automatically injected
    *
    * @throws AmbariException
    *           if an exception occurs while processing the stacks
    */
-  @Inject
+  @AssistedInject
   public StackManager(@Assisted("stackRoot") File stackRoot,
       @Assisted("commonServicesRoot") @Nullable File commonServicesRoot,
-      @Assisted OsFamily osFamily, MetainfoDAO metaInfoDAO,
-      ActionMetadata actionMetadata, StackDAO stackDao)
+      @Assisted("extensionRoot") @Nullable File extensionRoot,
+      @Assisted OsFamily osFamily, @Assisted boolean validate,
+      MetainfoDAO metaInfoDAO, ActionMetadata actionMetadata, StackDAO stackDao,
+      ExtensionDAO extensionDao, ExtensionLinkDAO linkDao, AmbariManagementHelper helper)
       throws AmbariException {
 
     LOG.info("Initializing the stack manager...");
 
-    validateStackDirectory(stackRoot);
-    validateCommonServicesDirectory(commonServicesRoot);
+    if (validate) {
+      validateStackDirectory(stackRoot);
+      validateCommonServicesDirectory(commonServicesRoot);
+      validateExtensionDirectory(extensionRoot);
+    }
 
-    stackMap = new HashMap<String, StackInfo>();
+    stackMap = new TreeMap<>();
     stackContext = new StackContext(metaInfoDAO, actionMetadata, osFamily);
+    extensionMap = new HashMap<>();
+    this.helper = helper;
 
-    Map<String, ServiceModule> commonServiceModules = parseCommonServicesDirectory(commonServicesRoot);
-    Map<String, StackModule> stackModules = parseStackDirectory(stackRoot);
+    parseDirectories(stackRoot, commonServicesRoot, extensionRoot);
 
-    fullyResolveCommonServices(stackModules, commonServiceModules);
-    fullyResolveStacks(stackModules, commonServiceModules);
+    //Read the extension links from the DB
+    for (StackModule module : stackModules.values()) {
+      StackInfo stack = module.getModuleInfo();
+      List<ExtensionLinkEntity> entities = linkDao.findByStack(stack.getName(), stack.getVersion());
+      for (ExtensionLinkEntity entity : entities) {
+        String name = entity.getExtension().getExtensionName();
+        String version = entity.getExtension().getExtensionVersion();
+        String key = name + StackManager.PATH_DELIMITER + version;
+        ExtensionModule extensionModule = extensionModules.get(key);
+        if (extensionModule != null) {
+          LOG.info("Adding extension to stack/version: " + stack.getName() + "/" + stack.getVersion() +
+                   " extension/version: " + name + "/" + version);
+          //Add the extension to the stack
+          module.getExtensionModules().put(key, extensionModule);
+        }
+      }
+    }
 
+    fullyResolveCommonServices(stackModules, commonServiceModules, extensionModules);
+    fullyResolveExtensions(stackModules, commonServiceModules, extensionModules);
+    fullyResolveStacks(stackModules, commonServiceModules, extensionModules);
+
+    populateDB(stackDao, extensionDao);
+  }
+
+  protected void parseDirectories(File stackRoot, File commonServicesRoot, File extensionRoot) throws AmbariException {
+    commonServiceModules = parseCommonServicesDirectory(commonServicesRoot);
+    stackModules = parseStackDirectory(stackRoot);
+    LOG.info("About to parse extension directories");
+    extensionModules = parseExtensionDirectory(extensionRoot);
+  }
+
+  private void populateDB(StackDAO stackDao, ExtensionDAO extensionDao) throws AmbariException {
     // for every stack read in, ensure that we have a database entry for it;
     // don't put try/catch logic around this since a failure here will
     // cause other things to break down the road
     Collection<StackInfo> stacks = getStacks();
-    for( StackInfo stack : stacks ){
+    for(StackInfo stack : stacks){
       String stackName = stack.getName();
       String stackVersion = stack.getVersion();
 
@@ -135,6 +213,70 @@ public class StackManager {
 
         stackDao.create(stackEntity);
       }
+    }
+
+    // for every extension read in, ensure that we have a database entry for it;
+    // don't put try/catch logic around this since a failure here will
+    // cause other things to break down the road
+    Collection<ExtensionInfo> extensions = getExtensions();
+    for(ExtensionInfo extension : extensions){
+      String extensionName = extension.getName();
+      String extensionVersion = extension.getVersion();
+
+      if (extensionDao.find(extensionName, extensionVersion) == null) {
+        LOG.info("Adding extension {}-{} to the database", extensionName, extensionVersion);
+
+        ExtensionEntity extensionEntity = new ExtensionEntity();
+        extensionEntity.setExtensionName(extensionName);
+        extensionEntity.setExtensionVersion(extensionVersion);
+
+        extensionDao.create(extensionEntity);
+      }
+    }
+
+    createLinks();
+  }
+
+  /**
+   * Attempts to automatically create links between extension versions and stack versions.
+   * This is limited to 'active' extensions that have the 'autolink' attribute set (in the metainfo.xml).
+   * Stack versions are selected based on the minimum stack versions that the extension supports.
+   * The extension and stack versions are processed in order of most recent to oldest.
+   * In this manner, the newest extension version will be autolinked before older extension versions.
+   * If a different version of the same extension is already linked to a stack version then that stack version
+   * will be skipped.
+   */
+  private void createLinks() {
+    LOG.info("Creating links");
+    Collection<ExtensionInfo> extensions = getExtensions();
+    Set<String> names = new HashSet<>();
+    for(ExtensionInfo extension : extensions){
+      names.add(extension.getName());
+    }
+    for(String name : names) {
+      createLinksForExtension(name);
+    }
+  }
+
+  /**
+   * Attempts to automatically create links between versions of a particular extension and stack versions they support.
+   * This is limited to 'active' extensions that have the 'autolink' attribute set (in the metainfo.xml).
+   * Stack versions are selected based on the minimum stack versions that the extension supports.
+   * The extension and stack versions are processed in order of most recent to oldest.
+   * In this manner, the newest extension version will be autolinked before older extension versions.
+   * If a different version of the same extension is already linked to a stack version then that stack version
+   * will be skipped.
+   */
+  private void createLinksForExtension(String name) {
+    Collection<ExtensionInfo> collection = getExtensions(name);
+    List<ExtensionInfo> extensions = new ArrayList<>(collection.size());
+    extensions.addAll(collection);
+    try {
+      helper.createExtensionLinks(this, extensions);
+    }
+    catch (AmbariException e) {
+      String msg = String.format("Failed to create link for extension: %s with exception: %s", name, e.getMessage());
+      LOG.error(msg);
     }
   }
 
@@ -158,11 +300,29 @@ public class StackManager {
    *         If no stacks match the specified name, an empty collection is returned.
    */
   public Collection<StackInfo> getStacks(String name) {
-    Collection<StackInfo> stacks = new HashSet<StackInfo>();
+    Collection<StackInfo> stacks = new HashSet<>();
     for (StackInfo stack: stackMap.values()) {
       if (stack.getName().equals(name)) {
         stacks.add(stack);
       }
+    }
+    return stacks;
+  }
+
+  /**
+   * Obtain all a map of all stacks by name.
+   *
+   * @return A map of all stacks with the name as the key.
+   */
+  public Map<String, List<StackInfo>> getStacksByName() {
+    Map<String, List<StackInfo>> stacks = new HashMap<>();
+    for (StackInfo stack: stackMap.values()) {
+      List<StackInfo> list = stacks.get(stack.getName());
+      if (list == null) {
+        list = new ArrayList<>();
+        stacks.put(stack.getName(),  list);
+      }
+      list.add(stack);
     }
     return stacks;
   }
@@ -174,6 +334,44 @@ public class StackManager {
    */
   public Collection<StackInfo> getStacks() {
     return stackMap.values();
+  }
+
+  /**
+   * Obtain the extension info specified by name and version.
+   *
+   * @param name     name of the extension
+   * @param version  version of the extension
+   * @return The extension corresponding to the specified name and version.
+   *         If no matching stack exists, null is returned.
+   */
+  public ExtensionInfo getExtension(String name, String version) {
+    return extensionMap.get(name + StackManager.PATH_DELIMITER + version);
+  }
+
+  /**
+   * Obtain all extensions for the given name.
+   *
+   * @param name  extension name
+   * @return A collection of all extensions with the given name.
+   *         If no extensions match the specified name, an empty collection is returned.
+   */
+  public Collection<ExtensionInfo> getExtensions(String name) {
+    Collection<ExtensionInfo> extensions = new HashSet<>();
+    for (ExtensionInfo extension: extensionMap.values()) {
+      if (extension.getName().equals(name)) {
+	  extensions.add(extension);
+      }
+    }
+    return extensions;
+  }
+
+  /**
+   * Obtain all extensions.
+   *
+   * @return collection of all extensions
+   */
+  public Collection<ExtensionInfo> getExtensions() {
+    return extensionMap.values();
   }
 
   /**
@@ -193,12 +391,12 @@ public class StackManager {
    * @throws AmbariException if unable to resolve all stacks
    */
   private void fullyResolveStacks(
-      Map<String, StackModule> stackModules, Map<String, ServiceModule> commonServiceModules)
+      Map<String, StackModule> stackModules, Map<String, ServiceModule> commonServiceModules, Map<String, ExtensionModule> extensions)
       throws AmbariException {
     // Resolve all stacks without finalizing the stacks.
     for (StackModule stack : stackModules.values()) {
       if (stack.getModuleState() == ModuleState.INIT) {
-        stack.resolve(null, stackModules, commonServiceModules);
+        stack.resolve(null, stackModules, commonServiceModules, extensions);
       }
     }
     // Finalize the common services and stacks to remove sub-modules marked for deletion.
@@ -207,6 +405,9 @@ public class StackManager {
     // are inlined into the child module even if the module is marked for deletion.
     for(ServiceModule commonService : commonServiceModules.values()) {
       commonService.finalizeModule();
+    }
+    for (ExtensionModule extension : extensions.values()) {
+      extension.finalizeModule();
     }
     for (StackModule stack : stackModules.values()) {
       stack.finalizeModule();
@@ -223,11 +424,29 @@ public class StackManager {
    * @throws AmbariException if unable to resolve all common services
    */
   private void fullyResolveCommonServices(
-      Map<String, StackModule> stackModules, Map<String, ServiceModule> commonServiceModules)
+      Map<String, StackModule> stackModules, Map<String, ServiceModule> commonServiceModules, Map<String, ExtensionModule> extensions)
       throws AmbariException {
     for(ServiceModule commonService : commonServiceModules.values()) {
       if (commonService.getModuleState() == ModuleState.INIT) {
-        commonService.resolveCommonService(stackModules, commonServiceModules);
+        commonService.resolveCommonService(stackModules, commonServiceModules, extensions);
+      }
+    }
+  }
+
+  /**
+   * Fully resolve extensions.
+   *
+   * @param extensionModules      map of extension id which contains name and version to extension module.
+   * @param stackModules          map of stack id which contains name and version to stack module.
+   * @param commonServiceModules  map of common service id which contains name and version to common service module.
+   * @throws AmbariException if unable to resolve all extensions
+   */
+  private void fullyResolveExtensions(Map<String, StackModule> stackModules, Map<String, ServiceModule> commonServiceModules,
+      Map<String, ExtensionModule> extensionModules)
+      throws AmbariException {
+    for(ExtensionModule extensionModule : extensionModules.values()) {
+      if (extensionModule.getModuleState() == ModuleState.INIT) {
+        extensionModule.resolve(null, stackModules, commonServiceModules, extensionModules);
       }
     }
   }
@@ -245,8 +464,7 @@ public class StackManager {
 
       String commonServicesRootAbsolutePath = commonServicesRoot.getAbsolutePath();
       if (LOG.isDebugEnabled()) {
-        LOG.debug("Loading common services information"
-            + ", commonServicesRoot = " + commonServicesRootAbsolutePath);
+        LOG.debug("Loading common services information, commonServicesRoot = {}", commonServicesRootAbsolutePath);
       }
 
       if (!commonServicesRoot.isDirectory() && !commonServicesRoot.exists()) {
@@ -268,14 +486,70 @@ public class StackManager {
 
     String stackRootAbsPath = stackRoot.getAbsolutePath();
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Loading stack information"
-          + ", stackRoot = " + stackRootAbsPath);
+      LOG.debug("Loading stack information, stackRoot = {}", stackRootAbsPath);
     }
 
     if (!stackRoot.isDirectory() && !stackRoot.exists()) {
       throw new AmbariException("" + Configuration.METADATA_DIR_PATH
           + " should be a directory with stack"
           + ", stackRoot = " + stackRootAbsPath);
+    }
+    Validator validator = getPropertySchemaValidator();
+
+    validateAllPropertyXmlsInFolderRecursively(stackRoot, validator);
+  }
+
+  public static Validator getPropertySchemaValidator() throws AmbariException {
+    SchemaFactory factory =
+      SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+    Schema schema;
+    ClassLoader classLoader = StackManager.class.getClassLoader();
+    try {
+      schema = factory.newSchema(classLoader.getResource(PROPERTY_SCHEMA_PATH));
+    } catch (SAXException e) {
+      throw new AmbariException(String.format("Failed to parse property schema file %s", PROPERTY_SCHEMA_PATH), e);
+    }
+    return schema.newValidator();
+  }
+
+  public static void validateAllPropertyXmlsInFolderRecursively(File stackRoot, Validator validator) throws AmbariException {
+    Collection<File> files = FileUtils.listFiles(stackRoot, new String[]{"xml"}, true);
+    for (File file : files) {
+      try {
+        if (file.getParentFile().getName().contains("configuration")) {
+          validator.validate(new StreamSource(file));
+        }
+      } catch (Exception e) {
+        String msg = String.format("File %s didn't pass the validation. Error message is : %s", file.getAbsolutePath(), e.getMessage());
+        LOG.error(msg);
+        throw new AmbariException(msg);
+      }
+    }
+  }
+
+  /**
+   * Validate that the specified extension root is a valid directory.
+   *
+   * @param extensionRoot  the extension root directory to validate
+   * @throws AmbariException if the specified extension root directory is invalid
+   */
+  private void validateExtensionDirectory(File extensionRoot) throws AmbariException {
+    LOG.info("Validating extension directory {} ...", extensionRoot);
+
+    if (extensionRoot == null) {
+      return;
+    }
+
+    String extensionRootAbsPath = extensionRoot.getAbsolutePath();
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Loading extension information, extensionRoot = {}", extensionRootAbsPath);
+    }
+
+    //For backwards compatibility extension directory may not exist
+    if (extensionRoot.exists() && !extensionRoot.isDirectory()) {
+      throw new AmbariException("" + Configuration.METADATA_DIR_PATH
+          + " should be a directory"
+          + ", extensionRoot = " + extensionRootAbsPath);
     }
   }
 
@@ -287,17 +561,15 @@ public class StackManager {
    * @throws AmbariException if unable to parse all common services
    */
   private Map<String, ServiceModule> parseCommonServicesDirectory(File commonServicesRoot) throws AmbariException {
-    Map<String, ServiceModule> commonServiceModules = new HashMap<String, ServiceModule>();
+    Map<String, ServiceModule> commonServiceModules = new HashMap<>();
 
     if(commonServicesRoot != null) {
-      File[] commonServiceFiles = commonServicesRoot.listFiles(AmbariMetaInfo.FILENAME_FILTER);
+      File[] commonServiceFiles = commonServicesRoot.listFiles(StackDirectory.FILENAME_FILTER);
       for (File commonService : commonServiceFiles) {
         if (commonService.isFile()) {
           continue;
         }
-        for (File serviceFolder : commonService.listFiles(AmbariMetaInfo.FILENAME_FILTER)) {
-          String serviceName = serviceFolder.getParentFile().getName();
-          String serviceVersion = serviceFolder.getName();
+        for (File serviceFolder : commonService.listFiles(StackDirectory.FILENAME_FILTER)) {
           ServiceDirectory serviceDirectory = new CommonServiceDirectory(serviceFolder.getPath());
           ServiceMetainfoXml metaInfoXml = serviceDirectory.getMetaInfoFile();
           if (metaInfoXml != null) {
@@ -330,14 +602,14 @@ public class StackManager {
    * @throws AmbariException if unable to parse all stacks
    */
   private Map<String, StackModule> parseStackDirectory(File stackRoot) throws AmbariException {
-    Map<String, StackModule> stackModules = new HashMap<String, StackModule>();
+    Map<String, StackModule> stackModules = new HashMap<>();
 
-    File[] stackFiles = stackRoot.listFiles(AmbariMetaInfo.FILENAME_FILTER);
+    File[] stackFiles = stackRoot.listFiles(StackDirectory.FILENAME_FILTER);
     for (File stack : stackFiles) {
       if (stack.isFile()) {
         continue;
       }
-      for (File stackFolder : stack.listFiles(AmbariMetaInfo.FILENAME_FILTER)) {
+      for (File stackFolder : stack.listFiles(StackDirectory.FILENAME_FILTER)) {
         if (stackFolder.isFile()) {
           continue;
         }
@@ -356,5 +628,52 @@ public class StackManager {
           "stackRoot = " + stackRoot.getAbsolutePath());
     }
     return stackModules;
+  }
+
+  public void linkStackToExtension(StackInfo stack, ExtensionInfo extension) throws AmbariException {
+    stack.addExtension(extension);
+  }
+
+  public void unlinkStackAndExtension(StackInfo stack, ExtensionInfo extension) throws AmbariException {
+    stack.removeExtension(extension);
+  }
+
+  /**
+   * Parse the specified extension root directory
+   *
+   * @param extensionRoot  the extension root directory to parse
+   * @return map of extension id which contains name and version to extension module.
+   * @throws AmbariException if unable to parse all extensions
+   */
+  private Map<String, ExtensionModule> parseExtensionDirectory(File extensionRoot) throws AmbariException {
+    Map<String, ExtensionModule> extensionModules = new HashMap<>();
+    if (extensionRoot == null || !extensionRoot.exists()) {
+      return extensionModules;
+    }
+
+    File[] extensionFiles = extensionRoot.listFiles(StackDirectory.FILENAME_FILTER);
+    for (File extensionNameFolder : extensionFiles) {
+      if (extensionNameFolder.isFile()) {
+        continue;
+      }
+      for (File extensionVersionFolder : extensionNameFolder.listFiles(StackDirectory.FILENAME_FILTER)) {
+        if (extensionVersionFolder.isFile()) {
+          continue;
+        }
+        String extensionName = extensionNameFolder.getName();
+        String extensionVersion = extensionVersionFolder.getName();
+
+        ExtensionModule extensionModule = new ExtensionModule(new ExtensionDirectory(extensionVersionFolder.getPath()), stackContext);
+        String extensionKey = extensionName + StackManager.PATH_DELIMITER + extensionVersion;
+        extensionModules.put(extensionKey, extensionModule);
+        extensionMap.put(extensionKey, extensionModule.getModuleInfo());
+      }
+    }
+
+    if (stackMap.isEmpty()) {
+      throw new AmbariException("Unable to find extension definitions under " +
+          "extensionRoot = " + extensionRoot.getAbsolutePath());
+    }
+    return extensionModules;
   }
 }

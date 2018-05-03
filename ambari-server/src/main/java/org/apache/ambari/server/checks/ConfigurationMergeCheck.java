@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -25,11 +25,11 @@ import java.util.Set;
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.controller.PrereqCheckRequest;
 import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
-import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.ConfigMergeHelper;
 import org.apache.ambari.server.state.ConfigMergeHelper.ThreeWayValue;
 import org.apache.ambari.server.state.stack.PrereqCheckStatus;
 import org.apache.ambari.server.state.stack.PrerequisiteCheck;
+import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
 import org.apache.commons.lang.StringUtils;
 
 import com.google.inject.Inject;
@@ -39,7 +39,9 @@ import com.google.inject.Singleton;
  * Checks for configuration merge conflicts.
  */
 @Singleton
-@UpgradeCheck(order = 99.0f, required = true)
+@UpgradeCheck(
+    order = 99.0f,
+    required = { UpgradeType.ROLLING, UpgradeType.NON_ROLLING, UpgradeType.HOST_ORDERED })
 public class ConfigurationMergeCheck extends AbstractCheckDescriptor {
 
   @Inject
@@ -61,13 +63,12 @@ public class ConfigurationMergeCheck extends AbstractCheckDescriptor {
   public void perform(PrerequisiteCheck prerequisiteCheck, PrereqCheckRequest request)
       throws AmbariException {
 
-    String stackName = request.getTargetStackId().getStackName();
-    RepositoryVersionEntity rve = repositoryVersionDaoProvider.get().findByStackNameAndVersion(stackName, request.getRepositoryVersion());
+    RepositoryVersionEntity rve = request.getTargetRepositoryVersion();
 
     Map<String, Map<String, ThreeWayValue>> changes =
         m_mergeHelper.getConflicts(request.getClusterName(), rve.getStackId());
 
-    Set<String> failedTypes = new HashSet<String>();
+    Set<String> failedTypes = new HashSet<>();
 
     for (Entry<String, Map<String, ThreeWayValue>> entry : changes.entrySet()) {
       for (Entry<String, ThreeWayValue> configEntry : entry.getValue().entrySet()) {

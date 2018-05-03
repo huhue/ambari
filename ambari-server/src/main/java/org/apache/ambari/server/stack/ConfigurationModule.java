@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,14 +18,15 @@
 
 package org.apache.ambari.server.stack;
 
-import org.apache.ambari.server.AmbariException;
-import org.apache.ambari.server.state.PropertyInfo;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.state.PropertyInfo;
 
 
 /**
@@ -54,7 +55,7 @@ public class ConfigurationModule extends BaseModule<ConfigurationModule, Configu
    */
   protected boolean valid = true;
 
-  private Set<String> errorSet = new HashSet<String>();
+  private Set<String> errorSet = new HashSet<>();
   
   @Override
   public void addError(String error) {
@@ -82,7 +83,8 @@ public class ConfigurationModule extends BaseModule<ConfigurationModule, Configu
   }
 
   @Override
-  public void resolve(ConfigurationModule parent, Map<String, StackModule> allStacks, Map<String, ServiceModule> commonServices) throws AmbariException {
+  public void resolve(ConfigurationModule parent, Map<String, StackModule> allStacks,
+	    Map<String, ServiceModule> commonServices, Map<String, ExtensionModule> extensions) throws AmbariException {
     // merge properties also removes deleted props so should be called even if extension is disabled
     if (parent != null) {
       if (parent.info != null) {
@@ -144,7 +146,7 @@ public class ConfigurationModule extends BaseModule<ConfigurationModule, Configu
    * @param parent  parent configuration module
    */
   private void mergeProperties(ConfigurationModule parent) {
-    Collection<String> existingProps = new HashSet<String>();
+    Collection<String> existingProps = new HashSet<>();
     Iterator<PropertyInfo> iter = info.getProperties().iterator();
     while (iter.hasNext()) {
       PropertyInfo prop = iter.next();
@@ -174,7 +176,7 @@ public class ConfigurationModule extends BaseModule<ConfigurationModule, Configu
       String category = parentCategoryEntry.getKey();
       Map<String, String> categoryAttributeMap = info.getAttributes().get(category);
       if (categoryAttributeMap == null) {
-        categoryAttributeMap = new HashMap<String, String>();
+        categoryAttributeMap = new HashMap<>();
         info.getAttributes().put(category, categoryAttributeMap);
       }
       for (Map.Entry<String, String> parentAttributeEntry : parentCategoryEntry.getValue().entrySet()) {

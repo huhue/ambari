@@ -19,11 +19,33 @@
  * limitations under the License.
  */
 -->
-<configuration supports_final="false" supports_adding_forbidden="true">
+<configuration supports_final="false" supports_adding_forbidden="false">
   <property>
-  <name>content</name>
-  <description>Custom hive-log4j2.properties</description>
-  <value>
+    <name>hive2_log_maxfilesize</name>
+    <value>256</value>
+    <description>The maximum size of backup file before the log is rotated</description>
+    <display-name>Hive Log2: backup file size</display-name>
+    <value-attributes>
+      <unit>MB</unit>
+    </value-attributes>
+    <on-ambari-upgrade add="false"/>
+  </property>
+  <property>
+    <name>hive2_log_maxbackupindex</name>
+    <value>30</value>
+    <description>The number of backup files</description>
+    <display-name>Hive Log2: # of backup files</display-name>
+    <value-attributes>
+      <type>int</type>
+      <minimum>0</minimum>
+    </value-attributes>
+    <on-ambari-upgrade add="false"/>
+  </property>
+  <property>
+    <name>content</name>
+    <display-name>hive-log4j2 template</display-name>
+    <description>Custom hive-log4j2.properties</description>
+    <value>
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -45,10 +67,11 @@ name = HiveLog4j2
 packages = org.apache.hadoop.hive.ql.log
 
 # list of properties
-property.hive.log.level = INFO
+property.hive.log.level = {{hive_log_level}}
 property.hive.root.logger = DRFA
 property.hive.log.dir = ${sys:java.io.tmpdir}/${sys:user.name}
 property.hive.log.file = hive.log
+property.hive.perflogger.log.level = INFO
 
 # list of all appenders
 appenders = console, DRFA
@@ -58,25 +81,27 @@ appender.console.type = Console
 appender.console.name = console
 appender.console.target = SYSTEM_ERR
 appender.console.layout.type = PatternLayout
-appender.console.layout.pattern = %d{yy/MM/dd HH:mm:ss} [%t]: %p %c{2}: %m%n
+appender.console.layout.pattern = %d{ISO8601} %5p [%t] %c{2}: %m%n
 
 # daily rolling file appender
-appender.DRFA.type = RollingFile
+appender.DRFA.type = RollingRandomAccessFile
 appender.DRFA.name = DRFA
 appender.DRFA.fileName = ${sys:hive.log.dir}/${sys:hive.log.file}
 # Use %pid in the filePattern to append process-id@host-name to the filename if you want separate log files for different CLI session
 appender.DRFA.filePattern = ${sys:hive.log.dir}/${sys:hive.log.file}.%d{yyyy-MM-dd}
 appender.DRFA.layout.type = PatternLayout
-appender.DRFA.layout.pattern = %d{ISO8601} %-5p [%t]: %c{2} (%F:%M(%L)) - %m%n
+appender.DRFA.layout.pattern = %d{ISO8601} %5p [%t] %c{2}: %m%n
 appender.DRFA.policies.type = Policies
 appender.DRFA.policies.time.type = TimeBasedTriggeringPolicy
 appender.DRFA.policies.time.interval = 1
 appender.DRFA.policies.time.modulate = true
 appender.DRFA.strategy.type = DefaultRolloverStrategy
-appender.DRFA.strategy.max = 30
+appender.DRFA.strategy.max = {{hive2_log_maxbackupindex}}
+appender.DRFA.policies.fsize.type = SizeBasedTriggeringPolicy
+appender.DRFA.policies.fsize.size = {{hive2_log_maxfilesize}}MB
 
 # list of all loggers
-loggers = NIOServerCnxn, ClientCnxnSocketNIO, DataNucleus, Datastore, JPOX
+loggers = NIOServerCnxn, ClientCnxnSocketNIO, DataNucleus, Datastore, JPOX, PerfLogger, AmazonAws, ApacheHttp
 
 logger.NIOServerCnxn.name = org.apache.zookeeper.server.NIOServerCnxn
 logger.NIOServerCnxn.level = WARN
@@ -93,6 +118,15 @@ logger.Datastore.level = ERROR
 logger.JPOX.name = JPOX
 logger.JPOX.level = ERROR
 
+logger.AmazonAws.name=com.amazonaws
+logger.AmazonAws.level = INFO
+
+logger.ApacheHttp.name=org.apache.http
+logger.ApacheHttp.level = INFO
+
+logger.PerfLogger.name = org.apache.hadoop.hive.ql.log.PerfLogger
+logger.PerfLogger.level = ${sys:hive.perflogger.log.level}
+
 # root logger
 rootLogger.level = ${sys:hive.log.level}
 rootLogger.appenderRefs = root
@@ -102,5 +136,6 @@ rootLogger.appenderRef.root.ref = ${sys:hive.root.logger}
       <type>content</type>
       <show-property-name>false</show-property-name>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
 </configuration>

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,24 +17,43 @@
  */
 package org.apache.ambari.server.controller;
 
+import org.apache.ambari.server.security.authorization.GroupType;
+
+import io.swagger.annotations.ApiModelProperty;
+
 /**
  * Represents a user group maintenance response.
  */
-public class GroupResponse {
+public class GroupResponse implements ApiModel{
   private final String groupName;
   private final boolean ldapGroup;
+  private final GroupType groupType;
+
+  public GroupResponse(String groupName, boolean ldapGroup, GroupType groupType) {
+    this.groupName = groupName;
+    this.ldapGroup = ldapGroup;
+    this.groupType = groupType;
+  }
 
   public GroupResponse(String groupName, boolean ldapGroup) {
     this.groupName = groupName;
     this.ldapGroup = ldapGroup;
+    this.groupType = GroupType.LOCAL;
   }
 
+  @ApiModelProperty(name = "Groups/group_name")
   public String getGroupName() {
     return groupName;
   }
 
+  @ApiModelProperty(name = "Groups/ldap_group")
   public boolean isLdapGroup() {
     return ldapGroup;
+  }
+
+  @ApiModelProperty(name = "Groups/group_type")
+  public GroupType getGroupType() {
+    return groupType;
   }
 
   @Override

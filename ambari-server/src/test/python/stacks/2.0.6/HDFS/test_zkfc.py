@@ -62,14 +62,14 @@ class TestZkfc(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['hdfs-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
                               )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
                               owner = 'hdfs',
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['core-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['core-site'],
+                              configuration_attributes = self.getConfig()['configurationAttributes']['core-site'],
                               mode = 0644
                               )
     self.assertResourceCalled('File', '/etc/hadoop/conf/slaves',
@@ -154,19 +154,34 @@ class TestZkfc(RMFTestCase):
                               group = 'root',
                               mode = 0644,
                               )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/hdfs_dn_jaas.conf',
+                              content = Template('hdfs_dn_jaas.conf.j2'),
+                              owner = 'hdfs',
+                              group = 'hadoop',
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/hdfs_nn_jaas.conf',
+                              content = Template('hdfs_nn_jaas.conf.j2'),
+                              owner = 'hdfs',
+                              group = 'hadoop',
+                              )
+    self.assertResourceCalled('File', '/etc/hadoop/conf/hdfs_jn_jaas.conf',
+                              content = Template('hdfs_jn_jaas.conf.j2'),
+                              owner = 'hdfs',
+                              group = 'hadoop',
+                              )
     self.assertResourceCalled('XmlConfig', 'hdfs-site.xml',
                               owner = 'hdfs',
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['hdfs-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
                               )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
                               owner = 'hdfs',
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['core-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['core-site'],
+                              configuration_attributes = self.getConfig()['configurationAttributes']['core-site'],
                               mode = 0644
     )
     self.assertResourceCalled('File', '/etc/hadoop/conf/slaves',
@@ -255,14 +270,14 @@ class TestZkfc(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['hdfs-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
     )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
                               owner = 'hdfs',
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['core-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['core-site'],
+                              configuration_attributes = self.getConfig()['configurationAttributes']['core-site'],
                               mode = 0644
     )
     self.assertResourceCalled('File', '/etc/hadoop/conf/slaves',
@@ -337,14 +352,14 @@ class TestZkfc(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['hdfs-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['hdfs-site']
+                              configuration_attributes = self.getConfig()['configurationAttributes']['hdfs-site']
     )
     self.assertResourceCalled('XmlConfig', 'core-site.xml',
                               owner = 'hdfs',
                               group = 'hadoop',
                               conf_dir = '/etc/hadoop/conf',
                               configurations = self.getConfig()['configurations']['core-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['core-site'],
+                              configuration_attributes = self.getConfig()['configurationAttributes']['core-site'],
                               mode = 0644
     )
     self.assertResourceCalled('File', '/etc/hadoop/conf/slaves',
@@ -382,103 +397,3 @@ class TestZkfc(RMFTestCase):
         not_if = "ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E test -f /var/run/hadoop/hdfs/hadoop-hdfs-zkfc.pid && ambari-sudo.sh [RMF_ENV_PLACEHOLDER] -H -E pgrep -F /var/run/hadoop/hdfs/hadoop-hdfs-zkfc.pid",
     )
     self.assertNoMoreResources()
-
-
-  @patch("resource_management.libraries.functions.security_commons.build_expectations")
-  @patch("resource_management.libraries.functions.security_commons.get_params_from_filesystem")
-  @patch("resource_management.libraries.functions.security_commons.validate_security_config_properties")
-  @patch("resource_management.libraries.functions.security_commons.cached_kinit_executor")
-  @patch("resource_management.libraries.script.Script.put_structured_out")
-  def test_security_status(self, put_structured_out_mock, cached_kinit_executor_mock, validate_security_config_mock, get_params_mock, build_exp_mock):
-
-    # Test that function works when is called with correct parameters
-    security_params = {
-      'core-site': {
-        'hadoop.security.authentication': 'kerberos'
-      }
-    }
-
-    props_value_check = {"hadoop.security.authentication": "kerberos",
-                         "hadoop.security.authorization": "true"}
-    props_empty_check = ["hadoop.security.auth_to_local"]
-    props_read_check = None
-
-    result_issues = []
-
-    get_params_mock.return_value = security_params
-    validate_security_config_mock.return_value = result_issues
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zkfc_slave.py",
-                       classname = "ZkfcSlave",
-                       command = "security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-
-    build_exp_mock.assert_called_with('core-site', props_value_check, props_empty_check, props_read_check)
-    put_structured_out_mock.assert_called_with({"securityState": "SECURED_KERBEROS"})
-    cached_kinit_executor_mock.called_with('/usr/bin/kinit',
-                                           self.config_dict['configurations']['hadoop-env']['hdfs_user'],
-                                           self.config_dict['configurations']['hadoop-env']['hdfs_user_keytab'],
-                                           self.config_dict['configurations']['hadoop-env']['hdfs_user_principal_name'],
-                                           self.config_dict['hostname'],
-                                           '/tmp')
-
-    # Testing that the exception throw by cached_executor is caught
-    cached_kinit_executor_mock.reset_mock()
-    cached_kinit_executor_mock.side_effect = Exception("Invalid command")
-
-    try:
-        self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zkfc_slave.py",
-                           classname = "ZkfcSlave",
-                           command = "security_status",
-                           config_file="secured.json",
-                           stack_version = self.STACK_VERSION,
-                           target = RMFTestCase.TARGET_COMMON_SERVICES
-        )
-    except:
-      self.assertTrue(True)
-
-    # Testing when hadoop.security.authentication is simple
-    security_params['core-site']['hadoop.security.authentication'] = 'simple'
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zkfc_slave.py",
-                       classname = "ZkfcSlave",
-                       command = "security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-    security_params['core-site']['hadoop.security.authentication'] = 'kerberos'
-
-    # Testing with not empty result_issues
-    result_issues_with_params = {
-      'hdfs-site': "Something bad happened"
-    }
-
-    validate_security_config_mock.reset_mock()
-    get_params_mock.reset_mock()
-    validate_security_config_mock.return_value = result_issues_with_params
-    get_params_mock.return_value = security_params
-
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zkfc_slave.py",
-                       classname = "ZkfcSlave",
-                       command = "security_status",
-                       config_file="secured.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})
-
-    # Testing with empty hdfs_user_principal and hdfs_user_keytab
-    self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/zkfc_slave.py",
-                       classname = "ZkfcSlave",
-                       command = "security_status",
-                       config_file="default.json",
-                       stack_version = self.STACK_VERSION,
-                       target = RMFTestCase.TARGET_COMMON_SERVICES
-    )
-    put_structured_out_mock.assert_called_with({"securityState": "UNSECURED"})

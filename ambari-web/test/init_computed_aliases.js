@@ -88,7 +88,7 @@ App.TestAliases = {
      * @returns {App.TestAliases}
      * @private
      */
-    _stubOneKey: function (self,dependentKey, value) {
+    _stubOneKey: function (self, dependentKey, value) {
       var isApp = dependentKey.startsWith('App.');
       var name = isApp ? dependentKey.replace('App.', '') : dependentKey;
       var context = isApp ? App : self;
@@ -160,6 +160,23 @@ App.TestAliases = {
         result.push(combo);
       }
       return result;
+    },
+
+    /**
+     * Reopens property of the given object as constant with the given value
+     * @param {Ember.Object} context
+     * @param {String} key
+     * @param {*} value
+     */
+    reopenProperty: function (context, key, value) {
+      var reopenObject = {},
+        isUndefined = typeof value === 'undefined';
+      // if the only property in reopen argument is undefined, context won't be changed
+      reopenObject[key] = isUndefined ? null : value;
+      context.reopen(reopenObject);
+      if (isUndefined) {
+        context.set(key, undefined);
+      }
     }
 
   }
@@ -170,12 +187,15 @@ require('test/aliases/computed/notEqual');
 require('test/aliases/computed/equalProperties');
 require('test/aliases/computed/notEqualProperties');
 require('test/aliases/computed/ifThenElse');
+require('test/aliases/computed/ifThenElseByKeys');
 require('test/aliases/computed/sumProperties');
 require('test/aliases/computed/countBasedMessage');
 require('test/aliases/computed/firstNotBlank');
 require('test/aliases/computed/percents');
 require('test/aliases/computed/existsIn');
+require('test/aliases/computed/existsInByKey');
 require('test/aliases/computed/notExistsIn');
+require('test/aliases/computed/notExistsInByKey');
 require('test/aliases/computed/alias');
 require('test/aliases/computed/gte');
 require('test/aliases/computed/gt');
@@ -186,13 +206,19 @@ require('test/aliases/computed/lt');
 require('test/aliases/computed/lteProperties');
 require('test/aliases/computed/ltProperties');
 require('test/aliases/computed/someBy');
+require('test/aliases/computed/someByKey');
 require('test/aliases/computed/everyBy');
+require('test/aliases/computed/everyByKey');
 require('test/aliases/computed/mapBy');
 require('test/aliases/computed/filterBy');
+require('test/aliases/computed/filterByKey');
 require('test/aliases/computed/findBy');
+require('test/aliases/computed/findByKey');
 require('test/aliases/computed/sumBy');
 require('test/aliases/computed/and');
 require('test/aliases/computed/or');
 require('test/aliases/computed/formatUnavailable');
 require('test/aliases/computed/getByKey');
 require('test/aliases/computed/truncate');
+require('test/aliases/computed/concat');
+require('test/aliases/computed/empty');

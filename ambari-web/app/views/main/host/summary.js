@@ -54,7 +54,75 @@ App.MainHostSummaryView = Em.View.extend(App.TimeRangeMixin, {
   /**
    * Host metrics panel not displayed when Metrics service (ex:Ganglia) is not in stack definition.
    */
-  isNoHostMetricsService: Em.computed.equal('App.services.hostMetrics.length', 0),
+  hasHostMetricsService: Em.computed.gt('App.services.hostMetrics.length', 0),
+
+  nameNodeComponent: Em.computed.findBy('content.hostComponents', 'componentName', 'NAMENODE'),
+
+  hasNameNode: Em.computed.bool('nameNodeComponent'),
+
+  showHostMetricsBlock: Em.computed.or('hasHostMetricsService', 'hasNameNode'),
+
+  nameNodeWidgets: function () {
+    const hasNameNode = this.get('hasNameNode');
+    let widgets = [];
+    if (hasNameNode) {
+      const model = App.HDFSService.find('HDFS'),
+        hostName = this.get('content.hostName'),
+        widgetsDefinitions = require('data/dashboard_widgets').toMapByProperty('viewName');
+      widgets.pushObjects([
+        App.NameNodeHeapPieChartView.extend({
+          model,
+          hostName,
+          widgetHtmlId: 'nn-heap',
+          title: Em.I18n.t('dashboard.widgets.NameNodeHeap'),
+          showActions: false,
+          widget: {
+            threshold: widgetsDefinitions.NameNodeHeapPieChartView.threshold,
+          }
+        }),
+        App.NameNodeCapacityPieChartView.extend({
+          model,
+          hostName,
+          widgetHtmlId: 'nn-capacity',
+          title: Em.I18n.t('dashboard.widgets.HDFSDiskUsage'),
+          showActions: false,
+          widget: {
+            threshold: widgetsDefinitions.NameNodeCapacityPieChartView.threshold
+          }
+        }),
+        App.NameNodeCpuPieChartView.extend({
+          widgetHtmlId: 'nn-cpu',
+          title: Em.I18n.t('dashboard.widgets.NameNodeCpu'),
+          showActions: false,
+          widget: {
+            threshold: widgetsDefinitions.NameNodeCpuPieChartView.threshold
+          },
+          subGroupId: this.get('nameNodeComponent.haNameSpace'),
+          activeNameNodes: [this.get('nameNodeComponent')],
+          nameNode: this.get('nameNodeComponent')
+        }),
+        App.NameNodeRpcView.extend({
+          model,
+          hostName,
+          widgetHtmlId: 'nn-rpc',
+          title: Em.I18n.t('dashboard.widgets.NameNodeRpc'),
+          showActions: false,
+          widget: {
+            threshold: widgetsDefinitions.NameNodeRpcView.threshold
+          }
+        }),
+        App.NameNodeUptimeView.extend({
+          model,
+          hostName,
+          widgetHtmlId: 'nn-uptime',
+          title: Em.I18n.t('dashboard.widgets.NameNodeUptime'),
+          showActions: false,
+          subGroupId: this.get('nameNodeComponent.haNameSpace')
+        })
+      ]);
+    }
+    return widgets;
+  }.property('hasNameNode'),
 
   /**
    * Message for "restart" block
@@ -71,20 +139,7 @@ App.MainHostSummaryView = Em.View.extend(App.TimeRangeMixin, {
     return Em.I18n.t('hosts.host.details.needToRestart').format(this.get('content.componentsWithStaleConfigsCount'), word);
   }.property('content.componentsWithStaleConfigsCount'),
 
-  /**
-   * Reset <code>sortedComponents</code>
-   * Used when some component was deleted from host
-   */
-  redrawComponents: function() {
-    if (App.router.get('mainHostDetailsController.redrawComponents')) {
-      this.set('sortedComponents', []);
-      this.sortedComponentsFormatter();
-      App.router.set('mainHostDetailsController.redrawComponents', false);
-    }
-  }.observes('App.router.mainHostDetailsController.redrawComponents'),
-
   willInsertElement: function() {
-    this.set('sortedComponents', []);
     this.sortedComponentsFormatter();
     this.addObserver('content.hostComponents.length', this, 'sortedComponentsFormatter');
   },
@@ -120,90 +175,27 @@ App.MainHostSummaryView = Em.View.extend(App.TimeRangeMixin, {
 
   /**
    * Update <code>sortedComponents</code>
-   * Master components first, then slaves
+   * Master components first, then slaves and clients
    */
   sortedComponentsFormatter: function() {
-    var updatebleProperties = Em.A(['workStatus', 'passiveState', 'staleConfigs', 'haStatus']);
-    var self = this;
-    var hostComponentViewMap = this.get('hostComponentViewMap');
-    // Remove deleted components
-    this.get('sortedComponents').forEach(function(sortedComponent, index) {
-      if (!self.get('content.hostComponents').findProperty('id', sortedComponent.get('id'))) {
-        self.get('sortedComponents').removeAt(index, 1);
-      }
-    });
+    const updatebleProperties = Em.A(['workStatus', 'passiveState', 'staleConfigs', 'haStatus']);
+    const hostComponentViewMap = this.get('hostComponentViewMap');
+    const masters = [], slaves = [], clients = [];
 
     this.get('content.hostComponents').forEach(function (component) {
-      if (component.get('isMaster') || component.get('isSlave')) {
-        var obj = this.get('sortedComponents').findProperty('id', component.get('id'));
-        if (obj) {
-          // Update existing component
-          updatebleProperties.forEach(function(property) {
-            obj.set(property, component.get(property));
-          });
-        }
-        else {
-          // Add new component
-          component.set('viewClass', hostComponentViewMap[component.get('componentName')] ? hostComponentViewMap[component.get('componentName')] : App.HostComponentView);
-          if (component.get('isMaster')) {
-            // Masters should be before slaves
-            var lastMasterIndex = 0, atLeastOneMasterExists = false;
-            this.get('sortedComponents').forEach(function(sortedComponent, index) {
-              if (sortedComponent.get('isMaster')) {
-                lastMasterIndex = index;
-                atLeastOneMasterExists = true;
-              }
-            });
-            this.get('sortedComponents').insertAt(atLeastOneMasterExists ? lastMasterIndex + 1 : 0, component);
-          }
-          else {
-            // it is slave 100%
-            this.get('sortedComponents').pushObject(component);
-          }
-        }
-      }
-    }, this);
-  },
-
-  /**
-   * List of installed clients
-   * @type {App.HostComponent[]}
-   */
-  clients: function () {
-    var clients = [];
-    this.get('content.hostComponents').forEach(function (component) {
-      if (!component.get('componentName')) {
-        //temporary fix because of different data in hostComponents and serviceComponents
-        return;
-      }
-      if (!component.get('isSlave') && !component.get('isMaster')) {
-        if (clients.length) {
-          clients[clients.length - 1].set('isLast', false);
-        }
+      component.set('viewClass', hostComponentViewMap[component.get('componentName')] ? hostComponentViewMap[component.get('componentName')] : App.HostComponentView);
+      if (component.get('isMaster')) {
+        masters.push(component);
+      } else if (component.get('isSlave')) {
+        slaves.push(component);
+      } else if (component.get('isClient')) {
         component.set('isLast', true);
-        if (['INSTALL_FAILED', 'INIT'].contains(component.get('workStatus'))) {
-          component.set('isInstallFailed', true);
+        component.set('isInstallFailed', ['INSTALL_FAILED', 'INIT'].contains(component.get('workStatus')));
+        clients.pushObject(component);
         }
-        clients.push(component);
-      }
     }, this);
-    return clients;
-  }.property('content.hostComponents.length'),
-
-  anyClientFailedToInstall: Em.computed.someBy('clients', 'isInstallFailed', true),
-
-  /**
-   * Check if some clients not installed or started
-   *
-   * @type {bool}
-   **/
-  areClientsNotInstalled: Em.computed.or('anyClientFailedToInstall', 'installableClientComponents.length'),
-
-  /**
-   * Check if some clients have stale configs
-   * @type {bool}
-   */
-  areClientWithStaleConfigs: Em.computed.someBy('clients', 'staleConfigs', true),
+    this.set('sortedComponents', masters.concat(slaves, clients));
+  },
 
   /**
    * Template for addable component
@@ -211,11 +203,7 @@ App.MainHostSummaryView = Em.View.extend(App.TimeRangeMixin, {
    */
   addableComponentObject: Em.Object.extend({
     componentName: '',
-    subComponentNames: null,
     displayName: function () {
-      if (this.get('componentName') === 'CLIENTS') {
-        return this.t('common.clients');
-      }
       return App.format.role(this.get('componentName'), false);
     }.property('componentName')
   }),
@@ -231,26 +219,6 @@ App.MainHostSummaryView = Em.View.extend(App.TimeRangeMixin, {
    * @type {bool}
    */
   addComponentDisabled: Em.computed.or('!isAddComponent', '!addableComponents.length'),
-
-  /**
-   * List of client's that may be installed to the current host
-   * @type {String[]}
-   */
-  installableClientComponents: function() {
-    var clientComponents = App.StackServiceComponent.find().filterProperty('isClient');
-    var installedServices = this.get('installedServices');
-    var installedClients = this.get('clients').mapProperty('componentName');
-    return clientComponents.filter(function(component) {
-      // service for current client is installed but client isn't installed on current host
-      return installedServices.contains(component.get('serviceName')) && !installedClients.contains(component.get('componentName'));
-    });
-  }.property('content.hostComponents.length', 'installedServices.length'),
-
-  notInstalledClientComponents: function () {
-    return this.get('clients').filter(function(component) {
-      return ['INIT', 'INSTALL_FAILED'].contains(component.get('workStatus'));
-    }).concat(this.get('installableClientComponents'));
-  }.property('installableClientComponents.length', 'clients.length'),
 
   /**
    * List of components that may be added to the current host
@@ -297,9 +265,13 @@ App.MainHostSummaryView = Em.View.extend(App.TimeRangeMixin, {
    * @type {String}
    */
   timeSinceHeartBeat: function () {
-    var d = this.get('content.rawLastHeartBeatTime');
-    return d ? $.timeago(d) : '';
-  }.property('content.rawLastHeartBeatTime'),
+    if (this.get('content.isNotHeartBeating')) {
+      const d = this.get('content.lastHeartBeatTime');
+      return d ? $.timeago(d) : '';
+    }
+    //when host hasn't lost heartbeat we assume that last heartbeat was a minute ago
+    return Em.I18n.t('common.minute.ago');
+  }.property('content.lastHeartBeatTime', 'content.isNotHeartBeating'),
 
   /**
    * Get clients with custom commands
@@ -335,9 +307,16 @@ App.MainHostSummaryView = Em.View.extend(App.TimeRangeMixin, {
   }.property('controller'),
 
   /**
-   * Call installClients method from controller for not installed components
+   * Call installClients method from controller for not installed client components
    */
   installClients: function () {
     this.get('controller').installClients(this.get('notInstalledClientComponents'));
+  },
+
+  /**
+   * Call installClients method from controller for not install failed client components
+   */
+  reinstallClients: function () {
+    this.get('controller').installClients(this.get('installFailedClients'));
   }
 });

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,7 +17,6 @@
  */
 package org.apache.ambari.server.orm.dao;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -35,7 +34,6 @@ import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
 import com.google.inject.persist.Transactional;
-import org.apache.ambari.server.security.authorization.UserType;
 
 @Singleton
 public class UserDAO {
@@ -56,49 +54,9 @@ public class UserDAO {
     return daoUtils.selectList(query);
   }
 
-  /**
-   * Results in Exception if two users with same name but different types present in DB
-   * As such situation is valid, use {@link #findUserByNameAndType(String, UserType)} instead
-   */
   @RequiresSession
-  @Deprecated
   public UserEntity findUserByName(String userName) {
     TypedQuery<UserEntity> query = entityManagerProvider.get().createNamedQuery("userByName", UserEntity.class);
-    query.setParameter("username", userName.toLowerCase());
-    try {
-      return query.getSingleResult();
-    } catch (NoResultException e) {
-      return null;
-    }
-  }
-
-  @RequiresSession
-  public UserEntity findUserByNameAndType(String userName, UserType userType) {
-    TypedQuery<UserEntity> query = entityManagerProvider.get().createQuery("SELECT user FROM UserEntity user WHERE " +
-        "user.userType=:type AND user.userName=:name", UserEntity.class);
-    query.setParameter("type", userType);
-    query.setParameter("name", userName);
-    try {
-      return query.getSingleResult();
-    } catch (NoResultException e) {
-      return null;
-    }
-  }
-
-  @RequiresSession
-  public UserEntity findLocalUserByName(String userName) {
-    TypedQuery<UserEntity> query = entityManagerProvider.get().createNamedQuery("localUserByName", UserEntity.class);
-    query.setParameter("username", userName.toLowerCase());
-    try {
-      return query.getSingleResult();
-    } catch (NoResultException e) {
-      return null;
-    }
-  }
-
-  @RequiresSession
-  public UserEntity findLdapUserByName(String userName) {
-    TypedQuery<UserEntity> query = entityManagerProvider.get().createNamedQuery("ldapUserByName", UserEntity.class);
     query.setParameter("username", userName.toLowerCase());
     try {
       return query.getSingleResult();
@@ -110,8 +68,7 @@ public class UserDAO {
   /**
    * Find the user entities for the given list of admin principal entities.
    *
-   * @param principalList  the list of principal entities
-   *
+   * @param principalList the list of principal entities
    * @return the matching list of user entities
    */
   @RequiresSession
@@ -128,7 +85,6 @@ public class UserDAO {
    * Find the user entity for the given admin principal entity.
    *
    * @param principal the principal entity
-   *
    * @return the matching user entity
    */
   @RequiresSession
@@ -144,27 +100,24 @@ public class UserDAO {
 
   @Transactional
   public void create(UserEntity user) {
-    create(new HashSet<UserEntity>(Arrays.asList(user)));
+    create(new HashSet<>(Collections.singleton(user)));
   }
 
   @Transactional
   public void create(Set<UserEntity> users) {
-    for (UserEntity user: users) {
-//      user.setUserName(user.getUserName().toLowerCase());
+    for (UserEntity user : users) {
       entityManagerProvider.get().persist(user);
     }
   }
 
   @Transactional
   public UserEntity merge(UserEntity user) {
-//    user.setUserName(user.getUserName().toLowerCase());
     return entityManagerProvider.get().merge(user);
   }
 
   @Transactional
   public void merge(Set<UserEntity> users) {
-    for (UserEntity user: users) {
-//      user.setUserName(user.getUserName().toLowerCase());
+    for (UserEntity user : users) {
       entityManagerProvider.get().merge(user);
     }
   }
@@ -177,7 +130,7 @@ public class UserDAO {
 
   @Transactional
   public void remove(Set<UserEntity> users) {
-    for (UserEntity userEntity: users) {
+    for (UserEntity userEntity : users) {
       entityManagerProvider.get().remove(entityManagerProvider.get().merge(userEntity));
     }
   }

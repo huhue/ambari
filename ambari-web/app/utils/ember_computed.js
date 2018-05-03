@@ -291,6 +291,36 @@ computed.ifThenElse = function (dependentKey, trueValue, falseValue) {
 };
 
 /**
+ * A computed property that returns value for trueKey property if dependent value is true and falseKey-value otherwise
+ * App.*-keys are supported
+ * <pre>
+ * var o = Em.Object.create({
+ *  p1: true,
+ *  p2: 1,
+ *  p3: 2,
+ *  p4: Em.computed.ifThenElseByKeys('p1', 'p2', 'p3')
+ * });
+ * console.log(o.get('p4')); // 1
+ * o.set('p1', false);
+ * console.log(o.get('p4')); // 2
+ *
+ * o.set('p3', 3);
+ * console.log(o.get('p4')); // 3
+ * </pre>
+ *
+ * @method ifThenElseByKeys
+ * @param {string} dependentKey
+ * @param {string} trueKey
+ * @param {string} falseKey
+ * @returns {Ember.ComputedProperty}
+ */
+computed.ifThenElseByKeys = function (dependentKey, trueKey, falseKey) {
+  return computed(dependentKey, trueKey, falseKey, function () {
+    return smartGet(this, dependentKey) ? smartGet(this, trueKey) : smartGet(this, falseKey);
+  });
+};
+
+/**
  * A computed property that is equal to the logical 'and'
  * Takes any number of arguments
  * Returns true if all of them are truly, false - otherwise
@@ -652,6 +682,37 @@ computed.someBy = function (collectionKey, propertyName, neededValue) {
 };
 
 /**
+ * A computed property that returns true of some collection's item has property with needed value
+ * Needed value is stored in the another property
+ * <pre>
+ * var o = Em.Object.create({
+ *  p1: [{a: 1}, {a: 2}, {a: 3}],
+ *  p2: Em.computed.someByKey('p1', 'a', 'v1'),
+ *  v1: 1
+ * });
+ * console.log(o.get('p2')); // true
+ * o.set('p1.0.a', 2);
+ * console.log(o.get('p2')); // false
+ * </pre>
+ *
+ * @method someByKey
+ * @param {string} collectionKey
+ * @param {string} propertyName
+ * @param {string} neededValueKey
+ * @returns {Ember.ComputedProperty}
+ */
+computed.someByKey = function (collectionKey, propertyName, neededValueKey) {
+  return computed(collectionKey + '.@each.' + propertyName, neededValueKey, function () {
+    var collection = smartGet(this, collectionKey);
+    if (!collection) {
+      return false;
+    }
+    var neededValue = smartGet(this, neededValueKey);
+    return collection.someProperty(propertyName, neededValue);
+  });
+};
+
+/**
  * A computed property that returns true of all collection's items have property with needed value
  * <pre>
  * var o = Em.Object.create({
@@ -675,6 +736,37 @@ computed.everyBy = function (collectionKey, propertyName, neededValue) {
     if (!collection) {
       return false;
     }
+    return collection.everyProperty(propertyName, neededValue);
+  });
+};
+
+/**
+ * A computed property that returns true of all collection's items have property with needed value
+ * Needed value is stored in the another property
+ * <pre>
+ * var o = Em.Object.create({
+ *  p1: [{a: 1}, {a: 1}, {a: 1}],
+ *  p2: Em.computed.everyByKey('p1', 'a', 'v1'),
+ *  v1: 1
+ * });
+ * console.log(o.get('p2')); // true
+ * o.set('p1.0.a', 2);
+ * console.log(o.get('p2')); // false
+ * </pre>
+ *
+ * @method everyByKey
+ * @param {string} collectionKey
+ * @param {string} propertyName
+ * @param {string} neededValueKey
+ * @returns {Ember.ComputedProperty}
+ */
+computed.everyByKey = function (collectionKey, propertyName, neededValueKey) {
+  return computed(collectionKey + '.@each.' + propertyName, neededValueKey, function () {
+    var collection = smartGet(this, collectionKey);
+    if (!collection) {
+      return false;
+    }
+    var neededValue = smartGet(this, neededValueKey);
     return collection.everyProperty(propertyName, neededValue);
   });
 };
@@ -735,6 +827,38 @@ computed.filterBy = function (collectionKey, propertyName, neededValue) {
 };
 
 /**
+ * A computed property that returns array with collection's items that have needed property value
+ * Needed value is stored in the another property
+ *
+ * <pre>
+ * var o = Em.Object.create({
+ *  p1: [{a: 1}, {a: 2}, {a: 3}],
+ *  p2: Em.computed.filterByKey('p1', 'a', 'v1'),
+ *  v1: 2
+ * });
+ * console.log(o.get('p2')); // [{a: 2}]
+ * o.set('p1.0.a', 2);
+ * console.log(o.get('p2')); // [{a: 2}, {a: 2}]
+ * </pre>
+ *
+ * @method filterByKey
+ * @param {string} collectionKey
+ * @param {string} propertyName
+ * @param {string} neededValueKey
+ * @returns {Ember.ComputedProperty}
+ */
+computed.filterByKey = function (collectionKey, propertyName, neededValueKey) {
+  return computed(collectionKey + '.@each.' + propertyName, neededValueKey, function () {
+    var collection = smartGet(this, collectionKey);
+    if (!collection) {
+      return [];
+    }
+    var neededValue = smartGet(this, neededValueKey);
+    return collection.filterProperty(propertyName, neededValue);
+  });
+};
+
+/**
  * A computed property that returns first collection's item that has needed property value
  * <pre>
  * var o = Em.Object.create({
@@ -758,6 +882,37 @@ computed.findBy = function (collectionKey, propertyName, neededValue) {
     if (!collection) {
       return null;
     }
+    return collection.findProperty(propertyName, neededValue);
+  });
+};
+
+/**
+ * A computed property that returns first collection's item that has needed property value
+ * Needed value is stored in the another property
+ * <pre>
+ * var o = Em.Object.create({
+ *  p1: [{a: 1, b: 1}, {a: 2, b: 2}, {a: 3, b: 3}],
+ *  p2: Em.computed.findByKey('p1', 'a', 'v1'),
+ *  v1: 2
+ * });
+ * console.log(o.get('p2')); // [{a: 2, b: 2}]
+ * o.set('p1.0.a', 2);
+ * console.log(o.get('p2')); // [{a: 2, b: 1}]
+ * </pre>
+ *
+ * @method findByKey
+ * @param {string} collectionKey
+ * @param {string} propertyName
+ * @param {string} neededValueKey
+ * @returns {Ember.ComputedProperty}
+ */
+computed.findByKey = function (collectionKey, propertyName, neededValueKey) {
+  return computed(collectionKey + '.@each.' + propertyName, neededValueKey, function () {
+    var collection = smartGet(this, collectionKey);
+    if (!collection) {
+      return null;
+    }
+    var neededValue = smartGet(this, neededValueKey);
     return collection.findProperty(propertyName, neededValue);
   });
 };
@@ -811,6 +966,32 @@ computed.existsIn = function (dependentKey, neededValues) {
 };
 
 /**
+ * A computed property that returns true if dependent property exists in the property with needed values
+ * <pre>
+ * var o = Em.Object.create({
+ *  p1: 2,
+ *  p2: Em.computed.existsInByKey('p1', 'p3'),
+ *  p3: [1, 2, 3]
+ * });
+ * console.log(o.get('p2')); // true
+ * o.set('p1', 4);
+ * console.log(o.get('p2')); // false
+ * </pre>
+ *
+ * @method existsIn
+ * @param {string} dependentKey
+ * @param {string} neededValuesKey
+ * @returns {Ember.ComputedProperty}
+ */
+computed.existsInByKey = function (dependentKey, neededValuesKey) {
+  return computed(dependentKey, `${neededValuesKey}.[]`, function () {
+    var value = smartGet(this, dependentKey);
+    var neededValues = smartGet(this, neededValuesKey);
+    return makeArray(neededValues).contains(value);
+  });
+};
+
+/**
  * A computed property that returns true if dependent property doesn't exist in the needed values
  * <pre>
  * var o = Em.Object.create({
@@ -830,6 +1011,32 @@ computed.existsIn = function (dependentKey, neededValues) {
 computed.notExistsIn = function (dependentKey, neededValues) {
   return computed(dependentKey, function () {
     var value = smartGet(this, dependentKey);
+    return !makeArray(neededValues).contains(value);
+  });
+};
+
+/**
+ * A computed property that returns true if dependent property doesn't exist in the property with needed values
+ * <pre>
+ * var o = Em.Object.create({
+ *  p1: 2,
+ *  p2: Em.computed.notExistsInByKey('p1', 'p3'),
+ *  p3: [1, 2, 3]
+ * });
+ * console.log(o.get('p2')); // false
+ * o.set('p1', 4);
+ * console.log(o.get('p2')); // true
+ * </pre>
+ *
+ * @method notExistsInByKey
+ * @param {string} dependentKey
+ * @param {string} neededValuesKey
+ * @returns {Ember.ComputedProperty}
+ */
+computed.notExistsInByKey = function (dependentKey, neededValuesKey) {
+  return computed(dependentKey, `${neededValuesKey}.[]`, function () {
+    var value = smartGet(this, dependentKey);
+    var neededValues = smartGet(this, neededValuesKey);
     return !makeArray(neededValues).contains(value);
   });
 };

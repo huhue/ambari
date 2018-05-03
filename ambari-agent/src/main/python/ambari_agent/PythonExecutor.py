@@ -20,13 +20,14 @@ limitations under the License.
 import ambari_simplejson as json
 import logging
 import os
-import subprocess
+from ambari_commons import subprocess32
 import pprint
 import threading
 import platform
 from threading import Thread
 import time
 from BackgroundCommandExecutionHandle import BackgroundCommandExecutionHandle
+from resource_management.libraries.functions.log_process_information import log_process_information
 from ambari_commons.os_check import OSConst, OSCheck
 from Grep import Grep
 import sys
@@ -53,7 +54,7 @@ class PythonExecutor(object):
     pass
 
 
-  def open_subprocess_files(self, tmpoutfile, tmperrfile, override_output_files, backup_log_files = True):
+  def open_subprocess32_files(self, tmpoutfile, tmperrfile, override_output_files, backup_log_files = True):
     if override_output_files: # Recreate files, existing files are backed up if backup_log_files is True
       if backup_log_files:
         self.back_up_log_file_if_exists(tmpoutfile)
@@ -82,8 +83,8 @@ class PythonExecutor(object):
                override_output_files = True, backup_log_files = True, handle = None,
                log_info_on_failure = True):
     """
-    Executes the specified python file in a separate subprocess.
-    Method returns only when the subprocess is finished.
+    Executes the specified python file in a separate subprocess32.
+    Method returns only when the subprocess32 is finished.
     Params arg is a list of script parameters
     Timeout meaning: how many seconds should pass before script execution
     is forcibly terminated
@@ -91,14 +92,14 @@ class PythonExecutor(object):
     recreated or appended.
     The structured out file, however, is preserved during multiple invocations that use the same file.
     """
-
     pythonCommand = self.python_command(script, script_params)
-    logger.debug("Running command " + pprint.pformat(pythonCommand))
-    
-    if handle is None:
-      tmpout, tmperr = self.open_subprocess_files(tmpoutfile, tmperrfile, override_output_files, backup_log_files)
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug("Running command %s", pprint.pformat(pythonCommand))
 
-      process = self.launch_python_subprocess(pythonCommand, tmpout, tmperr)
+    if handle is None:
+      tmpout, tmperr = self.open_subprocess32_files(tmpoutfile, tmperrfile, override_output_files, backup_log_files)
+
+      process = self.launch_python_subprocess32(pythonCommand, tmpout, tmperr)
       # map task_id to pid
       callback(task_id, process.pid)
       logger.debug("Launching watchdog thread")
@@ -111,10 +112,10 @@ class PythonExecutor(object):
       self.event.set()
       thread.join()
       result = self.prepare_process_result(process.returncode, tmpoutfile, tmperrfile, tmpstructedoutfile, timeout=timeout)
-      
+
       if log_info_on_failure and result['exitcode']:
         self.on_failure(pythonCommand, result)
-      
+
       return result
     else:
       holder = Holder(pythonCommand, tmpoutfile, tmperrfile, tmpstructedoutfile, handle)
@@ -122,23 +123,15 @@ class PythonExecutor(object):
       background = BackgroundThread(holder, self)
       background.start()
       return {"exitcode": 777}
-    
+
   def on_failure(self, pythonCommand, result):
     """
     Log some useful information after task failure.
     """
-    logger.info("Command " + pprint.pformat(pythonCommand) + " failed with exitcode=" + str(result['exitcode']))
-    if OSCheck.is_windows_family():
-      cmd_list = ["WMIC path win32_process get Caption,Processid,Commandline", "netstat -an"]
-    else:
-      cmd_list = ["ps faux", "netstat -tulpn"]
+    pass
+    #logger.info("Command %s failed with exitcode=%s", pprint.pformat(pythonCommand), result['exitcode'])
+    #log_process_information(logger)
 
-    shell_runner = shellRunner()
-    
-    for cmd in cmd_list:
-      ret = shell_runner.run(cmd)
-      logger.info("Command '{0}' returned {1}. {2}{3}".format(cmd, ret["exitCode"], ret["error"], ret["output"]))
-    
   def prepare_process_result(self, returncode, tmpoutfile, tmperrfile, tmpstructedoutfile, timeout=None):
     out, error, structured_out = self.read_result_from_files(tmpoutfile, tmperrfile, tmpstructedoutfile)
 
@@ -147,7 +140,7 @@ class PythonExecutor(object):
               (" after waiting %s secs" % str(timeout) if timeout else "")
       returncode = 999
     result = self.condenseOutput(out, error, returncode, structured_out)
-    logger.debug("Result: %s" % result)
+    logger.debug("Result: %s", result)
     return result
 
   def read_result_from_files(self, out_path, err_path, structured_out_path):
@@ -166,13 +159,13 @@ class PythonExecutor(object):
       else:
         structured_out = {}
     return out, error, structured_out
-  
+
   def preexec_fn(self):
     os.setpgid(0, 0)
 
-  def launch_python_subprocess(self, command, tmpout, tmperr):
+  def launch_python_subprocess32(self, command, tmpout, tmperr):
     """
-    Creates subprocess with given parameters. This functionality was moved to separate method
+    Creates subprocess32 with given parameters. This functionality was moved to separate method
     to make possible unit testing
     """
     close_fds = None if OSCheck.get_os_family() == OSConst.WINSRV_FAMILY else True
@@ -182,7 +175,7 @@ class PythonExecutor(object):
       for k, v in command_env.iteritems():
         command_env[k] = str(v)
 
-    return subprocess.Popen(command,
+    return subprocess32.Popen(command,
       stdout=tmpout,
       stderr=tmperr, close_fds=close_fds, env=command_env, preexec_fn=self.preexec_fn)
 
@@ -197,20 +190,20 @@ class PythonExecutor(object):
 
   def condenseOutput(self, stdout, stderr, retcode, structured_out):
     log_lines_count = self.config.get('heartbeat', 'log_lines_count')
-    
+
     result = {
       "exitcode": retcode,
       "stdout": self.grep.tail(stdout, log_lines_count) if log_lines_count else stdout,
       "stderr": self.grep.tail(stderr, log_lines_count) if log_lines_count else stderr,
       "structuredOut" : structured_out
     }
-    
+
     return result
 
   def python_watchdog_func(self, python, timeout):
     self.event.wait(timeout)
     if python.returncode is None:
-      logger.error("Subprocess timed out and will be killed")
+      logger.error("subprocess32 timed out and will be killed")
       shell.kill_process_with_children(python.pid)
       self.python_process_has_been_killed = True
     pass
@@ -230,12 +223,12 @@ class BackgroundThread(threading.Thread):
     self.pythonExecutor = pythonExecutor
 
   def run(self):
-    process_out, process_err = self.pythonExecutor.open_subprocess_files(self.holder.out_file, self.holder.err_file, True)
+    process_out, process_err = self.pythonExecutor.open_subprocess32_files(self.holder.out_file, self.holder.err_file, True)
 
-    logger.debug("Starting process command %s" % self.holder.command)
-    process = self.pythonExecutor.launch_python_subprocess(self.holder.command, process_out, process_err)
+    logger.debug("Starting process command %s", self.holder.command)
+    process = self.pythonExecutor.launch_python_subprocess32(self.holder.command, process_out, process_err)
 
-    logger.debug("Process has been started. Pid = %s" % process.pid)
+    logger.debug("Process has been started. Pid = %s", process.pid)
 
     self.holder.handle.pid = process.pid
     self.holder.handle.status = BackgroundCommandExecutionHandle.RUNNING_STATUS
@@ -245,6 +238,6 @@ class BackgroundThread(threading.Thread):
 
     self.holder.handle.exitCode = process.returncode
     process_condensed_result = self.pythonExecutor.prepare_process_result(process.returncode, self.holder.out_file, self.holder.err_file, self.holder.structured_out_file)
-    logger.debug("Calling callback with args %s" % process_condensed_result)
+    logger.debug("Calling callback with args %s", process_condensed_result)
     self.holder.handle.on_background_command_complete_callback(process_condensed_result, self.holder.handle)
-    logger.debug("Exiting from thread for holder pid %s" % self.holder.handle.pid)
+    logger.debug("Exiting from thread for holder pid %s", self.holder.handle.pid)

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,16 +19,21 @@ package org.apache.ambari.server.state.alerts;
 
 import java.util.List;
 
+import javax.persistence.EntityManager;
+
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.events.AlertReceivedEvent;
 import org.apache.ambari.server.events.InitialAlertEvent;
 import org.apache.ambari.server.events.MockEventListener;
 import org.apache.ambari.server.events.publishers.AlertEventPublisher;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
+import org.apache.ambari.server.orm.OrmTestHelper;
 import org.apache.ambari.server.orm.dao.AlertDefinitionDAO;
 import org.apache.ambari.server.orm.dao.AlertsDAO;
 import org.apache.ambari.server.orm.entities.AlertCurrentEntity;
 import org.apache.ambari.server.orm.entities.AlertDefinitionEntity;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
 import org.apache.ambari.server.state.Alert;
 import org.apache.ambari.server.state.AlertFirmness;
 import org.apache.ambari.server.state.AlertState;
@@ -41,13 +46,13 @@ import org.apache.ambari.server.utils.EventBusSynchronizer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import com.google.common.eventbus.EventBus;
 import com.google.inject.Binder;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Module;
-import com.google.inject.persist.PersistService;
 import com.google.inject.util.Modules;
 
 import junit.framework.Assert;
@@ -55,6 +60,7 @@ import junit.framework.Assert;
 /**
  * Tests that {@link InitialAlertEventTest} instances are fired correctly.
  */
+@Category({ category.AlertTest.class })
 public class InitialAlertEventTest {
 
   private AlertsDAO m_alertsDao;
@@ -67,6 +73,13 @@ public class InitialAlertEventTest {
   private Cluster m_cluster;
   private String m_clusterName;
   private ServiceFactory m_serviceFactory;
+
+  private OrmTestHelper m_helper;
+
+  private final String STACK_VERSION = "2.0.6";
+  private final String REPO_VERSION = "2.0.6-1234";
+  private final StackId STACK_ID = new StackId("HDP", STACK_VERSION);
+  private RepositoryVersionEntity m_repositoryVersion;
 
   /**
    *
@@ -93,9 +106,12 @@ public class InitialAlertEventTest {
     m_serviceFactory = m_injector.getInstance(ServiceFactory.class);
 
     m_alertsDao = m_injector.getInstance(AlertsDAO.class);
+    m_helper = m_injector.getInstance(OrmTestHelper.class);
+
+    m_repositoryVersion = m_helper.getOrCreateRepositoryVersion(STACK_ID, REPO_VERSION);
 
     m_clusterName = "c1";
-    m_clusters.addCluster(m_clusterName, new StackId("HDP", "2.0.6"));
+    m_clusters.addCluster(m_clusterName, STACK_ID);
     m_cluster = m_clusters.getCluster(m_clusterName);
     Assert.assertNotNull(m_cluster);
 
@@ -110,7 +126,7 @@ public class InitialAlertEventTest {
    */
   @After
   public void teardown() throws Exception {
-    m_injector.getInstance(PersistService.class).stop();
+    H2DatabaseCleaner.clearDatabase(m_injector.getProvider(EntityManager.class).get());
     m_injector = null;
   }
 
@@ -136,7 +152,7 @@ public class InitialAlertEventTest {
         definition.getServiceName(), definition.getComponentName(), null,
         AlertState.CRITICAL);
 
-    alert.setCluster(m_clusterName);
+    alert.setClusterId(m_cluster.getClusterId());
 
     AlertReceivedEvent event = new AlertReceivedEvent(m_cluster.getClusterId(), alert);
 
@@ -169,13 +185,9 @@ public class InitialAlertEventTest {
         m_listener.getAlertEventReceivedCount(InitialAlertEvent.class));
   }
 
-  /**
-   * Calls {@link Service#persist()} to mock a service install.
-   */
   private void installHdfsService() throws Exception {
     String serviceName = "HDFS";
-    Service service = m_serviceFactory.createNew(m_cluster, serviceName);
-    service.persist();
+    Service service = m_serviceFactory.createNew(m_cluster, serviceName, m_repositoryVersion);
     service = m_cluster.getService(serviceName);
 
     Assert.assertNotNull(service);

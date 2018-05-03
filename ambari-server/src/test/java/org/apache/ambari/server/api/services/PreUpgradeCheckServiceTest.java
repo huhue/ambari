@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -38,7 +38,7 @@ public class PreUpgradeCheckServiceTest extends BaseServiceTest {
 
   @Override
   public List<ServiceTestInvocation> getTestInvocations() throws Exception {
-    List<ServiceTestInvocation> listInvocations = new ArrayList<ServiceTestInvocation>();
+    List<ServiceTestInvocation> listInvocations = new ArrayList<>();
 
     PreUpgradeCheckService service;
     Method m;
@@ -46,9 +46,9 @@ public class PreUpgradeCheckServiceTest extends BaseServiceTest {
 
     //getPreUpgradeChecks
     service = new TestPreUpgradeCheckService("cluster");
-    m = service.getClass().getMethod("getPreUpgradeChecks", String.class, HttpHeaders.class, UriInfo.class);
-    args = new Object[] {"body", getHttpHeaders(), getUriInfo()};
-    listInvocations.add(new ServiceTestInvocation(Request.Type.GET, service, m, args, "body"));
+    m = service.getClass().getMethod("getPreUpgradeChecks", HttpHeaders.class, UriInfo.class);
+    args = new Object[] { getHttpHeaders(), getUriInfo() };
+    listInvocations.add(new ServiceTestInvocation(Request.Type.GET, service, m, args, null));
 
     return listInvocations;
   }

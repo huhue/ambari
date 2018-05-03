@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,12 +18,12 @@
 
 package org.apache.ambari.server.state.configgroup;
 
+import java.util.Map;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.controller.ConfigGroupResponse;
 import org.apache.ambari.server.state.Config;
 import org.apache.ambari.server.state.Host;
-
-import java.util.Map;
 
 /**
  * Configuration group or Config group is a type of Ambari resource that
@@ -35,92 +35,76 @@ public interface ConfigGroup {
    * Primary key of config group
    * @return
    */
-  public Long getId();
+  Long getId();
 
   /**
    * Unique config group name
    * @return
    */
-  public String getName();
+  String getName();
 
   /**
    * Update Group name
    * @param name
    */
-  public void setName(String name);
+  void setName(String name);
 
   /**
    * Cluster name to which config group belongs
    * @return
    */
-  public String getClusterName();
+  String getClusterName();
 
   /**
    * Tag which associates config group to service
    * @return
    */
-  public String getTag();
+  String getTag();
 
   /**
    * Update tag
    * @param tag
    */
-  public void setTag(String tag);
+  void setTag(String tag);
 
   /**
    * Config group description
    * @return
    */
-  public String getDescription();
+  String getDescription();
 
   /**
    * Update description
    * @param description
    */
-  public void setDescription(String description);
+  void setDescription(String description);
 
   /**
-   * List of hosts to which configs are applied
+   * Gets an unmodifiable list of {@link Host}s.
+   *
    * @return
    */
-  public Map<Long, Host> getHosts();
+  Map<Long, Host> getHosts();
 
   /**
-   * List of @Config objects
+   * Gets an unmodifiable map of {@link Config}s.
+   *
    * @return
    */
-  public Map<String, Config> getConfigurations();
-
-  /**
-   * Persist the Config group along with the related host and config mapping
-   * entities to the persistence store
-   */
-  void persist();
-
-  /**
-   * Persist the host mapping entity to the persistence store
-   */
-  void persistHostMapping();
+  Map<String, Config> getConfigurations();
 
   /**
    * Delete config group and the related host and config mapping
    * entities from the persistence store
    */
-  public void delete();
+  void delete();
 
   /**
    * Add host to Config group
    * @param host
    * @throws AmbariException
    */
-  public void addHost(Host host) throws AmbariException;
-
-  /**
-   * Add config to the config group
-   * @param config
-   * @throws AmbariException
-   */
-  public void addConfiguration(Config config) throws AmbariException;
+  void addHost(Host host) throws AmbariException;
 
   /**
    * Return @ConfigGroupResponse for the config group
@@ -128,29 +112,24 @@ public interface ConfigGroup {
    * @return @ConfigGroupResponse
    * @throws AmbariException
    */
-  public ConfigGroupResponse convertToResponse() throws AmbariException;
-
-  /**
-   * Refresh Config group and the host and config mappings for the group
-   */
-  public void refresh();
+  ConfigGroupResponse convertToResponse() throws AmbariException;
 
   /**
    * Reassign the set of hosts associated with this config group
    * @param hosts
    */
-  public void setHosts(Map<Long, Host> hosts);
+  void setHosts(Map<Long, Host> hosts);
 
   /**
    * Reassign the set of configs associated with this config group
    * @param configs
    */
-  public void setConfigurations(Map<String, Config> configs);
+  void setConfigurations(Map<String, Config> configs) throws AmbariException;
 
   /**
    * Remove host mapping
    */
-  public void removeHost(Long hostId) throws AmbariException;
+  void removeHost(Long hostId) throws AmbariException;
 
   /**
    * Name of service which config group is wired to

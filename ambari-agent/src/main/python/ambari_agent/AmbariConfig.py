@@ -23,13 +23,16 @@ import ConfigParser
 import StringIO
 import hostname
 import ambari_simplejson as json
-from NetUtil import NetUtil
 import os
 
-from ambari_commons import OSConst
+from ambari_agent.FileCache import FileCache
 from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
+
 logger = logging.getLogger(__name__)
 
+"""
+The below config is necessary only for unit tests.
+"""
 content = """
 
 [server]
@@ -44,14 +47,19 @@ data_cleanup_interval=86400
 data_cleanup_max_age=2592000
 data_cleanup_max_size_MB = 100
 ping_port=8670
-cache_dir={ps}var{ps}lib{ps}ambari-agent{ps}cache
+cache_dir={ps}tmp
 parallel_execution=0
 system_resource_overrides={ps}etc{ps}resource_overrides
+tolerate_download_failures=false
 
 [services]
 
 [python]
 custom_actions_dir = {ps}var{ps}lib{ps}ambari-agent{ps}resources{ps}custom_actions
+
+
+[network]
+use_system_proxy_settings=true
 
 [security]
 keysdir={ps}tmp{ps}ambari-agent
@@ -59,90 +67,17 @@ server_crt=ca.crt
 passphrase_env_var_name=AMBARI_PASSPHRASE
 
 [heartbeat]
-state_interval = 6
+state_interval = 1
 dirs={ps}etc{ps}hadoop,{ps}etc{ps}hadoop{ps}conf,{ps}var{ps}run{ps}hadoop,{ps}var{ps}log{ps}hadoop
 log_lines_count=300
+iddle_interval_min=1
+iddle_interval_max=10
+
 
 [logging]
 log_command_executes = 0
 
 """.format(ps=os.sep)
-
-
-servicesToPidNames = {
-  'GLUSTERFS' : 'glusterd.pid$',
-  'NAMENODE': 'hadoop-{USER}-namenode.pid$',
-  'SECONDARY_NAMENODE': 'hadoop-{USER}-secondarynamenode.pid$',
-  'DATANODE': 'hadoop-{USER}-datanode.pid$',
-  'JOBTRACKER': 'hadoop-{USER}-jobtracker.pid$',
-  'TASKTRACKER': 'hadoop-{USER}-tasktracker.pid$',
-  'RESOURCEMANAGER': 'yarn-{USER}-resourcemanager.pid$',
-  'NODEMANAGER': 'yarn-{USER}-nodemanager.pid$',
-  'HISTORYSERVER': 'mapred-{USER}-historyserver.pid$',
-  'JOURNALNODE': 'hadoop-{USER}-journalnode.pid$',
-  'ZKFC': 'hadoop-{USER}-zkfc.pid$',
-  'OOZIE_SERVER': 'oozie.pid',
-  'ZOOKEEPER_SERVER': 'zookeeper_server.pid',
-  'FLUME_SERVER': 'flume-node.pid',
-  'TEMPLETON_SERVER': 'templeton.pid',
-  'GANGLIA_SERVER': 'gmetad.pid',
-  'GANGLIA_MONITOR': 'gmond.pid',
-  'HBASE_MASTER': 'hbase-{USER}-master.pid',
-  'HBASE_REGIONSERVER': 'hbase-{USER}-regionserver.pid',
-  'HCATALOG_SERVER': 'webhcat.pid',
-  'KERBEROS_SERVER': 'kadmind.pid',
-  'HIVE_SERVER': 'hive-server.pid',
-  'HIVE_METASTORE': 'hive.pid',
-  'HIVE_SERVER_INTERACTIVE' : 'hive-interactive.pid',
-  'MYSQL_SERVER': 'mysqld.pid',
-  'HUE_SERVER': '/var/run/hue/supervisor.pid',
-  'WEBHCAT_SERVER': 'webhcat.pid',
-}
-
-#Each service, which's pid depends on user should provide user mapping
-servicesToLinuxUser = {
-  'NAMENODE': 'hdfs_user',
-  'SECONDARY_NAMENODE': 'hdfs_user',
-  'DATANODE': 'hdfs_user',
-  'JOURNALNODE': 'hdfs_user',
-  'ZKFC': 'hdfs_user',
-  'JOBTRACKER': 'mapred_user',
-  'TASKTRACKER': 'mapred_user',
-  'RESOURCEMANAGER': 'yarn_user',
-  'NODEMANAGER': 'yarn_user',
-  'HISTORYSERVER': 'mapred_user',
-  'HBASE_MASTER': 'hbase_user',
-  'HBASE_REGIONSERVER': 'hbase_user',
-}
-
-pidPathVars = [
-  {'var' : 'glusterfs_pid_dir_prefix',
-   'defaultValue' : '/var/run'},
-  {'var' : 'hadoop_pid_dir_prefix',
-   'defaultValue' : '/var/run/hadoop'},
-  {'var' : 'hadoop_pid_dir_prefix',
-   'defaultValue' : '/var/run/hadoop'},
-  {'var' : 'ganglia_runtime_dir',
-   'defaultValue' : '/var/run/ganglia/hdp'},
-  {'var' : 'hbase_pid_dir',
-   'defaultValue' : '/var/run/hbase'},
-  {'var' : 'zk_pid_dir',
-   'defaultValue' : '/var/run/zookeeper'},
-  {'var' : 'oozie_pid_dir',
-   'defaultValue' : '/var/run/oozie'},
-  {'var' : 'hcat_pid_dir',
-   'defaultValue' : '/var/run/webhcat'},
-  {'var' : 'hive_pid_dir',
-   'defaultValue' : '/var/run/hive'},
-  {'var' : 'mysqld_pid_dir',
-   'defaultValue' : '/var/run/mysqld'},
-  {'var' : 'hcat_pid_dir',
-   'defaultValue' : '/var/run/webhcat'},
-  {'var' : 'yarn_pid_dir_prefix',
-   'defaultValue' : '/var/run/hadoop-yarn'},
-  {'var' : 'mapred_pid_dir_prefix',
-   'defaultValue' : '/var/run/hadoop-mapreduce'},
-]
 
 
 class AmbariConfig:
@@ -151,13 +86,15 @@ class AmbariConfig:
   SERVER_CONNECTION_INFO = "{0}/connection_info"
   CONNECTION_PROTOCOL = "https"
 
+  # linux open-file limit
+  ULIMIT_OPEN_FILES_KEY = 'ulimit.open.files'
+
   config = None
   net = None
 
   def __init__(self):
     global content
     self.config = ConfigParser.RawConfigParser()
-    self.net = NetUtil()
     self.config.readfp(StringIO.StringIO(content))
 
   def get(self, section, value, default=None):
@@ -183,42 +120,129 @@ class AmbariConfig:
   def getConfig(self):
     return self.config
 
-  @staticmethod
-  @OsFamilyFuncImpl(OSConst.WINSRV_FAMILY)
-  def getConfigFile():
-    if 'AMBARI_AGENT_CONF_DIR' in os.environ:
-      return os.path.join(os.environ['AMBARI_AGENT_CONF_DIR'], "ambari-agent.ini")
-    else:
-      return "ambari-agent.ini"
+  @classmethod
+  def get_resolved_config(cls, home_dir=""):
+    if hasattr(cls, "_conf_cache"):
+      return getattr(cls, "_conf_cache")
+    config = cls()
+    configPath = os.path.abspath(cls.getConfigFile(home_dir))
+    try:
+      if os.path.exists(configPath):
+        config.read(configPath)
+      else:
+        raise Exception("No config found at {0}, use default".format(configPath))
+
+    except Exception, err:
+      logger.warn(err)
+    setattr(cls, "_conf_cache", config)
+    return config
 
   @staticmethod
   @OsFamilyFuncImpl(OsFamilyImpl.DEFAULT)
-  def getConfigFile():
+  def getConfigFile(home_dir=""):
+    """
+    Get the configuration file path.
+    :param home_dir: In production, will be "". When running multiple Agents per host, each agent will have a unique path.
+    :return: Configuration file path.
+    """
     if 'AMBARI_AGENT_CONF_DIR' in os.environ:
       return os.path.join(os.environ['AMBARI_AGENT_CONF_DIR'], "ambari-agent.ini")
     else:
-      return os.path.join(os.sep, "etc", "ambari-agent", "conf", "ambari-agent.ini")
+      # home_dir may be an empty string
+      return os.path.join(os.sep, home_dir, "etc", "ambari-agent", "conf", "ambari-agent.ini")
 
+  @property
+  def server_hostname(self):
+    return self.get('server', 'hostname')
+
+  @property
+  def secured_url_port(self):
+    return self.get('server', 'secured_url_port')
+
+  @property
+  def command_reports_interval(self):
+    return int(self.get('agent', 'command_reports_interval', default='5'))
+
+  @property
+  def alert_reports_interval(self):
+    return int(self.get('agent', 'alert_reports_interval', default='5'))
+
+  @property
+  def status_commands_run_interval(self):
+    return int(self.get('agent', 'status_commands_run_interval', default='20'))
+
+  @property
+  def command_update_output(self):
+    return bool(int(self.get('agent', 'command_update_output', default='1')))
+
+  @property
+  def host_status_report_interval(self):
+    return int(self.get('heartbeat', 'state_interval_seconds', '60'))
+
+  @property
+  def cache_dir(self):
+    return self.get('agent', 'cache_dir', default='/var/lib/ambari-agent/cache')
+
+  @property
+  def cluster_cache_dir(self):
+    return os.path.join(self.cache_dir, FileCache.CLUSTER_CACHE_DIRECTORY)
+  @property
+  def recovery_cache_dir(self):
+    return os.path.join(self.cache_dir, FileCache.RECOVERY_CACHE_DIRECTORY)
+  @property
+  def alerts_cachedir(self):
+    return os.path.join(self.cache_dir, FileCache.ALERTS_CACHE_DIRECTORY)
+  @property
+  def stacks_dir(self):
+    return os.path.join(self.cache_dir, FileCache.STACKS_CACHE_DIRECTORY)
+  @property
+  def common_services_dir(self):
+    return os.path.join(self.cache_dir, FileCache.COMMON_SERVICES_DIRECTORY)
+  @property
+  def extensions_dir(self):
+    return os.path.join(self.cache_dir, FileCache.EXTENSIONS_CACHE_DIRECTORY)
+  @property
+  def host_scripts_dir(self):
+    return os.path.join(self.cache_dir, FileCache.HOST_SCRIPTS_CACHE_DIRECTORY)
+
+  # TODO AMBARI-18733, change usages of this function to provide the home_dir.
   @staticmethod
-  def getLogFile():
+  def getLogFile(home_dir=""):
+    """
+    Get the log file path.
+    :param home_dir: In production, will be "". When running multiple Agents per host, each agent will have a unique path.
+    :return: Log file path.
+    """
     if 'AMBARI_AGENT_LOG_DIR' in os.environ:
       return os.path.join(os.environ['AMBARI_AGENT_LOG_DIR'], "ambari-agent.log")
     else:
-      return os.path.join(os.sep, "var", "log", "ambari-agent", "ambari-agent.log")
-    
-  @staticmethod
-  def getAlertsLogFile():
-    if 'AMBARI_AGENT_LOG_DIR' in os.environ:
-      return os.path.join(os.environ['AMBARI_AGENT_LOG_DIR'], "ambari-agent.log")
-    else:
-      return os.path.join(os.sep, "var", "log", "ambari-agent", "ambari-alerts.log")
+      return os.path.join(os.sep, home_dir, "var", "log", "ambari-agent", "ambari-agent.log")
 
+  # TODO AMBARI-18733, change usages of this function to provide the home_dir.
   @staticmethod
-  def getOutFile():
+  def getAlertsLogFile(home_dir=""):
+    """
+    Get the alerts log file path.
+    :param home_dir: In production, will be "". When running multiple Agents per host, each agent will have a unique path.
+    :return: Alerts log file path.
+    """
+    if 'AMBARI_AGENT_LOG_DIR' in os.environ:
+      return os.path.join(os.environ['AMBARI_AGENT_LOG_DIR'], "ambari-alerts.log")
+    else:
+      return os.path.join(os.sep, home_dir, "var", "log", "ambari-agent", "ambari-alerts.log")
+
+  # TODO AMBARI-18733, change usages of this function to provide the home_dir.
+  @staticmethod
+  def getOutFile(home_dir=""):
+    """
+    Get the out file path.
+    :param home_dir: In production, will be "". When running multiple Agents per host, each agent will have a unique path.
+    :return: Out file path.
+    """
     if 'AMBARI_AGENT_LOG_DIR' in os.environ:
       return os.path.join(os.environ['AMBARI_AGENT_LOG_DIR'], "ambari-agent.out")
     else:
-      return os.path.join(os.sep, "var", "log", "ambari-agent", "ambari-agent.out")
+      return os.path.join(os.sep, home_dir, "var", "log", "ambari-agent", "ambari-agent.out")
 
   def has_option(self, section, option):
     return self.config.has_option(section, option)
@@ -233,7 +257,8 @@ class AmbariConfig:
     self.config.read(filename)
 
   def getServerOption(self, url, name, default=None):
-    status, response = self.net.checkURL(url)
+    from ambari_agent.NetUtil import NetUtil
+    status, response = NetUtil(self).checkURL(url)
     if status is True:
       try:
         data = json.loads(response)
@@ -261,14 +286,60 @@ class AmbariConfig:
   def get_parallel_exec_option(self):
     return int(self.get('agent', 'parallel_execution', 0))
 
+  def get_ulimit_open_files(self):
+    open_files_config_val =  int(self.get('agent', self.ULIMIT_OPEN_FILES_KEY, 0))
+    open_files_ulimit = int(open_files_config_val) if (open_files_config_val and int(open_files_config_val) > 0) else 0
+    return open_files_ulimit
+
+  def set_ulimit_open_files(self, value):
+    self.set('agent', self.ULIMIT_OPEN_FILES_KEY, value)
+
+
+  def use_system_proxy_setting(self):
+    """
+    Return `True` if Agent need to honor system proxy setting and `False` if not
+
+    :rtype bool
+    """
+    return "true" == self.get("network", "use_system_proxy_settings", "true").lower()
+
+  def get_multiprocess_status_commands_executor_enabled(self):
+    return bool(int(self.get('agent', 'multiprocess_status_commands_executor_enabled', 1)))
+
   def update_configuration_from_registration(self, reg_resp):
     if reg_resp and AmbariConfig.AMBARI_PROPERTIES_CATEGORY in reg_resp:
       if not self.has_section(AmbariConfig.AMBARI_PROPERTIES_CATEGORY):
         self.add_section(AmbariConfig.AMBARI_PROPERTIES_CATEGORY)
-      for k,v in reg_resp[AmbariConfig.AMBARI_PROPERTIES_CATEGORY].items():
+      for k, v in reg_resp[AmbariConfig.AMBARI_PROPERTIES_CATEGORY].items():
         self.set(AmbariConfig.AMBARI_PROPERTIES_CATEGORY, k, v)
         logger.info("Updating config property (%s) with value (%s)", k, v)
     pass
+
+  def get_force_https_protocol_name(self):
+    """
+    Get forced https protocol name.
+
+    :return: protocol name, PROTOCOL_TLSv1_2 by default
+    """
+    return self.get('security', 'force_https_protocol', default="PROTOCOL_TLSv1_2")
+
+  def get_force_https_protocol_value(self):
+    """
+    Get forced https protocol value that correspondents to ssl module variable.
+
+    :return: protocol value
+    """
+    import ssl
+    return getattr(ssl, self.get_force_https_protocol_name())
+
+  def get_ca_cert_file_path(self):
+    """
+    Get path to file with trusted certificates.
+
+    :return: trusted certificates file path
+    """
+    return self.get('security', 'ca_cert_path', default="")
+
 
 def isSameHostList(hostlist1, hostlist2):
   is_same = True

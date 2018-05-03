@@ -17,24 +17,44 @@
 }}
 
 {{#if view.isOutOfSync}}
-  <i class="icon-exclamation-sign out-of-sync-badge"></i>
+  <i class="glyphicon glyphicon-exclamation-sign out-of-sync-badge"></i>
 {{/if}}
 
 <p class="version-column-display-name">
-  <span>{{view.content.displayNameSimple}}</span>
+  {{#if view.content.isStandard}}
+    <span>{{view.content.displayNameSimple}}</span>
+  {{else}}
+    <span>{{view.content.displayName}}</span>
+  {{/if}}
 </p>
+
+<p class="version-column-repository-name">({{view.content.repositoryVersion}})</p>
+
+{{#if view.displayVersionTypeBlock}}
+  <p class="version-column-display-type">
+    {{#if view.content.isMaint}}
+      <i class="icon-wrench"></i>&nbsp;{{t common.maint}}
+    {{/if}}
+    {{#if view.content.isPatch}}
+      <i class="icon-bug"></i>&nbsp;{{t common.patch}}
+    {{/if}}
+    {{#if view.content.isService}}
+      <i class="icon-umbrella"></i>&nbsp;{{t common.service}}
+    {{/if}}
+  </p>
+{{/if}}
 
 <p class="version-column-show-details">
   <a {{action openVersionBoxPopup target="view"}}>{{t admin.stackVersions.version.column.showDetails}}</a>
 </p>
-<div {{bindAttr class="view.stateElement.isInstalling:installing :align-center :state"}}>
+<div {{bindAttr class="view.stateElement.isInstalling:installing :align-center :state :repo-version-tooltip"}}>
   {{#if view.stateElement.isButton}}
     <button class="btn btn-primary"
       {{action runAction target="view"}}
       {{bindAttr disabled="view.stateElement.isDisabled"}}>
       {{view.stateElement.text}}
     </button>
- {{/if}}
+  {{/if}}
   {{#if view.stateElement.isButtonGroup}}
     <div class="btn-group">
       <button class="btn btn-primary"
@@ -57,13 +77,30 @@
     </div>
   {{/if}}
   {{#if view.stateElement.isLabel}}
-      <span {{bindAttr class="view.stateElement.class"}}>{{view.stateElement.text}}</span>
+    <div {{bindAttr class="view.stateElement.canBeReverted:btn-group :label-wrapper"}}>
+      <button {{bindAttr class="view.stateElement.class"}}>
+        <span class="state-label-text">{{view.stateElement.text}}</span>
+      </button>
+      {{#if view.stateElement.canBeReverted}}
+        <button {{bindAttr class="view.stateElement.class :dropdown-toggle"}} data-toggle="dropdown">
+          <span class="caret"></span>
+        </button>
+        <ul class="dropdown-menu">
+          <li>
+            <a {{action runAction view.stateElement.action target="view"}}>
+              {{view.stateElement.actionText}}
+            </a>
+          </li>
+        </ul>
+      {{/if}}
+    </div>
   {{/if}}
   {{#if view.stateElement.isLink}}
     {{#if view.stateElement.iconClass}}
-        <i {{bindAttr class="view.stateElement.iconClass"}}></i>
+      <i {{bindAttr class="view.stateElement.iconClass" disabled="view.stateElement.isDisabled"}}></i>
     {{/if}}
-      <a href="#" {{action runAction target="view"}}>{{view.stateElement.text}}</a>
+    <a href="#" {{action runAction target="view"}}
+        {{bindAttr disabled="view.stateElement.isDisabled"}}>{{view.stateElement.text}}</a>
     {{#if view.stateElement.isInstalling}}
       {{view App.ProgressBarView
           progressBinding="view.installProgress"
@@ -78,10 +115,13 @@
 
 <div class="services-section">
   {{#each service in view.services}}
-    <div class="line-separator"></div>
     <p class="service-version-info">
-       <span {{bindAttr class="service.isVersionInvisible:invisible :label"}}>{{service.latestVersion}}</span>
+       <span {{bindAttr class="service.isVersionInvisible:invisible service.isAvailable:available :label"}}>
+           {{service.latestVersion}}
+       </span>
+        {{#if service.notUpgradable}}
+          <i class="icon-info-sign not-upgradable" {{bindAttr data-original-title="service.notUpgradableTitle"}}></i>
+        {{/if}}
     </p>
-    <div class="line-separator-bottom"></div>
   {{/each}}
 </div>

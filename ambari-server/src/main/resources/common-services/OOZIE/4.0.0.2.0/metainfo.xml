@@ -58,7 +58,7 @@
           <commandScript>
             <script>scripts/oozie_server.py</script>
             <scriptType>PYTHON</scriptType>
-            <timeout>1200</timeout>
+            <timeout>1800</timeout>
           </commandScript>
           <logs>
             <log>
@@ -128,7 +128,7 @@
         </osSpecific>
 
        <osSpecific>
-          <osFamily>amazon2015,redhat6,redhat7,suse11,suse12</osFamily>
+          <osFamily>amazonlinux2,redhat6,redhat7,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>extjs-2.2-1</name>
@@ -137,13 +137,10 @@
         </osSpecific>
 
         <osSpecific>
-          <osFamily>debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
             <package>
               <name>extjs</name>
-            </package>
-            <package>
-              <name>libxml2-utils</name>
             </package>
           </packages>
         </osSpecific>
@@ -167,7 +164,23 @@
         <config-type>yarn-site</config-type>
         <config-type>hive-site</config-type>
         <config-type>tez-site</config-type>
+        <config-type>core-site</config-type>
       </configuration-dependencies>
+
+      <themes>
+        <theme>
+          <fileName>credentials.json</fileName>
+          <default>true</default>
+        </theme>
+        <theme>
+          <fileName>database.json</fileName>
+          <default>true</default>
+        </theme>
+        <theme>
+          <fileName>directories.json</fileName>
+          <default>true</default>
+        </theme>
+      </themes>
     </service>
   </services>
 </metainfo>

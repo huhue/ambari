@@ -87,6 +87,15 @@
             <scriptType>PYTHON</scriptType>
             <timeout>1200</timeout>
           </commandScript>
+          <logs>
+            <log>
+              <logId>ams_monitor</logId>
+              <primary>true</primary>
+            </log>
+          </logs>
+          <configuration-dependencies>
+            <config-type>ams-site</config-type>
+          </configuration-dependencies>
         </component>
 
         <component>
@@ -95,6 +104,7 @@
           <category>MASTER</category>
           <cardinality>0-1</cardinality>
           <versionAdvertised>false</versionAdvertised>
+          <customFolder>dashboards</customFolder>
           <commandScript>
             <script>scripts/metrics_grafana.py</script>
             <scriptType>PYTHON</scriptType>
@@ -104,12 +114,26 @@
             <config-type>ams-grafana-env</config-type>
             <config-type>ams-grafana-ini</config-type>
           </configuration-dependencies>
+          <logs>
+            <log>
+              <logId>ams_grafana</logId>
+              <primary>true</primary>
+            </log>
+          </logs>
         </component>
+
       </components>
+
+      <themes>
+        <theme>
+          <fileName>theme.json</fileName>
+          <default>true</default>
+        </theme>
+      </themes>
 
       <osSpecifics>
         <osSpecific>
-          <osFamily>redhat7,amazon2015,redhat6,suse11,suse12</osFamily>
+          <osFamily>redhat7,amazonlinux2,redhat6,suse11,suse12</osFamily>
           <packages>
             <package>
               <name>ambari-metrics-collector</name>
@@ -135,6 +159,14 @@
           </packages>
         </osSpecific>
         <osSpecific>
+          <osFamily>redhat7,redhat6,amazonlinux2</osFamily>
+          <packages>
+            <package>
+              <name>python-kerberos</name>
+            </package>
+          </packages>
+        </osSpecific>
+        <osSpecific>
           <osFamily>debian7,ubuntu12,ubuntu14</osFamily>
           <packages>
             <package>
@@ -143,6 +175,24 @@
             </package>
             <package>
               <name>gcc</name>
+            </package>
+            <package>
+              <name>libsnappy1*</name>
+            </package>
+          </packages>
+        </osSpecific>
+        <osSpecific>
+          <osFamily>ubuntu16</osFamily>
+          <packages>
+            <package>
+              <name>ambari-metrics-assembly</name>
+              <skipUpgrade>true</skipUpgrade>
+            </package>
+            <package>
+              <name>gcc</name>
+            </package>
+            <package>
+              <name>libsnappy1v5*</name>
             </package>
           </packages>
         </osSpecific>
@@ -179,16 +229,23 @@
         <config-type>ams-env</config-type>
       </configuration-dependencies>
 
-      <excluded-config-types>
-        <config-type>storm-site</config-type>
-      </excluded-config-types>
-
       <quickLinksConfigurations>
         <quickLinksConfiguration>
           <fileName>quicklinks.json</fileName>
           <default>true</default>
         </quickLinksConfiguration>
       </quickLinksConfigurations>
+
+      <themes>
+        <theme>
+          <fileName>credentials.json</fileName>
+          <default>true</default>
+        </theme>
+        <theme>
+          <fileName>directories.json</fileName>
+          <default>true</default>
+        </theme>
+      </themes>
 
     </service>
   </services>

@@ -27,6 +27,7 @@ from resource_management.libraries.functions import get_kinit_path
 from resource_management.libraries.script.script import Script
 import os
 from resource_management.libraries.functions.expect import expect
+from resource_management.libraries.functions import stack_features
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions import StackFeature
 
@@ -34,21 +35,24 @@ config = Script.get_config()
 stack_root = status_params.stack_root
 stack_name = status_params.stack_name
 
-agent_stack_retry_on_unavailability = config['hostLevelParams']['agent_stack_retry_on_unavailability']
-agent_stack_retry_count = expect("/hostLevelParams/agent_stack_retry_count", int)
+agent_stack_retry_on_unavailability = config['ambariLevelParams']['agent_stack_retry_on_unavailability']
+agent_stack_retry_count = expect("/ambariLevelParams/agent_stack_retry_count", int)
 
-# New Cluster Stack Version that is defined during the RESTART of a Rolling Upgrade
-version = default("/commandParams/version", None)
+version = stack_features.get_stack_feature_version(config)
 
 stack_version_unformatted = status_params.stack_version_unformatted
 stack_version_formatted = status_params.stack_version_formatted
+upgrade_direction = default("/commandParams/upgrade_direction", None)
+jdk_location = config['ambariLevelParams']['jdk_location']
+
+
 etc_prefix_dir = "/etc/falcon"
 
 # hadoop params
 hadoop_home_dir = stack_select.get_hadoop_dir("home")
 hadoop_bin_dir = stack_select.get_hadoop_dir("bin")
 
-if stack_version_formatted and check_stack_feature(StackFeature.ROLLING_UPGRADE, stack_version_formatted):
+if check_stack_feature(StackFeature.ROLLING_UPGRADE, version):
   # if this is a server action, then use the server binaries; smoke tests
   # use the client binaries
   server_role_dir_mapping = { 'FALCON_SERVER' : 'falcon-server',
@@ -61,6 +65,11 @@ if stack_version_formatted and check_stack_feature(StackFeature.ROLLING_UPGRADE,
   falcon_root = server_role_dir_mapping[command_role]
   falcon_webapp_dir = format('{stack_root}/current/{falcon_root}/webapp')
   falcon_home = format('{stack_root}/current/{falcon_root}')
+
+  # Extensions dir is only available in HDP 2.5 and higher
+  falcon_extensions_source_dir = os.path.join(stack_root, "current", falcon_root, "extensions")
+  # Dir in HDFS
+  falcon_extensions_dest_dir = default("/configurations/falcon-startup.properties/*.extension.store.uri", "/apps/falcon/extensions")
 else:
   falcon_webapp_dir = '/var/lib/falcon/webapp'
   falcon_home = '/usr/lib/falcon'
@@ -78,9 +87,8 @@ server_pid_file = status_params.server_pid_file
 user_group = config['configurations']['cluster-env']['user_group']
 proxyuser_group =  config['configurations']['hadoop-env']['proxyuser_group']
 
-java_home = config['hostLevelParams']['java_home']
+java_home = config['ambariLevelParams']['java_home']
 falcon_local_dir = config['configurations']['falcon-env']['falcon_local_dir']
-falcon_store_uri = config['configurations']['falcon-env']['falcon_store_uri']
 falcon_log_dir = config['configurations']['falcon-env']['falcon_log_dir']
 
 # falcon-startup.properties
@@ -97,13 +105,22 @@ falcon_host = config['clusterHostInfo']['falcon_server_hosts'][0]
 falcon_port = config['configurations']['falcon-env']['falcon_port']
 falcon_runtime_properties = config['configurations']['falcon-runtime.properties']
 falcon_startup_properties = config['configurations']['falcon-startup.properties']
+falcon_client_properties = config['configurations']['falcon-client.properties']
 smokeuser_keytab = config['configurations']['cluster-env']['smokeuser_keytab']
 falcon_env_sh_template = config['configurations']['falcon-env']['content']
+
+#Log4j properties
+falcon_log_maxfilesize = default('/configurations/falcon-log4j/falcon_log_maxfilesize',256)
+falcon_log_maxbackupindex =  default('/configurations/falcon-log4j/falcon_log_maxbackupindex',20)
+falcon_security_log_maxfilesize = default('/configurations/falcon-log4j/falcon_security_log_maxfilesize',256)
+falcon_security_log_maxbackupindex = default('/configurations/falcon-log4j/falcon_security_log_maxbackupindex',20)
+
+falcon_log4j=config['configurations']['falcon-log4j']['content']
 
 falcon_apps_dir = config['configurations']['falcon-env']['falcon_apps_hdfs_dir']
 #for create_hdfs_directory
 security_enabled = config['configurations']['cluster-env']['security_enabled']
-hostname = config["hostname"]
+hostname = config['agentLevelParams']['hostname']
 hdfs_user_keytab = config['configurations']['hadoop-env']['hdfs_user_keytab']
 hdfs_user = config['configurations']['hadoop-env']['hdfs_user']
 hdfs_principal_name = config['configurations']['hadoop-env']['hdfs_principal_name']
@@ -111,24 +128,64 @@ smokeuser_principal =  config['configurations']['cluster-env']['smokeuser_princi
 kinit_path_local = get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))
 
 supports_hive_dr = config['configurations']['falcon-env']['supports_hive_dr']
+# HDP 2.4 still supported the /usr/$STACK/$VERSION/falcon/data-mirroring folder, which had to be copied to HDFS
+# In HDP 2.5, an empty data-mirroring folder has to be created, and the extensions folder has to be uploaded to HDFS.
+supports_data_mirroring = supports_hive_dr and not check_stack_feature(StackFeature.FALCON_EXTENSIONS, version)
+
 local_data_mirroring_dir = format('{stack_root}/current/falcon-server/data-mirroring')
 dfs_data_mirroring_dir = "/apps/data-mirroring"
 
-atlas_hosts = default('/clusterHostInfo/atlas_server_hosts', [])
-has_atlas = len(atlas_hosts) > 0
-atlas_plugin_package = "atlas-metadata*-hive-plugin"
-atlas_ubuntu_plugin_package = "atlas-metadata.*-hive-plugin"
 
-if has_atlas:
-  atlas_conf_file = config['configurations']['atlas-env']['metadata_conf_file']
-  atlas_conf_dir = os.environ['METADATA_CONF'] if 'METADATA_CONF' in os.environ else '/etc/atlas/conf'
-  atlas_home_dir = os.environ['METADATA_HOME_DIR'] if 'METADATA_HOME_DIR' in os.environ else format('{stack_root}/current/atlas-server')
-  atlas_hook_cp = atlas_conf_dir + os.pathsep + os.path.join(atlas_home_dir, "hook", "falcon", "*") + os.pathsep
+########################################################
+############# Atlas related params #####################
+########################################################
+#region Atlas Hooks
+falcon_atlas_application_properties = default('/configurations/falcon-atlas-application.properties', {})
+atlas_hook_filename = default('/configurations/atlas-env/metadata_conf_file', 'atlas-application.properties')
+enable_atlas_hook = default('/configurations/falcon-env/falcon.atlas.hook', False)
+
+# Calculate atlas_hook_cp to add to FALCON_EXTRA_CLASS_PATH
+falcon_atlas_support = False
+
+# Path to add to environment variable
+atlas_hook_cp = ""
+if enable_atlas_hook:
+
+  # stack_version doesn't contain a minor number of the stack (only first two numbers: 2.3). Get it from the command version
+  falcon_atlas_support = check_stack_feature(StackFeature.FALCON_ATLAS_SUPPORT_2_3, version) \
+      or check_stack_feature(StackFeature.FALCON_ATLAS_SUPPORT, version)
+
+  if check_stack_feature(StackFeature.ATLAS_CONF_DIR_IN_PATH, version):
+    atlas_conf_dir = format('{stack_root}/current/atlas-server/conf')
+    atlas_home_dir = format('{stack_root}/current/atlas-server')
+    atlas_hook_cp = atlas_conf_dir + os.pathsep + os.path.join(atlas_home_dir, "hook", "falcon", "*") + os.pathsep
+  elif check_stack_feature(StackFeature.ATLAS_UPGRADE_SUPPORT, version):
+    atlas_hook_cp = format('{stack_root}/current/atlas-client/hook/falcon/*') + os.pathsep
+
+atlas_application_class_addition = ""
+if falcon_atlas_support:
+  # Some stack versions do not support Atlas Falcon hook. See stack_features.json
+  # Packaging was different in older versions.
+  if check_stack_feature(StackFeature.FALCON_ATLAS_SUPPORT_2_3, version):
+    atlas_application_class_addition = ",\\\norg.apache.falcon.atlas.service.AtlasService"
+    atlas_plugin_package = "atlas-metadata*-falcon-plugin"
+    atlas_ubuntu_plugin_package = "atlas-metadata.*-falcon-plugin"
+  else:
+    atlas_application_class_addition = ",\\\norg.apache.atlas.falcon.service.AtlasService"
+    atlas_plugin_package = "atlas-metadata*-hive-plugin"
+    atlas_ubuntu_plugin_package = "atlas-metadata.*-hive-plugin"
+
+#endregion
 
 hdfs_site = config['configurations']['hdfs-site']
 default_fs = config['configurations']['core-site']['fs.defaultFS']
 
 dfs_type = default("/commandParams/dfs_type", "")
+
+bdb_jar_name = "je-5.0.73.jar"
+bdb_resource_name = format("{jdk_location}/{bdb_jar_name}")
+target_jar_file = os.path.join(falcon_webinf_lib, bdb_jar_name)
+
 
 import functools
 #create partial functions with common arguments for every HdfsResource call

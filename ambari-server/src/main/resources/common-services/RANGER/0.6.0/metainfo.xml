@@ -28,6 +28,20 @@
 
       <components>
         <component>
+          <name>RANGER_ADMIN</name>
+          <cardinality>1+</cardinality>
+          <dependencies>
+            <dependency>
+              <name>AMBARI_INFRA_SOLR/INFRA_SOLR_CLIENT</name>
+              <scope>host</scope>
+              <auto-deploy>
+                <enabled>true</enabled>
+              </auto-deploy>
+            </dependency>
+          </dependencies>
+        </component>
+
+        <component>
           <name>RANGER_TAGSYNC</name>
           <displayName>Ranger Tagsync</displayName>
           <category>SLAVE</category>
@@ -51,6 +65,52 @@
           <default>true</default>
         </theme>
       </themes>
+
+      <osSpecifics>
+        <osSpecific>
+          <osFamily>redhat7,amazonlinux2,redhat6,suse11,suse12</osFamily>
+          <packages>
+            <package>
+              <name>ranger_${stack_version}-admin</name>
+            </package>
+            <package>
+              <name>ranger_${stack_version}-usersync</name>
+            </package>
+            <package>
+              <name>ranger_${stack_version}-tagsync</name>
+              <condition>should_install_ranger_tagsync</condition>
+            </package>
+            <package>
+              <name>ambari-infra-solr-client</name>
+              <condition>should_install_infra_solr_client</condition>
+            </package>
+          </packages>
+        </osSpecific>
+        <osSpecific>
+          <osFamily>debian7,ubuntu12,ubuntu14,ubuntu16</osFamily>
+          <packages>
+            <package>
+              <name>ranger-${stack_version}-admin</name>
+            </package>
+            <package>
+              <name>ranger-${stack_version}-usersync</name>
+            </package>
+            <package>
+              <name>ranger-${stack_version}-tagsync</name>
+              <condition>should_install_ranger_tagsync</condition>
+            </package>
+            <package>
+              <name>ambari-infra-solr-client</name>
+              <condition>should_install_infra_solr_client</condition>
+            </package>
+          </packages>
+        </osSpecific>
+      </osSpecifics>
+
+      <configuration-dependencies>
+        <config-type>admin-log4j</config-type>
+        <config-type>usersync-log4j</config-type>
+      </configuration-dependencies>
 
     </service>
   </services>

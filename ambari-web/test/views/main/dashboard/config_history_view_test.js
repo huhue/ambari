@@ -36,7 +36,8 @@ describe('App.MainConfigHistoryView', function() {
           name: 'startIndex'
         }
       ],
-      doPolling: Em.K,
+      subscribeToUpdates: Em.K,
+      unsubscribeOfUpdates: Em.K,
       load: function () {
         return {done: Em.K};
       },
@@ -54,161 +55,13 @@ describe('App.MainConfigHistoryView', function() {
     });
   });
 
-  describe("#serviceFilterView", function () {
-    var subView = view.get('serviceFilterView').create({
-      parentView: view
-    });
-
-    before(function () {
-      sinon.stub(App.StackService, 'find').returns([Em.Object.create({
-        serviceName: 'S1',
-        displayName: 's1'
-      })])
-    });
-    after(function () {
-      App.StackService.find.restore();
-    });
-    it("content", function () {
-      expect(subView.get('content')).to.eql([
-        {
-          "value": "",
-          "label": Em.I18n.t('common.all')
-        },
-        {
-          "value": "S1",
-          "label": "s1"
-        }
-      ]);
-    });
-
-    before(function () {
-      sinon.stub(view, 'updateFilter', Em.K);
-    });
-    after(function () {
-      view.updateFilter.restore();
-    });
-    it("call onChangeValue()", function () {
-      subView.set('column', 1);
-      subView.set('value', 'value');
-      subView.onChangeValue();
-      expect(view.updateFilter.calledWith(1, 'value', 'select')).to.be.true;
-    });
-  });
-
-  describe("#configGroupFilterView", function () {
-    var subView = view.get('configGroupFilterView').create({
-      parentView: view
-    });
-
-    before(function () {
-      sinon.stub(App.ServiceConfigVersion, 'find').returns([
-        Em.Object.create({groupName: 'G1'}),
-        Em.Object.create({groupName: 'G1'}),
-        Em.Object.create({groupName: null})
-      ]);
-    });
-    after(function () {
-      App.ServiceConfigVersion.find.restore();
-    });
-    it("content", function () {
-      expect(subView.get('content')).to.eql([
-        {
-          "value": "",
-          "label": Em.I18n.t('common.all')
-        },
-        {
-          "value": "G1",
-          "label": "G1"
-        }
-      ]);
-    });
-
-    before(function () {
-      sinon.stub(view, 'updateFilter', Em.K);
-    });
-    after(function () {
-      view.updateFilter.restore();
-    });
-    it("call onChangeValue()", function () {
-      subView.set('column', 1);
-      subView.set('value', 'value');
-      subView.onChangeValue();
-      expect(view.updateFilter.calledWith(1, 'value', 'select')).to.be.true;
-    });
-  });
-
-  /**
-   * for now we don't use this method
-  describe("#modifiedFilterView", function () {
-    var subView = view.get('modifiedFilterView').create({
-      parentView: view,
-      controller: {
-        modifiedFilter: {
-          actualValues: {
-            startTime: 0,
-            endTime: 1
-          }
-        }
-      }
-    });
-
-    before(function () {
-      sinon.stub(view, 'updateFilter', Em.K);
-    });
-    after(function () {
-      view.updateFilter.restore();
-    });
-    it("call onTimeChange()", function () {
-      subView.set('column', 1);
-      subView.onTimeChange();
-      expect(view.updateFilter.calledWith(1, [0, 1], 'range')).to.be.true;
-    });
-  });*/
-
-  describe("#authorFilterView", function () {
-    var subView = view.get('authorFilterView').create({
-      parentView: view
-    });
-
-    before(function () {
-      sinon.stub(view, 'updateFilter', Em.K);
-    });
-    after(function () {
-      view.updateFilter.restore();
-    });
-    it("call onChangeValue()", function () {
-      subView.set('column', 1);
-      subView.set('value', 'value');
-      subView.onChangeValue();
-      expect(view.updateFilter.calledWith(1, 'value', 'string')).to.be.true;
-    });
-  });
-
-  describe("#notesFilterView", function () {
-    var subView = view.get('notesFilterView').create({
-      parentView: view
-    });
-
-    before(function () {
-      sinon.stub(view, 'updateFilter', Em.K);
-    });
-    after(function () {
-      view.updateFilter.restore();
-    });
-    it("call onChangeValue()", function () {
-      subView.set('column', 1);
-      subView.set('value', 'value');
-      subView.onChangeValue();
-      expect(view.updateFilter.calledWith(1, 'value', 'string')).to.be.true;
-    });
-  });
-
   describe("#ConfigVersionView", function () {
-    var subView = view.get('ConfigVersionView').create({
-      parentView: view
-    });
-
+    var subView;
     before(function () {
+      subView = view.get('ConfigVersionView').create({
+        parentView: view
+      });
+
       sinon.stub(App, 'tooltip', Em.K);
     });
     after(function () {
@@ -223,19 +76,46 @@ describe('App.MainConfigHistoryView', function() {
       subView.toggleShowLessStatus();
       expect(subView.get('showLessNotes')).to.be.false;
     });
+
+    describe("#isServiceLinkDisable", function () {
+      beforeEach(function () {
+        subView.set('content', Em.Object.create());
+        this.hasKerberos = sinon.stub(App.Service, 'find');
+      });
+      afterEach(function () {
+        App.Service.find.restore();
+      });
+      it("should be true for deleted kerberos groups", function () {
+        subView.set('content.serviceName', 'KERBEROS');
+        this.hasKerberos.returns([]);
+        expect(subView.get('isServiceLinkDisabled')).to.be.true;
+      });
+      it("should be false for deleted kerberos groups", function () {
+        subView.set('content.serviceName', 'KERBEROS');
+        subView.set('content.isConfigGroupDeleted', false);
+        this.hasKerberos.returns([{serviceName: 'KERBEROS'}]);
+        expect(subView.get('isServiceLinkDisabled')).to.be.false;
+      });
+      it("should be true if group is deleted", function () {
+        subView.set('content.serviceName', 'KERBEROS');
+        subView.set('content.isConfigGroupDeleted', true);
+        this.hasKerberos.returns([{serviceName: 'KERBEROS'}]);
+        expect(subView.get('isServiceLinkDisabled')).to.be.true;
+      });
+    });
   });
 
   describe('#didInsertElement()', function() {
 
     beforeEach(function () {
       sinon.stub(view, 'addObserver', Em.K);
-      sinon.spy(view.get('controller'), 'doPolling');
+      sinon.stub(view.get('controller'), 'subscribeToUpdates');
       view.didInsertElement();
     });
 
     afterEach(function () {
+      view.get('controller').subscribeToUpdates.restore();
       view.addObserver.restore();
-      view.get('controller').doPolling.restore();
     });
 
     it('addObserver is called twice', function() {
@@ -246,48 +126,22 @@ describe('App.MainConfigHistoryView', function() {
       expect(view.get('isInitialRendering')).to.be.true;
     });
 
-    it('controller.isPolling is true', function() {
-      expect(view.get('controller.isPolling')).to.be.true;
-    });
-
-    it('controller.doPolling is true', function() {
-      expect(view.get('controller').doPolling.calledOnce).to.be.true;
-    });
-  });
-
-  describe('#updateFilter()', function () {
-    var cases = [
-      {
-        isInitialRendering: false,
-        updateFilterCalled: true,
-        title: 'updateFilter should be called'
-      },
-      {
-        isInitialRendering: true,
-        updateFilterCalled: false,
-        title: 'updateFilter should not be called'
-      }
-    ];
-    beforeEach(function () {
-      sinon.stub(view, 'saveFilterConditions', Em.K);
-      view.set('filteringComplete', true);
-    });
-    afterEach(function () {
-      view.saveFilterConditions.restore();
-    });
-    cases.forEach(function (item) {
-      it(item.title, function () {
-        view.set('isInitialRendering', item.isInitialRendering);
-        view.updateFilter(1, 'value', 'string');
-        expect(view.get('saveFilterConditions').calledWith(1, 'value', 'string')).to.equal(item.updateFilterCalled);
-      });
+    it('subscribeToUpdates should be called', function() {
+      expect(view.get('controller').subscribeToUpdates.calledOnce).to.be.true;
     });
   });
 
   describe('#willDestroyElement()', function() {
-    it('controller.isPolling is false', function() {
+    beforeEach(function () {
+      sinon.stub(view.get('controller'), 'unsubscribeOfUpdates');
+    });
+    afterEach(function () {
+      view.get('controller').unsubscribeOfUpdates.restore();
+    });
+
+    it('unsubscribeOfUpdates should be called', function() {
       view.willDestroyElement();
-      expect(view.get('controller.isPolling')).to.be.false;
+      expect(view.get('controller').unsubscribeOfUpdates.calledOnce).to.be.true;
     });
   });
 
@@ -328,7 +182,4 @@ describe('App.MainConfigHistoryView', function() {
       expect(view.get('controller.resetStartIndex')).to.be.false;
     });
   });
-
-  App.TestAliases.testAsComputedAlias(view, 'colPropAssoc', 'controller.colPropAssoc', 'array');
-
 });

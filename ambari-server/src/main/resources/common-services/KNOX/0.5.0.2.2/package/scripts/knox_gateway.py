@@ -18,26 +18,25 @@ limitations under the License.
 """
 
 import os
-import tarfile
 
 from resource_management.libraries.script.script import Script
-from resource_management.libraries.functions import conf_select, tar_archive
-from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions.check_process_status import check_process_status
-from resource_management.libraries.functions import format
-from resource_management.libraries.functions import conf_select
+from resource_management.libraries.functions.format import format
 from resource_management.libraries.functions import stack_select
-from resource_management.libraries.functions import Direction
-from resource_management.libraries.functions.security_commons import build_expectations, \
-  cached_kinit_executor, validate_security_config_properties, get_params_from_filesystem, \
-  FILE_TYPE_XML
-from resource_management.core.resources.system import File, Execute, Directory, Link
+from resource_management.libraries.functions.constants import Direction
+from resource_management.libraries.functions.security_commons import build_expectations
+from resource_management.libraries.functions.security_commons import cached_kinit_executor
+from resource_management.libraries.functions.security_commons import validate_security_config_properties
+from resource_management.libraries.functions.security_commons import get_params_from_filesystem
+from resource_management.libraries.functions.security_commons import FILE_TYPE_XML
+from resource_management.libraries.functions.show_logs import show_logs
+from resource_management.core.resources.system import File, Execute, Link
 from resource_management.core.resources.service import Service
 from resource_management.core.logger import Logger
-from resource_management.libraries.functions.show_logs import show_logs
+
 
 from ambari_commons import OSConst, OSCheck
-from ambari_commons.os_family_impl import OsFamilyFuncImpl, OsFamilyImpl
+from ambari_commons.os_family_impl import OsFamilyImpl
 
 if OSCheck.is_windows_family():
   from resource_management.libraries.functions.windows_service_utils import check_windows_service_status
@@ -46,14 +45,9 @@ import upgrade
 from knox import knox, update_knox_logfolder_permissions
 from knox_ldap import ldap
 from setup_ranger_knox import setup_ranger_knox
-from resource_management.libraries.functions.stack_features import check_stack_feature
-from resource_management.libraries.functions import StackFeature
 
 
 class KnoxGateway(Script):
-  def get_component_name(self):
-    return "knox-server"
-
   def install(self, env):
     import params
     env.set_params(params)
@@ -114,34 +108,20 @@ class KnoxGatewayDefault(KnoxGateway):
   def pre_upgrade_restart(self, env, upgrade_type=None):
     import params
     env.set_params(params)
-    if params.version and check_stack_feature(StackFeature.ROLLING_UPGRADE, params.version):
-      absolute_backup_dir = None
-      if params.upgrade_direction and params.upgrade_direction == Direction.UPGRADE:
-        Logger.info("Backing up directories. Initial conf folder: %s" % os.path.realpath(params.knox_conf_dir))
 
-        # This will backup the contents of the conf directory into /tmp/knox-upgrade-backup/knox-conf-backup.tar
-        absolute_backup_dir = upgrade.backup_data()
+    # backup the data directory to /tmp/knox-upgrade-backup/knox-data-backup.tar just in case
+    # something happens; Knox is interesting in that they re-generate missing files like
+    # keystores which can cause side effects if the upgrade goes wrong
+    if params.upgrade_direction and params.upgrade_direction == Direction.UPGRADE:
+      absolute_backup_dir = upgrade.backup_data()
+      Logger.info("Knox data was successfully backed up to {0}".format(absolute_backup_dir))
 
-      # <conf-selector-tool> will change the symlink to the conf folder.
-      conf_select.select(params.stack_name, "knox", params.version)
-      stack_select.select("knox-server", params.version)
+    stack_select.select_packages(params.version)
 
-      # Extract the tar of the old conf folder into the new conf directory
-      if absolute_backup_dir is not None and params.upgrade_direction and params.upgrade_direction == Direction.UPGRADE:
-        conf_tar_source_path = os.path.join(absolute_backup_dir, upgrade.BACKUP_CONF_ARCHIVE)
-        if os.path.exists(conf_tar_source_path):
-          extract_dir = os.path.realpath(params.knox_conf_dir)
-          conf_tar_dest_path = os.path.join(extract_dir, upgrade.BACKUP_CONF_ARCHIVE)
-          Logger.info("Copying %s into %s file." % (upgrade.BACKUP_CONF_ARCHIVE, conf_tar_dest_path))
-          Execute(('cp', conf_tar_source_path, conf_tar_dest_path),
-                  sudo = True,
-          )
+    # seed the new Knox data directory with the keystores of yesteryear
+    if params.upgrade_direction == Direction.UPGRADE:
+      upgrade.seed_current_data_directory()
 
-          tar_archive.untar_archive(conf_tar_source_path, extract_dir)
-          
-          File(conf_tar_dest_path,
-               action = "delete",
-          )
 
   def start(self, env, upgrade_type=None):
     import params
@@ -217,67 +197,6 @@ class KnoxGatewayDefault(KnoxGateway):
     File(params.ldap_pid_file,
       action = "delete"
     )
-
-  def security_status(self, env):
-    import status_params
-    env.set_params(status_params)
-
-    if status_params.security_enabled:
-      expectations = {}
-      expectations.update(build_expectations(
-        'krb5JAASLogin',
-        None,
-        ['keytab', 'principal'],
-        None
-      ))
-      expectations.update(build_expectations(
-        'gateway-site',
-        {
-          "gateway.hadoop.kerberos.secured" : "true"
-        },
-        None,
-        None
-      ))
-
-      security_params = {
-        "krb5JAASLogin":
-          {
-            'keytab': status_params.knox_keytab_path,
-            'principal': status_params.knox_principal_name
-          }
-      }
-      security_params.update(get_params_from_filesystem(status_params.knox_conf_dir,
-        {"gateway-site.xml" : FILE_TYPE_XML}))
-
-      result_issues = validate_security_config_properties(security_params, expectations)
-      if not result_issues:  # If all validations passed successfully
-        try:
-          # Double check the dict before calling execute
-          if ( 'krb5JAASLogin' not in security_params
-               or 'keytab' not in security_params['krb5JAASLogin']
-               or 'principal' not in security_params['krb5JAASLogin']):
-            self.put_structured_out({"securityState": "UNSECURED"})
-            self.put_structured_out({"securityIssuesFound": "Keytab file and principal are not set."})
-            return
-
-          cached_kinit_executor(status_params.kinit_path_local,
-                                status_params.knox_user,
-                                security_params['krb5JAASLogin']['keytab'],
-                                security_params['krb5JAASLogin']['principal'],
-                                status_params.hostname,
-                                status_params.temp_dir)
-          self.put_structured_out({"securityState": "SECURED_KERBEROS"})
-        except Exception as e:
-          self.put_structured_out({"securityState": "ERROR"})
-          self.put_structured_out({"securityStateErrorInfo": str(e)})
-      else:
-        issues = []
-        for cf in result_issues:
-          issues.append("Configuration file %s did not pass the validation. Reason: %s" % (cf, result_issues[cf]))
-        self.put_structured_out({"securityIssuesFound": ". ".join(issues)})
-        self.put_structured_out({"securityState": "UNSECURED"})
-    else:
-      self.put_structured_out({"securityState": "UNSECURED"})
       
   def get_log_folder(self):
     import params
@@ -286,6 +205,10 @@ class KnoxGatewayDefault(KnoxGateway):
   def get_user(self):
     import params
     return params.knox_user
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.knox_pid_file]
 
 
 if __name__ == "__main__":

@@ -85,7 +85,7 @@ App.stackConfigPropertiesMapper = App.QuickDataMapper.create({
 
           var attributes = config.StackConfigurations.property_value_attributes;
           if (attributes) {
-            config.is_required = !attributes.empty_value_valid;
+            config.is_required = this._isRequired(attributes.empty_value_valid, config.StackConfigurations.property_value);
             config.is_reconfigurable = !(attributes.editable_only_at_install || config.StackConfigurations.type === 'cluster-env.xml');
             config.is_editable = !attributes.read_only;
             config.is_required_by_agent = !attributes.ui_only_property;
@@ -145,6 +145,7 @@ App.stackConfigPropertiesMapper = App.QuickDataMapper.create({
           staticConfigInfo.value = staticConfigInfo.recommendedValue = App.config.formatPropertyValue(staticConfigInfo, v);
           staticConfigInfo.isSecureConfig = App.config.getIsSecure(staticConfigInfo.name);
           staticConfigInfo.description = App.config.getDescription(staticConfigInfo.description, staticConfigInfo.displayType);
+          staticConfigInfo.name = JSON.parse('"' + staticConfigInfo.name + '"');
           staticConfigInfo.isUserProperty = false;
           App.configsCollection.add(staticConfigInfo);
 
@@ -156,6 +157,18 @@ App.stackConfigPropertiesMapper = App.QuickDataMapper.create({
   },
 
   /******************* METHODS TO MERGE STACK PROPERTIES WITH STORED ON UI *********************************/
+
+  /**
+   * Config should not be required if value from stack is null
+   *
+   * @param allowEmpty
+   * @param propertyValue
+   * @returns {*|boolean}
+   * @private
+   */
+  _isRequired: function (allowEmpty, propertyValue) {
+    return !allowEmpty && !Em.isNone(propertyValue);
+  },
 
   /**
    * find UI config with current name and fileName
@@ -185,8 +198,13 @@ App.stackConfigPropertiesMapper = App.QuickDataMapper.create({
    * @param config
    */
   handleSpecialProperties: function(config) {
-    if (!config.StackConfigurations.property_type.contains('ADDITIONAL_USER_PROPERTY')) {
+    var types = config.StackConfigurations.property_type;
+    if (!types.contains('ADDITIONAL_USER_PROPERTY')) {
       config.index = App.StackService.displayOrder.indexOf(config.StackConfigurations.service_name) + 1 || 30;
+    }
+    // displayType from stack ignored, cause UID and GID should be shown along with service's user config
+    if (types.contains('UID') || types.contains('GID')) {
+      config.StackConfigurations.property_value_attributes.type = 'uid_gid';
     }
     config.StackConfigurations.service_name = 'MISC';
     config.category = 'Users and Groups';
@@ -198,7 +216,12 @@ App.stackConfigPropertiesMapper = App.QuickDataMapper.create({
    * @returns {Boolean}
    */
   isMiscService: function(type) {
-    return type.length && (type.contains('USER') || type.contains('GROUP') || type.contains('ADDITIONAL_USER_PROPERTY'));
+    return type.length &&
+      (type.contains('USER')
+      || type.contains('GROUP')
+      || type.contains('ADDITIONAL_USER_PROPERTY')
+      || type.contains('UID')
+      || type.contains('GID'));
   },
 
   /**
@@ -206,7 +229,7 @@ App.stackConfigPropertiesMapper = App.QuickDataMapper.create({
    * @param configs
    */
   addUIOnlyProperties: function(configs) {
-    require('data/HDP2/ui_properties').concat(require('data/HDP2/alert_notification')).forEach(function(p) {
+    require('data/configs/ui_properties').concat(require('data/configs/alert_notification')).forEach(function(p) {
       if(p.name == "dfs.ha.fencing.methods" && !App.get('isHaEnabled')) return;
 
       configs.push({

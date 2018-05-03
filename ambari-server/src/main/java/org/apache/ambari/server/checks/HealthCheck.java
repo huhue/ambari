@@ -35,7 +35,9 @@ import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.MaintenanceState;
 import org.apache.ambari.server.state.stack.PrereqCheckStatus;
 import org.apache.ambari.server.state.stack.PrerequisiteCheck;
+import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
 import org.apache.commons.lang.StringUtils;
+import org.codehaus.jackson.annotate.JsonProperty;
 
 import com.google.inject.Inject;
 import com.google.inject.Provider;
@@ -46,7 +48,9 @@ import com.google.inject.Singleton;
  * That is a potential problem when doing stack update.
  */
 @Singleton
-@UpgradeCheck(group = UpgradeCheckGroup.DEFAULT, required = true)
+@UpgradeCheck(
+    group = UpgradeCheckGroup.DEFAULT,
+    required = { UpgradeType.ROLLING, UpgradeType.NON_ROLLING, UpgradeType.HOST_ORDERED })
 public class HealthCheck extends AbstractCheckDescriptor {
 
   private static final List<AlertState> ALERT_STATES = asList(WARNING, CRITICAL);
@@ -73,7 +77,7 @@ public class HealthCheck extends AbstractCheckDescriptor {
     final Cluster cluster = clustersProvider.get().getCluster(clusterName);
     List<AlertCurrentEntity> alerts = alertsDAO.findCurrentByCluster(cluster.getClusterId());
 
-    List<String> errorMessages = new ArrayList<String>();
+    List<String> errorMessages = new ArrayList<>();
 
     for (AlertCurrentEntity alert : alerts) {
       AlertHistoryEntity alertHistory = alert.getAlertHistory();
@@ -96,7 +100,8 @@ public class HealthCheck extends AbstractCheckDescriptor {
       prerequisiteCheck.getFailedOn().add(clusterName);
       prerequisiteCheck.setStatus(PrereqCheckStatus.WARNING);
       String failReason = getFailReason(prerequisiteCheck, request);
-      prerequisiteCheck.setFailReason(String.format(failReason, StringUtils.join(errorMessages, "\n")));
+      prerequisiteCheck.setFailReason(
+          String.format(failReason, StringUtils.join(errorMessages, System.lineSeparator())));
     }
   }
 
@@ -104,8 +109,13 @@ public class HealthCheck extends AbstractCheckDescriptor {
    * Used to represent specific detail about alert.
    */
   private static class AlertDetail {
+    @JsonProperty("state")
     public String state;
+
+    @JsonProperty("label")
     public String label;
+
+    @JsonProperty("host_name")
     public String hostName;
 
     AlertDetail(String state, String label, String hostName) {

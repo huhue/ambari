@@ -4,10 +4,12 @@
       "name": "HIVE",
       "identities": [
         {
-          "name": "/spnego"
+          "name": "hive_spnego",
+          "reference": "/spnego"
         },
         {
-          "name": "/smokeuser"
+          "name": "hive_smokeuser",
+          "reference": "/smokeuser"
         }
       ],
       "configurations": [
@@ -15,22 +17,6 @@
           "hive-site": {
             "hive.metastore.sasl.enabled": "true",
             "hive.server2.authentication": "KERBEROS"
-          }
-        },
-        {
-          "hive-interactive-site": {
-            "hive.llap.daemon.work.dirs": "/hadoop/llap/local"
-          }
-        },
-        {
-          "webhcat-site": {
-            "templeton.kerberos.secret": "secret",
-            "templeton.hive.properties": "hive.metastore.local=false,hive.metastore.uris=${clusterHostInfo/hive_metastore_host|each(thrift://%s:9083, \\\\,, \\s*\\,\\s*)},hive.metastore.sasl.enabled=true,hive.metastore.execute.setugi=true,hive.metastore.warehouse.dir=/apps/hive/warehouse,hive.exec.mode.local.auto=false,hive.metastore.kerberos.principal=hive/_HOST@${realm}"
-          }
-        },
-        {
-          "core-site": {
-            "hadoop.proxyuser.HTTP.hosts": "${clusterHostInfo/webhcat_server_host}"
           }
         }
       ],
@@ -42,7 +28,7 @@
               "name": "hive_metastore_hive",
               "principal": {
                 "value": "hive/_HOST@${realm}",
-                "type" : "service",
+                "type": "service",
                 "configuration": "hive-site/hive.metastore.kerberos.principal",
                 "local_username": "${hive-env/hive_user}"
               },
@@ -65,13 +51,14 @@
           "name": "HIVE_SERVER",
           "identities": [
             {
-              "name": "/HDFS/NAMENODE/hdfs"
+              "name": "hive_hive_server_hdfs",
+              "reference": "/HDFS/NAMENODE/hdfs"
             },
             {
               "name": "hive_server_hive",
               "principal": {
                 "value": "hive/_HOST@${realm}",
-                "type" : "service",
+                "type": "service",
                 "configuration": "hive-site/hive.server2.authentication.kerberos.principal",
                 "local_username": "${hive-env/hive_user}"
               },
@@ -89,7 +76,8 @@
               }
             },
             {
-              "name": "/spnego",
+              "name": "hive_hive_server_spnego",
+              "reference": "/spnego",
               "principal": {
                 "configuration": "hive-site/hive.server2.authentication.spnego.principal"
               },
@@ -103,12 +91,26 @@
           "name": "WEBHCAT_SERVER",
           "identities": [
             {
-              "name": "/spnego",
+              "name": "hive_webhcat_server_spnego",
+              "reference": "/spnego",
               "principal": {
                 "configuration": "webhcat-site/templeton.kerberos.principal"
               },
               "keytab": {
                 "configuration": "webhcat-site/templeton.kerberos.keytab"
+              }
+            }
+          ],
+          "configurations": [
+            {
+              "core-site": {
+                "hadoop.proxyuser.HTTP.hosts": "${clusterHostInfo/webhcat_server_host|append(core-site/hadoop.proxyuser.HTTP.hosts, \\\\,, true)}"
+              }
+            },
+            {
+              "webhcat-site": {
+                "templeton.kerberos.secret": "secret",
+                "templeton.hive.properties": "hive.metastore.local=false,hive.metastore.uris=${clusterHostInfo/hive_metastore_host|each(thrift://%s:9083, \\\\,, \\s*\\,\\s*)},hive.metastore.sasl.enabled=true,hive.metastore.execute.setugi=true,hive.metastore.warehouse.dir=/apps/hive/warehouse,hive.exec.mode.local.auto=false,hive.metastore.kerberos.principal=hive/_HOST@${realm}"
               }
             }
           ]

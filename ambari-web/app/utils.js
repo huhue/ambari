@@ -33,3 +33,4 @@ require('utils/configs/move_rm_config_initializer');
 require('utils/configs/move_os_config_initializer');
 require('utils/configs/move_hm_config_initializer');
 require('utils/configs/move_hs_config_initializer');
+require('utils/configs/move_ws_config_initializer');

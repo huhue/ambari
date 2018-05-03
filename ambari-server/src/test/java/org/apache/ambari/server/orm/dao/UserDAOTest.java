@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,31 +18,85 @@
 
 package org.apache.ambari.server.orm.dao;
 
-import com.google.inject.Inject;
-import com.google.inject.Provider;
-import org.junit.Before;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.anyString;
+import static org.easymock.EasyMock.createNiceMock;
 import static org.easymock.EasyMock.createStrictMock;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.reset;
+import static org.junit.Assert.assertEquals;
+
 import javax.persistence.EntityManager;
+import javax.persistence.TypedQuery;
+
+import org.apache.ambari.server.orm.DBAccessor;
+import org.apache.ambari.server.orm.entities.UserEntity;
+import org.apache.ambari.server.security.authorization.UserName;
+import org.junit.Test;
+
+import com.google.inject.AbstractModule;
+import com.google.inject.Guice;
+import com.google.inject.Inject;
+import com.google.inject.Injector;
+import com.google.inject.Provider;
 
 /**
  * UserDAO unit tests.
  */
 public class UserDAOTest {
 
-  @Inject
-  DaoUtils daoUtils;
+  private static String SERVICEOP_USER_NAME = "serviceopuser";
+  private UserDAO userDAO;
 
-  Provider<EntityManager> entityManagerProvider = createStrictMock(Provider.class);
-  EntityManager entityManager = createStrictMock(EntityManager.class);
+  public void init(UserEntity userInDB) {
+    final EntityManager entityManager = createStrictMock(EntityManager.class);
+    final DaoUtils daoUtils = createNiceMock(DaoUtils.class);
+    final DBAccessor dbAccessor = createNiceMock(DBAccessor.class);
+    final Injector mockInjector = Guice.createInjector(new AbstractModule() {
+      @Override
+      protected void configure() {
+        bind(EntityManagerProvider.class);
+        bind(EntityManager.class).toInstance(entityManager);
+        bind(DBAccessor.class).toInstance(dbAccessor);
+        bind(DaoUtils.class).toInstance(daoUtils);
+      }
+    });
+    userDAO = mockInjector.getInstance(UserDAO.class);
 
-  @Before
-  public void init() {
-    reset(entityManagerProvider);
-    expect(entityManagerProvider.get()).andReturn(entityManager).atLeastOnce();
-    replay(entityManagerProvider);
+    TypedQuery<UserEntity> userQuery = createNiceMock(TypedQuery.class);
+    expect(userQuery.getSingleResult()).andReturn(userInDB);
+    expect(entityManager.createNamedQuery(anyString(), anyObject(Class.class))).andReturn(userQuery);
+    replay(entityManager, daoUtils, dbAccessor, userQuery);
+  }
+
+  @Test
+  public void testUserByName() {
+    init(user());
+    assertEquals(SERVICEOP_USER_NAME, userDAO.findUserByName(SERVICEOP_USER_NAME).getUserName());
+  }
+
+  private static final UserEntity user() {
+    return user(SERVICEOP_USER_NAME);
+  }
+
+  private static final UserEntity user(String name) {
+    UserEntity userEntity = new UserEntity();
+    userEntity.setUserName(UserName.fromString(name).toString());
+    return userEntity;
+  }
+
+  static class EntityManagerProvider implements Provider<EntityManager> {
+    private final EntityManager entityManager;
+
+    @Inject
+    public EntityManagerProvider(EntityManager entityManager) {
+      this.entityManager = entityManager;
+    }
+
+    @Override
+    public EntityManager get() {
+      return entityManager;
+    }
   }
 
 }

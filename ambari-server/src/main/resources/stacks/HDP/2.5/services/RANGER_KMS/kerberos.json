@@ -4,13 +4,11 @@
       "name": "RANGER_KMS",
       "identities": [
         {
-          "name": "/spnego",
+          "name": "ranger_kms_spnego",
+          "reference": "/spnego",
           "keytab": {
             "configuration": "kms-site/hadoop.kms.authentication.kerberos.keytab"
           }
-        },
-        {
-          "name": "/smokeuser"
         }
       ],
       "auth_to_local_properties" : [
@@ -22,6 +20,16 @@
             "hadoop.kms.authentication.type": "kerberos",
             "hadoop.kms.authentication.kerberos.principal": "*"
           }
+        },
+        {
+          "ranger-kms-audit": {
+            "xasecure.audit.jaas.Client.loginModuleName": "com.sun.security.auth.module.Krb5LoginModule",
+            "xasecure.audit.jaas.Client.loginModuleControlFlag": "required",
+            "xasecure.audit.jaas.Client.option.useKeyTab": "true",
+            "xasecure.audit.jaas.Client.option.storeKey": "false",
+            "xasecure.audit.jaas.Client.option.serviceName": "solr",
+            "xasecure.audit.destination.solr.force.use.inmemory.jaas.config": "true"
+          }
         }
       ],
       "components": [
@@ -29,16 +37,14 @@
           "name": "RANGER_KMS_SERVER",
           "identities": [
             {
-              "name": "/spnego",
+              "name": "ranger_kms_ranger_kms_server_spnego",
+              "reference": "/spnego",
               "principal": {
                 "configuration": "kms-site/hadoop.kms.authentication.signer.secret.provider.zookeeper.kerberos.principal"
               },
               "keytab": {
                 "configuration": "kms-site/hadoop.kms.authentication.signer.secret.provider.zookeeper.kerberos.keytab"
               }
-            },
-            {
-              "name": "/smokeuser"
             },
             {
               "name": "rangerkms",
@@ -55,6 +61,16 @@
                   "access": "r"
                 },
                 "configuration": "dbks-site/ranger.ks.kerberos.keytab"
+              }
+            },
+            {
+              "name": "ranger_kms_ranger_kms_server_rangerkms",
+              "reference": "/RANGER_KMS/RANGER_KMS_SERVER/rangerkms",
+              "principal": {
+                "configuration": "ranger-kms-audit/xasecure.audit.jaas.Client.option.principal"
+              },
+              "keytab": {
+                "configuration": "ranger-kms-audit/xasecure.audit.jaas.Client.option.keyTab"
               }
             }
           ]

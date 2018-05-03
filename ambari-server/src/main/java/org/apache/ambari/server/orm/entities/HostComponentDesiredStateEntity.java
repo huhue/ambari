@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -24,52 +24,73 @@ import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.EnumType;
 import javax.persistence.Enumerated;
+import javax.persistence.GeneratedValue;
+import javax.persistence.GenerationType;
 import javax.persistence.Id;
 import javax.persistence.JoinColumn;
 import javax.persistence.JoinColumns;
 import javax.persistence.ManyToOne;
 import javax.persistence.NamedQueries;
 import javax.persistence.NamedQuery;
-import javax.persistence.OneToOne;
+import javax.persistence.Table;
+import javax.persistence.TableGenerator;
+import javax.persistence.UniqueConstraint;
 
 import org.apache.ambari.server.state.HostComponentAdminState;
 import org.apache.ambari.server.state.MaintenanceState;
-import org.apache.ambari.server.state.SecurityState;
 import org.apache.ambari.server.state.State;
 
-@javax.persistence.IdClass(HostComponentDesiredStateEntityPK.class)
-@javax.persistence.Table(name = "hostcomponentdesiredstate")
+import com.google.common.base.Objects;
+
+
 @Entity
+@Table(
+  name = "hostcomponentdesiredstate",
+  uniqueConstraints = @UniqueConstraint(
+    name = "UQ_hcdesiredstate_name",
+    columnNames = { "component_name", "service_name", "host_id", "cluster_id" }) )
+@TableGenerator(
+  name = "hostcomponentdesiredstate_id_generator",
+  table = "ambari_sequences",
+  pkColumnName = "sequence_name",
+  valueColumnName = "sequence_value",
+  pkColumnValue = "hostcomponentdesiredstate_id_seq",
+  initialValue = 0)
 @NamedQueries({
     @NamedQuery(name = "HostComponentDesiredStateEntity.findAll", query = "SELECT hcds from HostComponentDesiredStateEntity hcds"),
-
-    @NamedQuery(name = "HostComponentDesiredStateEntity.findByHost", query =
-        "SELECT hcds from HostComponentDesiredStateEntity hcds WHERE hcds.hostEntity.hostName=:hostName"),
-
-    @NamedQuery(name = "HostComponentDesiredStateEntity.findByService", query =
-        "SELECT hcds from HostComponentDesiredStateEntity hcds WHERE hcds.serviceName=:serviceName"),
 
     @NamedQuery(name = "HostComponentDesiredStateEntity.findByServiceAndComponent", query =
         "SELECT hcds from HostComponentDesiredStateEntity hcds WHERE hcds.serviceName=:serviceName AND hcds.componentName=:componentName"),
 
     @NamedQuery(name = "HostComponentDesiredStateEntity.findByServiceComponentAndHost", query =
         "SELECT hcds from HostComponentDesiredStateEntity hcds WHERE hcds.serviceName=:serviceName AND hcds.componentName=:componentName AND hcds.hostEntity.hostName=:hostName"),
+
+  @NamedQuery(name = "HostComponentDesiredStateEntity.findByIndexAndHost", query =
+    "SELECT hcds from HostComponentDesiredStateEntity hcds WHERE hcds.clusterId=:clusterId AND hcds.serviceName=:serviceName AND hcds.componentName=:componentName AND hcds.hostId=:hostId"),
+
+  @NamedQuery(name = "HostComponentDesiredStateEntity.findByIndex", query =
+    "SELECT hcds from HostComponentDesiredStateEntity hcds WHERE hcds.clusterId=:clusterId AND hcds.serviceName=:serviceName AND hcds.componentName=:componentName"),
+
+  @NamedQuery(name = "HostComponentDesiredStateEntity.findByHostsAndCluster", query =
+    "SELECT hcds from HostComponentDesiredStateEntity hcds WHERE hcds.hostId IN :hostIds AND hcds.clusterId=:clusterId"),
 })
 public class HostComponentDesiredStateEntity {
 
   @Id
+  @GeneratedValue(strategy = GenerationType.TABLE, generator = "hostcomponentdesiredstate_id_generator")
+  @Column(name = "id", nullable = false, insertable = true, updatable = false)
+  private Long id;
+
+
   @Column(name = "cluster_id", nullable = false, insertable = false, updatable = false, length = 10)
   private Long clusterId;
 
-  @Id
   @Column(name = "service_name", nullable = false, insertable = false, updatable = false)
   private String serviceName;
 
-  @Id
   @Column(name = "host_id", nullable = false, insertable = false, updatable = false)
   private Long hostId;
 
-  @Id
   @Column(name = "component_name", insertable = false, updatable = false)
   private String componentName = "";
 
@@ -77,18 +98,6 @@ public class HostComponentDesiredStateEntity {
   @Column(name = "desired_state", nullable = false, insertable = true, updatable = true)
   @Enumerated(value = EnumType.STRING)
   private State desiredState = State.INIT;
-
-  @Basic
-  @Column(name = "security_state", nullable = false, insertable = true, updatable = true)
-  @Enumerated(value = EnumType.STRING)
-  private SecurityState securityState = SecurityState.UNSECURED;
-
-  /**
-   * Unidirectional one-to-one association to {@link StackEntity}
-   */
-  @OneToOne
-  @JoinColumn(name = "desired_stack_id", unique = false, nullable = false)
-  private StackEntity desiredStack;
 
   @Enumerated(value = EnumType.STRING)
   @Column(name = "admin_state", nullable = true, insertable = true, updatable = true)
@@ -112,6 +121,8 @@ public class HostComponentDesiredStateEntity {
   @Basic
   @Column(name = "restart_required", insertable = true, updatable = true, nullable = false)
   private Integer restartRequired = 0;
+
+  public Long getId() { return id; }
 
   public Long getClusterId() {
     return clusterId;
@@ -149,22 +160,6 @@ public class HostComponentDesiredStateEntity {
     this.desiredState = desiredState;
   }
 
-  public SecurityState getSecurityState() {
-    return securityState;
-  }
-
-  public void setSecurityState(SecurityState securityState) {
-    this.securityState = securityState;
-  }
-
-  public StackEntity getDesiredStack() {
-    return desiredStack;
-  }
-
-  public void setDesiredStack(StackEntity desiredStack) {
-    this.desiredStack = desiredStack;
-  }
-
   public HostComponentAdminState getAdminState() {
     return adminState;
   }
@@ -181,6 +176,10 @@ public class HostComponentDesiredStateEntity {
     maintenanceState = state;
   }
 
+  public void setHostId(Long hostId) {
+    this.hostId = hostId;
+  }
+
   @Override
   public boolean equals(Object o) {
     if (this == o) {
@@ -192,28 +191,27 @@ public class HostComponentDesiredStateEntity {
 
     HostComponentDesiredStateEntity that = (HostComponentDesiredStateEntity) o;
 
-    if (clusterId != null ? !clusterId.equals(that.clusterId) : that.clusterId != null) {
+    if (!Objects.equal(id, that.id)) {
       return false;
     }
 
-    if (componentName != null ? !componentName.equals(that.componentName) : that.componentName != null) {
+    if (!Objects.equal(clusterId, that.clusterId)) {
       return false;
     }
 
-    if (desiredStack != null ? !desiredStack.equals(that.desiredStack)
-        : that.desiredStack != null) {
+    if (!Objects.equal(componentName, that.componentName)) {
       return false;
     }
 
-    if (desiredState != null ? !desiredState.equals(that.desiredState) : that.desiredState != null) {
+    if (!Objects.equal(desiredState, that.desiredState)) {
       return false;
     }
 
-    if (hostEntity != null ? !hostEntity.equals(that.hostEntity) : that.hostEntity != null) {
+    if (!Objects.equal(hostEntity, that.hostEntity)) {
       return false;
     }
 
-    if (serviceName != null ? !serviceName.equals(that.serviceName) : that.serviceName != null) {
+    if (!Objects.equal(serviceName, that.serviceName)) {
       return false;
     }
 
@@ -222,11 +220,11 @@ public class HostComponentDesiredStateEntity {
 
   @Override
   public int hashCode() {
-    int result = clusterId != null ? clusterId.intValue() : 0;
+    int result = id != null ? id.hashCode() : 0;
+    result = 31 * result + (clusterId != null ? clusterId.hashCode() : 0);
     result = 31 * result + (hostEntity != null ? hostEntity.hashCode() : 0);
     result = 31 * result + (componentName != null ? componentName.hashCode() : 0);
     result = 31 * result + (desiredState != null ? desiredState.hashCode() : 0);
-    result = 31 * result + (desiredStack != null ? desiredStack.hashCode() : 0);
     result = 31 * result + (serviceName != null ? serviceName.hashCode() : 0);
     return result;
   }
@@ -254,5 +252,14 @@ public class HostComponentDesiredStateEntity {
 
   public void setRestartRequired(boolean restartRequired) {
     this.restartRequired = (restartRequired == false ? 0 : 1);
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this).add("serviceName", serviceName).add("componentName",
+        componentName).add("hostId", hostId).add("desiredState", desiredState).toString();
   }
 }

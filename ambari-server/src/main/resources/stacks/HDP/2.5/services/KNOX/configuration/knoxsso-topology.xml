@@ -19,12 +19,11 @@
  * limitations under the License.
  */
 -->
-
 <configuration supports_final="false" supports_adding_forbidden="true">
-    <!-- topology file -->
-
-    <property>
+  <!-- topology file -->
+  <property>
     <name>content</name>
+    <display-name>knoxsso-topology template</display-name>
     <value>
       &lt;topology&gt;
           &lt;gateway&gt;
@@ -118,9 +117,10 @@
         The configuration specifies the KnoxSSO provider integration, cookie and token management details.
     </description>
     <value-attributes>
-       <type>content</type>
-       <empty-value-valid>true</empty-value-valid>
-       <show-property-name>false</show-property-name>
+      <type>content</type>
+      <empty-value-valid>true</empty-value-valid>
+      <show-property-name>false</show-property-name>
     </value-attributes>
-    </property>
+    <on-ambari-upgrade add="true"/>
+  </property>
 </configuration>

@@ -35,9 +35,11 @@
   <properties>
     <collector.dir>${project.basedir}/../ambari-metrics-timelineservice</collector.dir>
     <monitor.dir>${project.basedir}/../ambari-metrics-host-monitoring</monitor.dir>
+    <aggregator.dir>${project.basedir}/../ambari-metrics-host-aggregator</aggregator.dir>
     <grafana.dir>${project.basedir}/../ambari-metrics-grafana</grafana.dir>
     <hadoop-sink.dir>${project.basedir}/../ambari-metrics-hadoop-sink</hadoop-sink.dir>
     <storm-sink.dir>${project.basedir}/../ambari-metrics-storm-sink</storm-sink.dir>
+    <storm-sink-legacy.dir>${project.basedir}/../ambari-metrics-storm-sink-legacy</storm-sink-legacy.dir>
     <flume-sink.dir>${project.basedir}/../ambari-metrics-flume-sink</flume-sink.dir>
     <kafka-sink.dir>${project.basedir}/../ambari-metrics-kafka-sink</kafka-sink.dir>
     <python.ver>python &gt;= 2.6</python.ver>
@@ -51,6 +53,7 @@
     <deb.dependency.list>${deb.python.ver},python-dev,gcc</deb.dependency.list>
     <hadoop.sink.jar>ambari-metrics-hadoop-sink-with-common-${project.version}.jar</hadoop.sink.jar>
     <storm.sink.jar>ambari-metrics-storm-sink-with-common-${project.version}.jar</storm.sink.jar>
+    <storm.sink.legacy.jar>ambari-metrics-storm-sink-legacy-with-common-${project.version}.jar</storm.sink.legacy.jar>
     <flume.sink.jar>ambari-metrics-flume-sink-with-common-${project.version}.jar</flume.sink.jar>
     <kafka.sink.jar>ambari-metrics-kafka-sink-with-common-${project.version}.jar</kafka.sink.jar>
   </properties>
@@ -238,6 +241,11 @@
                       <sources>
                         <source>
                           <location>${collector.dir}/target/lib</location>
+                          <excludes>
+                            <exclude>*tests.jar</exclude>
+                            <exclude>findbugs*.jar</exclude>
+                            <exclude>jdk.tools*.jar</exclude>
+                          </excludes>
                         </source>
                         <source>
                           <location>
@@ -255,6 +263,9 @@
                           <excludes>
                             <exclude>bin/**</exclude>
                             <exclude>bin/*</exclude>
+                            <exclude>lib/*tests.jar</exclude>
+                            <exclude>lib/findbugs*.jar</exclude>
+                            <exclude>lib/jdk.tools*.jar</exclude>
                           </excludes>
                         </source>
                       </sources>
@@ -302,6 +313,19 @@
                       </sources>
                     </mapping>
                     <mapping>
+                      <directory>/usr/lib/ambari-metrics-collector/bin</directory>
+                      <filemode>755</filemode>
+                      <username>root</username>
+                      <groupname>root</groupname>
+                      <directoryIncluded>false</directoryIncluded>
+                      <sources>
+                        <source>
+                          <location>${collector.dir}/conf/unix/sqlline</location>
+                          <filter>false</filter>
+                        </source>
+                      </sources>
+                    </mapping>
+                    <mapping>
                       <directory>/etc/ambari-metrics-collector/conf</directory>
                       <configuration>true</configuration>
                       <sources>
@@ -313,6 +337,12 @@
                         </source>
                         <source>
                           <location>${collector.dir}/conf/unix/log4j.properties</location>
+                        </source>
+                        <source>
+                          <location>${collector.dir}/conf/unix/metrics_whitelist</location>
+                        </source>
+                        <source>
+                          <location>${collector.dir}/conf/unix/amshbase_metrics_whitelist</location>
                         </source>
                         <source>
                           <location>${collector.dir}/target/embedded/${hbase.folder}/conf/hbase-site.xml</location>
@@ -387,6 +417,14 @@
                       <sources>
                         <source>
                           <location>${storm-sink.dir}/target/ambari-metrics-storm-sink-with-common-${project.version}.jar</location>
+                        </source>
+                      </sources>
+                    </mapping>
+                    <mapping>
+                      <directory>/usr/lib/storm/lib</directory>
+                      <sources>
+                        <source>
+                          <location>${storm-sink-legacy.dir}/target/ambari-metrics-storm-sink-legacy-with-common-${project.version}.jar</location>
                         </source>
                       </sources>
                     </mapping>
@@ -565,6 +603,19 @@
                       </sources>
                     </mapping>
                     <mapping>
+                      <directory>/var/lib/ambari-metrics-monitor/lib</directory>
+                      <sources>
+                        <source>
+                          <location>
+                            ${aggregator.dir}/target/
+                          </location>
+                          <includes>
+                            <include>ambari-metrics-host-aggregator-${project.version}.jar</include>
+                          </includes>
+                        </source>
+                      </sources>
+                    </mapping>
+                    <mapping>
                       <directory>/etc/ambari-metrics-monitor/conf</directory>
                       <configuration>true</configuration>
                     </mapping>
@@ -586,7 +637,6 @@
                   </mappings>
                 </configuration>
               </execution>
-
 
             </executions>
           </plugin>
@@ -710,6 +760,7 @@
                     <path>/var/run/ambari-metrics-grafana</path>
                     <path>/var/log/ambari-metrics-grafana</path>
                     <path>/var/lib/ambari-metrics-collector</path>
+                    <path>/var/lib/ambari-metrics-monitor/lib</path>
                     <path>/var/lib/ambari-metrics-grafana</path>
                     <path>/usr/lib/ambari-metrics-hadoop-sink</path>
                     <path>/usr/lib/ambari-metrics-kafka-sink</path>
@@ -760,6 +811,7 @@
                 <data>
                   <src>${collector.dir}/target/lib</src>
                   <type>directory</type>
+                  <excludes>*tests.jar</excludes>
                   <mapper>
                     <type>perm</type>
                     <filemode>644</filemode>
@@ -769,7 +821,7 @@
                 <data>
                   <src>${collector.dir}/target/embedded/${hbase.folder}</src>
                   <type>directory</type>
-                  <excludes>bin/**,bin/*</excludes>
+                  <excludes>bin/**,bin/*,lib/*tests.jar</excludes>
                   <mapper>
                     <type>perm</type>
                     <prefix>/usr/lib/ams-hbase</prefix>
@@ -837,6 +889,24 @@
                   <mapper>
                     <type>perm</type>
                     <filemode>644</filemode>
+                    <prefix>/etc/ambari-metrics-collector/conf</prefix>
+                  </mapper>
+                </data>
+                <data>
+                  <src>${collector.dir}/conf/unix/metrics_whitelist</src>
+                  <type>file</type>
+                  <mapper>
+                    <type>perm</type>
+                    <filemode>755</filemode>
+                    <prefix>/etc/ambari-metrics-collector/conf</prefix>
+                  </mapper>
+                </data>
+                <data>
+                  <src>${collector.dir}/conf/unix/amshbase_metrics_whitelist</src>
+                  <type>file</type>
+                  <mapper>
+                    <type>perm</type>
+                    <filemode>755</filemode>
                     <prefix>/etc/ambari-metrics-collector/conf</prefix>
                   </mapper>
                 </data>
@@ -934,10 +1004,20 @@
                   </mapper>
                 </data>
 
-                <!-- storm sink -->
+                <!-- storm sinks -->
 
                 <data>
                   <src>${storm-sink.dir}/target/${storm.sink.jar}</src>
+                  <type>file</type>
+                  <mapper>
+                    <type>perm</type>
+                    <filemode>644</filemode>
+                    <dirmode>755</dirmode>
+                    <prefix>/usr/lib/storm/lib</prefix>
+                  </mapper>
+                </data>
+                <data>
+                  <src>${storm-sink-legacy.dir}/target/${storm.sink.legacy.jar}</src>
                   <type>file</type>
                   <mapper>
                     <type>perm</type>
@@ -994,6 +1074,7 @@
         <assemblydescriptor.monitor>src/main/assembly/monitor.xml</assemblydescriptor.monitor>
         <assemblydescriptor.sink>src/main/assembly/sink.xml</assemblydescriptor.sink>
         <assemblydescriptor.grafana>src/main/assembly/grafana.xml</assemblydescriptor.grafana>
+
         <packagingFormat>jar</packagingFormat>
       </properties>
       <build>
@@ -1025,7 +1106,7 @@
                     <!-- Resolving symlinks-->
                     <move todir="${project.build.directory}/embedded/${hadoop.folder}/lib/native/">
                       <fileset dir="${project.build.directory}/embedded/${hadoop.folder}/lib/native/"/>
-                      <mapper type="regexp" from="libsnappy.so.1.1.*" to="libsnappy.so.1"/>
+                      <mapper type="regexp" from="libsnappy.so.1.*.*" to="libsnappy.so.1"/>
                     </move>
                     <move
                       file="${project.build.directory}/embedded/${hadoop.folder}/lib/native/libhdfs.so.0.0.0"
@@ -1253,6 +1334,11 @@
     </dependency>
     <dependency>
       <groupId>org.apache.ambari</groupId>
+      <artifactId>ambari-metrics-storm-sink-legacy</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.ambari</groupId>
       <artifactId>ambari-metrics-kafka-sink</artifactId>
       <version>${project.version}</version>
     </dependency>
@@ -1262,6 +1348,11 @@
       <version>${project.version}</version>
       <type>pom</type>
       <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.ambari</groupId>
+      <artifactId>ambari-metrics-host-aggregator</artifactId>
+      <version>${project.version}</version>
     </dependency>
   </dependencies>
 

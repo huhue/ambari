@@ -17,7 +17,7 @@
  */
 package org.apache.ambari.server.checks;
 
-import java.util.Map;
+import java.util.Set;
 
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.controller.PrereqCheckRequest;
@@ -26,14 +26,18 @@ import org.apache.ambari.server.state.MaintenanceState;
 import org.apache.ambari.server.state.Service;
 import org.apache.ambari.server.state.stack.PrereqCheckStatus;
 import org.apache.ambari.server.state.stack.PrerequisiteCheck;
+import org.apache.ambari.server.state.stack.upgrade.UpgradeType;
 
 import com.google.inject.Singleton;
 
 /**
- * Checks that services are in the maintenance mode.
+ * Checks to ensure that services are not in maintenance mode.
  */
 @Singleton
-@UpgradeCheck(group = UpgradeCheckGroup.MAINTENANCE_MODE, order = 6.0f, required = true)
+@UpgradeCheck(
+    group = UpgradeCheckGroup.MAINTENANCE_MODE,
+    order = 6.0f,
+    required = { UpgradeType.ROLLING, UpgradeType.NON_ROLLING, UpgradeType.HOST_ORDERED })
 public class ServicesMaintenanceModeCheck extends AbstractCheckDescriptor {
 
   /**
@@ -45,10 +49,11 @@ public class ServicesMaintenanceModeCheck extends AbstractCheckDescriptor {
 
   @Override
   public void perform(PrerequisiteCheck prerequisiteCheck, PrereqCheckRequest request) throws AmbariException {
-    final String clusterName = request.getClusterName();
-    final Cluster cluster = clustersProvider.get().getCluster(clusterName);
-    for (Map.Entry<String, Service> serviceEntry : cluster.getServices().entrySet()) {
-      final Service service = serviceEntry.getValue();
+    final Cluster cluster = clustersProvider.get().getCluster(request.getClusterName());
+    Set<String> servicesInUpgrade = getServicesInUpgrade(request);
+
+    for (String serviceName : servicesInUpgrade) {
+      final Service service = cluster.getService(serviceName);
       if (!service.isClientOnlyService() && service.getMaintenanceState() == MaintenanceState.ON) {
         prerequisiteCheck.getFailedOn().add(service.getName());
       }

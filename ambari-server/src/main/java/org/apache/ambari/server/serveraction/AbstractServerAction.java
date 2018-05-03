@@ -18,24 +18,23 @@
 
 package org.apache.ambari.server.serveraction;
 
+import java.util.Collections;
+import java.util.Map;
+
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.ExecutionCommandWrapper;
 import org.apache.ambari.server.actionmanager.HostRoleCommand;
 import org.apache.ambari.server.actionmanager.HostRoleStatus;
 import org.apache.ambari.server.agent.CommandReport;
 import org.apache.ambari.server.agent.ExecutionCommand;
-import org.apache.ambari.server.audit.event.AuditEvent;
 import org.apache.ambari.server.audit.AuditLogger;
+import org.apache.ambari.server.audit.event.AuditEvent;
 import org.apache.ambari.server.utils.StageUtils;
 
-import java.util.Collections;
-import java.util.Map;
-
 import com.google.inject.Inject;
-import com.google.inject.Injector;
 
 /**
- * AbstractServerActionImpl is an abstract implementation of a ServerAction.
+ * AbstractServerAction is an abstract implementation of a ServerAction.
  * <p/>
  * This abstract implementation provides common facilities for all ServerActions, such as
  * maintaining the ExecutionCommand and HostRoleCommand properties. It also provides a convenient
@@ -81,6 +80,13 @@ public abstract class AbstractServerAction implements ServerAction {
   }
 
   /**
+   * @return a command report with 0 exit code and COMPLETED HostRoleStatus
+   */
+  protected CommandReport createCompletedCommandReport() {
+    return createCommandReport(0, HostRoleStatus.COMPLETED, "{}", actionLog.getStdOut(), actionLog.getStdErr());
+  }
+
+  /**
    * Creates a CommandReport used to report back to Ambari the status of this ServerAction.
    *
    * @param exitCode      an integer value declaring the exit code for this action - 0 typically
@@ -115,8 +121,8 @@ public abstract class AbstractServerAction implements ServerAction {
         report = new CommandReport();
 
         report.setActionId(StageUtils.getActionId(hostRoleCommand.getRequestId(), hostRoleCommand.getStageId()));
-        report.setClusterName(executionCommand.getClusterName());
-        report.setConfigurationTags(executionCommand.getConfigurationTags());
+        report.setClusterId(executionCommand.getClusterId());
+        //report.setConfigurationTags(executionCommand.getConfigurationTags());
         report.setRole(executionCommand.getRole());
         report.setRoleCommand((roleCommand == null) ? null : roleCommand.toString());
         report.setServiceName(executionCommand.getServiceName());
@@ -168,7 +174,7 @@ public abstract class AbstractServerAction implements ServerAction {
    * @return the (assumed read-only) configurations value from the ExecutionCommand
    */
   protected Map<String, Map<String, String>> getConfigurations() {
-    return (executionCommand == null) ? Collections.<String, Map<String, String>>emptyMap() : executionCommand.getConfigurations();
+    return (executionCommand == null) ? Collections.emptyMap() : executionCommand.getConfigurations();
   }
 
   /**

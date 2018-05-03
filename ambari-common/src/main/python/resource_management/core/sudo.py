@@ -27,11 +27,11 @@ import stat
 import errno
 import random
 from resource_management.core import shell
-from resource_management.core.logger import Logger
 from resource_management.core.exceptions import Fail
-from ambari_commons.os_check import OSCheck
-import subprocess
+from ambari_commons.unicode_tolerant_fs import unicode_walk
+from ambari_commons import subprocess32
 
+from resource_management.core.utils import attr_to_bitmask
 
 if os.geteuid() == 0:
   def chown(path, owner, group):
@@ -47,7 +47,7 @@ if os.geteuid() == 0:
     if uid == -1 and gid == -1:
       return
       
-    for root, dirs, files in os.walk(path, followlinks=follow_links):
+    for root, dirs, files in unicode_walk(path, followlinks=True):
       for name in files + dirs:
         if follow_links:
           os.chown(os.path.join(root, name), uid, gid)
@@ -56,16 +56,45 @@ if os.geteuid() == 0:
             
   
   def chmod(path, mode):
+    """
+    Wrapper around python function
+    
+    :type path str
+    :type mode int
+    """
     return os.chmod(path, mode)
   
-  mode_to_stat = {"a+x": stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH, "a+rx": stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH | stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH, "u+x": stat.S_IXUSR, "g+x": stat.S_IXGRP,  "o+x": stat.S_IXOTH}
+
   def chmod_extended(path, mode):
-    if mode in mode_to_stat:
-      st = os.stat(path)
-      os.chmod(path, st.st_mode | mode_to_stat[mode])
-    else:
-      shell.checked_call(["chmod", mode, path])
-      
+    """
+    :type path str
+    :type mode str
+    """
+    st = os.stat(path)
+    os.chmod(path, attr_to_bitmask(mode, initial_bitmask=st.st_mode))
+
+  def chmod_recursive(path, recursive_mode_flags, recursion_follow_links=False):
+    """
+    Change recursively permissions on directories or files
+    
+    :type path str
+    :type recursive_mode_flags
+    :type recursion_follow_links bool
+    """
+    dir_attrib = recursive_mode_flags["d"] if "d" in recursive_mode_flags else None
+    files_attrib = recursive_mode_flags["f"] if "d" in recursive_mode_flags else None
+
+    for root, dirs, files in unicode_walk(path, followlinks=recursion_follow_links):
+      if dir_attrib is not None:
+        for dir_name in dirs:
+          full_dir_path = os.path.join(root, dir_name)
+          chmod(full_dir_path, attr_to_bitmask(dir_attrib, initial_bitmask=os.stat(full_dir_path).st_mode))
+
+      if files_attrib is not None:
+        for file_name in files:
+          full_file_path = os.path.join(root, file_name)
+          chmod(full_file_path, attr_to_bitmask(files_attrib, initial_bitmask=os.stat(full_file_path).st_mode))
+
   def copy(src, dst):
     shutil.copy(src, dst)
     
@@ -144,6 +173,8 @@ if os.geteuid() == 0:
   def kill(pid, signal):
     os.kill(pid, signal)
     
+  def listdir(path):
+    return os.listdir(path)
     
 else:
   # os.chown replacement
@@ -197,7 +228,19 @@ else:
     
   # fp.write replacement
   def create_file(filename, content, encoding=None):
-    return _create_file(filename, content, True, encoding)
+    """
+    if content is None, create empty file
+    """
+    content = content if content else ""
+    content = content.encode(encoding) if encoding else content
+
+    tmpf_name = tempfile.gettempdir() + os.sep + tempfile.template + str(time.time()) + "_" + str(random.randint(0, 1000))
+    try:
+        with open(tmpf_name, "wb") as fp:
+            fp.write(content)
+        shell.checked_call(["cp", "-f", tmpf_name, filename], sudo=True)
+    finally:
+        os.unlink(tmpf_name)
       
   # fp.read replacement
   def read_file(filename, encoding=None):
@@ -236,7 +279,7 @@ else:
     class Stat:
       def __init__(self, path):
         cmd = ["stat", "-c", "%u %g %a", path]
-        code, out, err = shell.checked_call(cmd, sudo=True, stderr=subprocess.PIPE)
+        code, out, err = shell.checked_call(cmd, sudo=True, stderr=subprocess32.PIPE)
         values = out.split(' ')
         if len(values) != 3:
           raise Fail("Execution of '{0}' returned unexpected output. {2}\n{3}".format(cmd, code, err, out))
@@ -255,27 +298,21 @@ else:
   # shutil.copy replacement
   def copy(src, dst):
     shell.checked_call(["sudo", "cp", "-r", src, dst], sudo=True)
-    
-def chmod_recursive(path, recursive_mode_flags, recursion_follow_links):
-  find_flags = []
-  if recursion_follow_links:
-    find_flags.append('-L')
-    
-  for key, flags in recursive_mode_flags.iteritems():
-    shell.checked_call(["find"] + find_flags + [path, "-type", key, "-exec" , "chmod", flags ,"{}" ,";"])
 
-# fp.write replacement
-def _create_file(filename, content, withSudo, encoding=None):
-  """
-  if content is None, create empty file
-  """
-  content = content if content else ""
-  content = content.encode(encoding) if encoding else content
+  # os.listdir replacement
+  def listdir(path):
+    if not path_isdir(path):
+      raise Fail("{0} is not a directory. Cannot list files of it.".format(path))
+    
+    code, out, err = shell.checked_call(["ls", path], sudo=True, stderr=subprocess32.PIPE)
+    files = out.splitlines()
+    return files
 
-  tmpf_name = tempfile.gettempdir() + os.sep + tempfile.template + str(time.time()) + "_" + str(random.randint(0, 1000))
-  try:
-      with open(tmpf_name, "wb") as fp:
-          fp.write(content)
-      shell.checked_call(["cp", "-f", tmpf_name, filename], sudo=withSudo)
-  finally:
-      os.unlink(tmpf_name)
+
+  def chmod_recursive(path, recursive_mode_flags, recursion_follow_links):
+    find_flags = []
+    if recursion_follow_links:
+      find_flags.append('-L')
+
+    for key, flags in recursive_mode_flags.iteritems():
+      shell.checked_call(["find"] + find_flags + [path, "-type", key, "-exec" , "chmod", flags ,"{}" ,";"])

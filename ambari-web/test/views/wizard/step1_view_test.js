@@ -20,219 +20,30 @@ var App = require('app');
 require('views/wizard/step1_view');
 
 var view;
-var controller;
 
 function getView() {
-  return App.WizardStep1View.create();
+  return App.WizardStep1View.create({
+    controller: Em.Object.create()
+  });
 }
 
 describe('App.WizardStep1View', function () {
 
-  describe('#operatingSystems', function () {
-    beforeEach(function () {
-      sinon.stub(App.Stack, 'find', function () {
-        return [
-          Ember.Object.create({
-            id: 'HDP-1.3-1234',
-            stackName: 'HDP',
-            stackVersion: '1.3',
-            active: true,
-            operatingSystems: [
-              Ember.Object.create({
-                id: 'HDP-1.3-1234-redhat5',
-                osType: 'redhat5',
-                isSelected: false,
-                repositories: [
-                  Ember.Object.create({
-                    id: 'redhat5-HDP-1.3',
-                    isSelected: false
-                  }),
-                  Ember.Object.create({
-                    id: 'redhat5-HDP-UTILS-1.1.0.19',
-                    isSelected: false
-                  })
-                ]
-              }),
-              Ember.Object.create({
-                id: 'HDP-1.3-1234-redhat6',
-                osType: 'redhat6',
-                isSelected: false,
-                repositories: [
-                  Ember.Object.create({
-                    id: 'redhat6-HDP-1.3',
-                    isSelected: false
-                  }),
-                  Ember.Object.create({
-                    id: 'redhat6-HDP-UTILS-1.1.0.19',
-                    isSelected: false
-                  })
-                ]
-              })
-            ],
-            isSelected: false
-          }),
-          Ember.Object.create({
-            id: 'HDP-2.1',
-            stackName: 'HDP',
-            stackVersion: '2.1',
-            active: true,
-            operatingSystems: [
-              Ember.Object.create({
-                id: 'HDP-2.1-redhat5',
-                osType: 'redhat5',
-                isSelected: true,
-                repositories: [
-                  Ember.Object.create({
-                    id: 'redhat5-HDP-2.1',
-                    isSelected: true,
-                    baseUrl: "http://public-repo-1.hortonworks.com/HDP/centos5/2.x/updates/2.1.5.0",
-                    latestBaseUrl: "http://public-repo-1.hortonworks.com/HDP/centos5/2.x/updates/2.1.5.0"
-                  }),
-                  Ember.Object.create({
-                    id: 'redhat5-HDP-UTILS-1.1.0.19',
-                    isSelected: true,
-                    baseUrl: "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.19/repos/centos5",
-                    latestBaseUrl: "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.19/repos/centos5"
-                  })
-                ]
-              }),
-              Ember.Object.create({
-                id: 'HDP-2.1-redhat6',
-                osType: 'redhat6',
-                isSelected: true,
-                repositories: [
-                  Ember.Object.create({
-                    id: 'redhat6-HDP-2.1',
-                    isSelected: true,
-                    baseUrl: "http://public-repo-1.hortonworks.com/HDP/centos6/2.x/updates/2.1.5.0",
-                    latestBaseUrl: "http://public-repo-1.hortonworks.com/HDP/centos6/2.x/updates/2.1.5.0"
-                  }),
-                  Ember.Object.create({
-                    id: 'redhat6-HDP-UTILS-1.1.0.19',
-                    isSelected: true,
-                    baseUrl: "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.19/repos/centos6",
-                    latestBaseUrl: "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.19/repos/centos6"
-                  })
-                ]
-              })
-            ],
-            repositories: [
-              Ember.Object.create({
-                id: 'redhat5-HDP-2.1',
-                isSelected: true,
-                baseUrl: "http://public-repo-1.hortonworks.com/HDP/centos5/2.x/updates/2.1.5.0",
-                latestBaseUrl: "http://public-repo-1.hortonworks.com/HDP/centos5/2.x/updates/2.1.5.0"
-              }),
-              Ember.Object.create({
-                id: 'redhat5-HDP-UTILS-1.1.0.19',
-                isSelected: true,
-                baseUrl: "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.19/repos/centos5",
-                latestBaseUrl: "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.19/repos/centos5"
-              }),
-              Ember.Object.create({
-                id: 'redhat6-HDP-2.1',
-                isSelected: true,
-                baseUrl: "http://public-repo-1.hortonworks.com/HDP/centos6/2.x/updates/2.1.5.0",
-                latestBaseUrl: "http://public-repo-1.hortonworks.com/HDP/centos6/2.x/updates/2.1.5.0"
-              }),
-              Ember.Object.create({
-                id: 'redhat6-HDP-UTILS-1.1.0.19',
-                isSelected: true,
-                baseUrl: "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.19/repos/centos6",
-                latestBaseUrl: "http://s3.amazonaws.com/dev.hortonworks.com/HDP-UTILS-1.1.0.19/repos/centos6"
-              })
-            ],
-            isSelected: true
-          })
-        ];
-      });
-    });
-
-    afterEach(function () {
-      App.Stack.find.restore();
-    });
-
-    describe('should create repo groups from repo list', function () {
-
-      var repositories;
-      beforeEach(function () {
-        controller = App.WizardStep1Controller.create({
-          content: {
-            stacks: App.Stack.find()
-          }
-        });
-
-        view = App.WizardStep1View.create({'controller': controller});
-        view.set('$', function () {
-          return Em.Object.create({hide: Em.K, toggle: Em.K});
-        });
-        repositories = view.get('allRepositories');
-      });
-
-      it('operatingSystems.length', function () {
-        expect(view.get('operatingSystems.length')).to.equal(2);
-      });
-
-      it('operatingSystems.0.osType', function () {
-        expect(view.get('operatingSystems')[0].get('osType')).to.equal('redhat5');
-      });
-
-      it('operatingSystems.1.osType', function () {
-        expect(view.get('operatingSystems')[1].get('osType')).to.equal('redhat6');
-      });
-
-      it('operatingSystems.0.isSelected', function () {
-        expect(view.get('operatingSystems')[0].get('isSelected')).to.be.true;
-      });
-
-      it('operatingSystems.1.isSelected', function () {
-        expect(view.get('operatingSystems')[1].get('isSelected')).to.be.true;
-      });
-
-      it('operatingSystems.0.repositories', function () {
-        expect(view.get('operatingSystems')[0].get('repositories')).to.eql([repositories[0], repositories[1]]);
-      });
-
-      it('operatingSystems.1.repositories', function () {
-        expect(view.get('operatingSystems')[1].get('repositories')).to.eql([repositories[2], repositories[3]]);
-      });
-
-    });
-
+  beforeEach(function () {
+    view = getView();
   });
 
-  describe('#invalidFormatUrlExist', function () {
+  App.TestAliases.testAsComputedEveryBy(getView(), 'isNoOsChecked', 'controller.selectedStack.operatingSystems', 'isSelected', false);
 
-    controller = App.WizardStep1Controller.create({
-      content: {
-        stacks: App.Stack.find()
-      }
-    });
-    view = App.WizardStep1View.create();
-    view.reopen({
-      controller: controller
-    });
-    view.set('$', function () {
-      return Em.Object.create({hide: Em.K, toggle: Em.K});
-    });
+  App.TestAliases.testAsComputedOr(getView(), 'isSubmitDisabled', ['invalidFormatUrlExist', 'isNoOsChecked', 'isNoOsFilled', 'controller.content.isCheckInProgress', 'App.router.btnClickInProgress', '!controller.isLoadingComplete']);
 
-    it(view.get('allRepositories').mapProperty('invalidFormatError').join(', '), function () {
-      expect(view.get('invalidFormatUrlExist')).to.equal(false);
-    });
-  });
-
-  App.TestAliases.testAsComputedEveryBy(getView(), 'isNoOsChecked', 'operatingSystems', 'isSelected', false);
-
-  App.TestAliases.testAsComputedOr(getView(), 'isSubmitDisabled', ['controller.content.isCheckInProgress']);
-
-  App.TestAliases.testAsComputedSomeBy(getView(), 'invalidUrlExist', 'allRepositories', 'validation', App.Repository.validation.INVALID);
-
-  App.TestAliases.testAsComputedSomeBy(getView(), 'invalidFormatUrlExist', 'allRepositories', 'invalidFormatError', true);
-
+  App.TestAliases.testAsComputedSomeBy(getView(), 'invalidUrlExist', 'allRepositories', 'validation', 'INVALID');
 
   describe('#editLocalRepository', function () {
 
-    it('should update repository', function () {
+    var repository;
+
+    beforeEach(function () {
       view.reopen({
         allRepositories: [
           Em.Object.create({
@@ -243,9 +54,167 @@ describe('App.WizardStep1View', function () {
         ]
       });
       view.editLocalRepository();
-      var repository = view.get('allRepositories.firstObject');
+      repository = view.get('allRepositories.firstObject');
+    });
+
+    it('should update repository base URL', function () {
       expect(repository.get('lastBaseUrl')).to.equal(repository.get('baseUrl'));
-      expect(repository.get('validation')).to.be.empty;
+    });
+
+    it('should update repository validation status', function () {
+      expect(repository.get('validation')).to.equal('PENDING');
     });
   });
+
+  describe('#isNoOsFilled', function() {
+
+    it('should be false when useRedhatSatellite is true', function() {
+      view.set('controller.selectedStack', Em.Object.create({
+        useRedhatSatellite: true
+      }));
+      expect(view.get('isNoOsFilled')).to.be.false;
+    });
+
+    it('should be false when operatingSystems is null', function() {
+      view.set('controller.selectedStack', Em.Object.create({
+        useRedhatSatellite: false,
+        operatingSystems: null
+      }));
+      expect(view.get('isNoOsFilled')).to.be.false;
+    });
+
+    it('should be false when operatingSystem is filled', function() {
+      view.set('controller.selectedStack', Em.Object.create({
+        useRedhatSatellite: false,
+        operatingSystems: [
+          Em.Object.create({
+            isSelected: true,
+            isNotFilled: false
+          })
+        ]
+      }));
+      expect(view.get('isNoOsFilled')).to.be.false;
+    });
+
+    it('should be true when operatingSystem is not filled', function() {
+      view.set('controller.selectedStack', Em.Object.create({
+        useRedhatSatellite: false,
+        operatingSystems: [
+          Em.Object.create({
+            isSelected: true,
+            isNotFilled: true
+          })
+        ]
+      }));
+      expect(view.get('isNoOsFilled')).to.be.true;
+    });
+  });
+
+  describe('#isRedhat', function() {
+
+    it('should be false when osType not specified', function() {
+      expect(view.isRedhat(Em.Object.create())).to.be.false;
+    });
+
+    it('should be false when osType not redhat', function() {
+      expect(view.isRedhat(Em.Object.create({osType: 'debian7'}))).to.be.false;
+    });
+
+    it('should be true when osType is redhat7', function() {
+      expect(view.isRedhat(Em.Object.create({osType: 'redhat7'}))).to.be.true;
+    });
+
+    it('should be true when osType is redhat-ppc7', function() {
+      expect(view.isRedhat(Em.Object.create({osType: 'redhat-ppc7'}))).to.be.true;
+    });
+  });
+
+  describe('#invalidFormatUrlExist', function () {
+
+    var testCases = [
+      {
+        title: 'no repositories',
+        allRepositories: undefined,
+        useRedhatSatellite: false,
+        result: false
+      },
+      {
+        title: 'use redhat, invalid format',
+        allRepositories: [
+          Em.Object.create({
+            osType: '',
+            invalidFormatError: false
+          }),
+          Em.Object.create({
+            osType: 'redhat',
+            invalidFormatError: true
+          })
+        ],
+        useRedhatSatellite: true,
+        result: true
+      },
+      {
+        title: 'use redhat, no invalid format',
+        allRepositories: [
+          Em.Object.create({
+            osType: '',
+            invalidFormatError: true
+          }),
+          Em.Object.create({
+            osType: 'redhat',
+            invalidFormatError: false
+          })
+        ],
+        useRedhatSatellite: true,
+        result: false
+      },
+      {
+        title: 'no use redhat, invalid format',
+        allRepositories: [
+          Em.Object.create({
+            osType: '',
+            invalidFormatError: true
+          }),
+          Em.Object.create({
+            osType: 'redhat',
+            invalidFormatError: false
+          })
+        ],
+        useRedhatSatellite: false,
+        result: true
+      },
+      {
+        title: 'no use redhat, invalid format',
+        allRepositories: [
+          Em.Object.create({
+            osType: '',
+            invalidFormatError: false
+          }),
+          Em.Object.create({
+            osType: 'redhat',
+            invalidFormatError: true
+          })
+        ],
+        useRedhatSatellite: false,
+        result: true
+      }
+    ];
+
+    testCases.forEach(function (testCase) {
+      describe(testCase.title, function () {
+        beforeEach(function () {
+          view.reopen({
+            allRepositories: testCase.allRepositories
+          });
+          view.set('controller.selectedStack', Em.Object.create({
+            useRedhatSatellite: testCase.useRedhatSatellite
+          }));
+        });
+        it('', function () {
+          expect(view.get('invalidFormatUrlExist')).to.equal(testCase.result);
+        });
+      });
+    });
+  });
+
 });

@@ -95,6 +95,13 @@ App.ServiceConfigProperty = Em.Object.extend({
   rightSideLabel: false,
 
   /**
+   * type of property
+   * @type {String[]}
+   * @default empty array
+   */
+  propertyType: [],
+
+  /**
    * Text to be shown as placeholder
    * By default savedValue is shown as placeholder
    * @type {String}
@@ -111,8 +118,13 @@ App.ServiceConfigProperty = Em.Object.extend({
   /**
    * Placeholder used for configs with input type text
    */
-  placeholder: Em.computed.firstNotBlank('placeholderText', 'savedValue'),
-
+  placeholder: function() {
+    if (this.isEditable) {
+      return this.get('placeholderText') || this.get('savedValue');
+    }
+    return null;
+  }.property('isEditable', 'placeholderText', 'savedValue'),
+  
   retypedPassword: '',
   description: '',
   displayType: 'string', // string, digits, number, directories, custom
@@ -121,6 +133,7 @@ App.ServiceConfigProperty = Em.Object.extend({
   isRequired: true, // by default a config property is required
   isReconfigurable: true, // by default a config property is reconfigurable
   isEditable: true, // by default a config property is editable
+  disabledAsComponentAction: false, // is true for component action configs
   isNotEditable: Em.computed.not('isEditable'),
   hideFinalIcon: Em.computed.and('!isFinal', 'isNotEditable'),
   isVisible: true,
@@ -129,6 +142,8 @@ App.ServiceConfigProperty = Em.Object.extend({
   isSecureConfig: false,
   errorMessage: '',
   warnMessage: '',
+  validationErrors: [], // stores messages from validation response marked as ERRROR
+  validationWarnings: [], // stores message from validation response marked as WARN
   serviceConfig: null, // points to the parent App.ServiceConfig object
   filename: '',
   isOriginalSCP : true, // if true, then this is original SCP instance and its value is not overridden value.
@@ -142,9 +157,28 @@ App.ServiceConfigProperty = Em.Object.extend({
   isComparison: false,
   hasCompareDiffs: false,
   showLabel: true,
+  isConfigIdentity: false,
+  copy: '',
+
+  /**
+   * Determines if config exists in the non-default config group but is loaded for default config group
+   *
+   * @type {boolean}
+   */
+  isCustomGroupConfig: false,
+
+  /**
+   * Determines if config is Undefined label, used for overrides, that do not have original property in default group
+   * @type {boolean}
+   */
+  isUndefinedLabel: function () {
+    return this.get('displayType') === 'label' && this.get('value') === 'Undefined';
+  }.property('displayType', 'value'),
 
   error: Em.computed.bool('errorMessage.length'),
   warn: Em.computed.bool('warnMessage.length'),
+  hasValidationErrors: Em.computed.bool('validationErrors.length'),
+  hasValidationWarnings: Em.computed.bool('validationWarnings.length'),
   isValid: Em.computed.equal('errorMessage', ''),
 
   previousValue: null, // cached value before changing config <code>value</code>
@@ -178,6 +212,19 @@ App.ServiceConfigProperty = Em.Object.extend({
    * @type {boolean}
    */
   hiddenBySection: false,
+
+  /**
+   * Determines config visibility on subsection level when wrapped.
+   * @type {boolean}
+   */
+  hiddenBySubSection: false,
+
+  /**
+   * Determines visibility state including section/subsection state.
+   * When <code>true</code> means that property is shown and may affect validation process.
+   * When <code>false</code> means that property won't affect validation.
+   */
+  isActive: Em.computed.and('isVisible', '!hiddenBySubSection', '!hiddenBySection'),
 
   /**
    * @type {boolean}
@@ -231,9 +278,7 @@ App.ServiceConfigProperty = Em.Object.extend({
     return overrideable && (editable || !overrides || !overrides.length) && (!["componentHost", "password"].contains(dt));
   }.property('isEditable', 'displayType', 'isOverridable', 'overrides.length'),
 
-  isOverridden: function() {
-    return (this.get('overrides') != null && this.get('overrides.length') > 0) || !this.get('isOriginalSCP');
-  }.property('overrides', 'overrides.length', 'isOriginalSCP'),
+  isOverridden: Em.computed.or('overrides.length', '!isOriginalSCP'),
 
   isOverrideChanged: function () {
     if (Em.isNone(this.get('overrides')) && this.get('overrideValues.length') === 0) return false;
@@ -249,7 +294,8 @@ App.ServiceConfigProperty = Em.Object.extend({
   init: function () {
     this.setInitialValues();
     this.set('viewClass', App.config.getViewClass(this.get("displayType"), this.get('dependentConfigPattern'), this.get('unit')));
-    this.set('validator', App.config.getValidator(this.get("displayType")));
+    this.set('validateErrors', App.config.getErrorValidator(this.get("displayType")));
+    this.set('validateWarnings', App.config.getWarningValidator(this.get("displayType")));
     this.validate();
   },
 
@@ -260,6 +306,10 @@ App.ServiceConfigProperty = Em.Object.extend({
       } else if (!Em.isNone(this.get('recommendedValue'))) {
         this.set('value', this.get('recommendedValue'));
       }
+    }
+    this.set('previousValue', this.get('value'));
+    if (this.get('value') === null) {
+      this.set('isVisible', false);
     }
     if (this.get("displayType") === "password") {
       this.set('retypedPassword', this.get('value'));
@@ -314,18 +364,24 @@ App.ServiceConfigProperty = Em.Object.extend({
   cantBeUndone: Em.computed.existsIn('displayType', ["componentHost", "componentHosts", "radio button"]),
 
   validate: function () {
-    if (!this.get('isEditable')) {
-      this.set('errorMessage', ''); // do not perform validation for not editable configs
-    } else if ((typeof this.get('value') != 'object') && ((this.get('value') + '').length === 0)) {
-      this.set('errorMessage', (this.get('isRequired') && this.get('widgetType') != 'test-db-connection') ? Em.I18n.t('errorMessage.config.required') : '');
+    if ((typeof this.get('value') != 'object') && ((this.get('value') + '').length === 0)) {
+      var widgetType = this.get('widgetType');
+      this.set('errorMessage', (this.get('isRequired') && (!['test-db-connection','label'].contains(widgetType))) ? Em.I18n.t('errorMessage.config.required') : '');
     } else {
-      this.set('errorMessage', this.validator(this.get('value'), this.get('name'), this.get('retypedPassword')));
+      this.set('errorMessage', this.validateErrors(this.get('value'), this.get('name'), this.get('retypedPassword')));
+    }
+    if (!this.get('widgetType') || ('text-field' === this.get('widgetType'))) {
+      //temp conditions, since other warnings are calculated directly in widget view
+      this.set('warnMessage', this.validateWarnings(this.get('value'), this.get('name'), this.get('filename'),
+        this.get('stackConfigProperty'), this.get('unit')));
     }
   }.observes('value', 'retypedPassword', 'isEditable'),
 
   viewClass: App.ServiceConfigTextField,
 
-  validator: function() { return '' },
+  validateErrors: function() { return '' },
+
+  validateWarnings: function() { return '' },
 
   /**
    * Get override for selected group

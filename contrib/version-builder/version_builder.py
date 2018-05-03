@@ -75,7 +75,7 @@ class VersionBuilder:
       print(stderr.decode("UTF-8"))
 
   def set_release(self, type=None, stack=None, version=None, build=None, notes=None, display=None,
-    compatible=None, package_version=None):
+    compatible=None):
     """
     Create elements of the 'release' parent
     """
@@ -105,11 +105,24 @@ class VersionBuilder:
     if display:
       update_simple(release_element, "display", display)
 
+  def set_os(self, os_family, package_version=None):
+    repo_parent = self.root_element.find("./repository-info")
+    if repo_parent is None:
+      raise Exception("'repository-info' element is not found")
+
+    os_element = self.findByAttributeValue(repo_parent, "./os", "family", os_family)
+    if os_element is None:
+      os_element = ET.SubElement(repo_parent, 'os')
+      os_element.set('family', os_family)
+
     if package_version:
-      update_simple(release_element, "package-version", package_version)
+      pv_element = os_element.find("package-version")
+      if pv_element is None:
+        pv_element = ET.SubElement(os_element, "package-version")
+      pv_element.text = package_version
 
 
-  def add_manifest(self, id, service_name, version, version_id = None):
+  def add_manifest(self, id, service_name, version, version_id=None, release_version=None):
     """
     Add a manifest service.  A manifest lists all services in a repo, whether they are to be
     upgraded or not.
@@ -129,6 +142,9 @@ class VersionBuilder:
     service_element.set('version', version)
     if version_id:
       service_element.set('version-id', version_id)
+
+    if release_version:
+      service_element.set('release-version', release_version)
 
   def add_available(self, manifest_id, available_components=None):
     """
@@ -160,7 +176,7 @@ class VersionBuilder:
         e = ET.SubElement(service_element, 'component')
         e.text = component
 
-  def add_repo(self, os_family, repo_id, repo_name, base_url):
+  def add_repo(self, os_family, repo_id, repo_name, base_url, unique, tags):
     """
     Adds a repository
     """
@@ -190,6 +206,17 @@ class VersionBuilder:
 
     e = ET.SubElement(repo_element, 'reponame')
     e.text = repo_name
+
+    if unique is not None:
+      e = ET.SubElement(repo_element, 'unique')
+      e.text = unique
+
+    if tags is not None:
+      e = ET.SubElement(repo_element, 'tags')
+      tag_names = tags.split(',')
+      for tag in tag_names:
+        t = ET.SubElement(e, 'tag')
+        t.text = tag
 
 
   def _check_xmllint(self):
@@ -279,7 +306,8 @@ def process_manifest(vb, options):
   if not options.manifest:
     return
 
-  vb.add_manifest(options.manifest_id, options.manifest_service, options.manifest_version, options.manifest_version_id)
+  vb.add_manifest(options.manifest_id, options.manifest_service, options.manifest_version, options.manifest_version_id,
+    options.manifest_release_version)
 
 def process_available(vb, options):
   """
@@ -291,6 +319,12 @@ def process_available(vb, options):
   vb.add_available(options.manifest_id, options.available_components)
 
 
+def process_os(vb, options):
+  if not options.os:
+    return
+
+  vb.set_os(options.os_family, options.os_package_version)
+
 def process_repo(vb, options):
   """
   Processes repository options.  This method doesn't update or create individual elements, it
@@ -299,7 +333,8 @@ def process_repo(vb, options):
   if not options.repo:
     return
 
-  vb.add_repo(options.repo_os, options.repo_id, options.repo_name, options.repo_url)
+  vb.add_repo(options.repo_os, options.repo_id, options.repo_name, options.repo_url,
+    options.unique, options.repo_tags)
 
 def validate_manifest(parser, options):
   """
@@ -328,6 +363,13 @@ def validate_available(parser, options):
 
   if not options.manifest_id:
     parser.error("When specifying --available, --manifest-id is also required")
+
+def validate_os(parser, options):
+  if not options.os:
+    return
+
+  if not options.os_family:
+    parser.error("When specifying --os, --os-family is also required")
 
 def validate_repo(parser, options):
   """
@@ -363,8 +405,8 @@ def main(argv):
   parser.add_option('--xsd', dest='xsd_file',
     help="The XSD location when finalizing")
 
-  parser.add_option('--release-type', type='choice', choices=['STANDARD', 'PATCH'], dest='release_type' ,
-    help="Indicate the release type: i.e. STANDARD or PATCH")
+  parser.add_option('--release-type', type='choice', choices=['STANDARD', 'PATCH', 'MAINT'], dest='release_type' ,
+    help="Indicate the release type: i.e. STANDARD, PATCH, MAINT")
   parser.add_option('--release-stack', dest='release_stack',
     help="The stack id: e.g. HDP-2.4")
   parser.add_option('--release-version', dest='release_version',
@@ -381,27 +423,36 @@ def main(argv):
     help="Identifier to use when installing packages, generally a part of the package name")
 
   parser.add_option('--manifest', action='store_true', dest='manifest',
-    help="Add a manifest service with other options: --manifest-id, --manifest-service, --manifest-version, --manifest-version-id")
+    help="Add a manifest service with other options: --manifest-id, --manifest-service, --manifest-version, --manifest-version-id, --manifest-release-version")
   parser.add_option('--manifest-id', dest='manifest_id',
     help="Unique ID for a service in a manifest.  Required when specifying --manifest and --available")
   parser.add_option('--manifest-service', dest='manifest_service')
   parser.add_option('--manifest-version', dest='manifest_version')
   parser.add_option('--manifest-version-id', dest='manifest_version_id')
+  parser.add_option('--manifest-release-version', dest='manifest_release_version')
 
   parser.add_option('--available', action='store_true', dest='available',
-    help="Add an available service with other options: --manifest-id, --available-components")
+    help="Add an available service with other options: --manifest-id, --available-components --service-release-version")
   parser.add_option('--available-components', dest='available_components',
     help="A CSV of service components that are intended to be upgraded via patch. \
       Omitting this implies the entire service should be upgraded")
 
+  parser.add_option('--os', action='store_true', dest='os', help="Add OS data with options --os-family, --os-package-version")
+  parser.add_option('--os-family', dest='os_family', help="The operating system: i.e redhat7, debian7, ubuntu12, ubuntu14, suse11, suse12")
+  parser.add_option('--os-package-version', dest='os_package_version',
+    help="The package version to use for the OS")
+
   parser.add_option('--repo', action='store_true', dest='repo',
-    help="Add repository data with options: --repo-os, --repo-url, --repo-id, --repo-name")
+    help="Add repository data with options: --repo-os, --repo-url, --repo-id, --repo-name, --repo-unique")
   parser.add_option('--repo-os', dest='repo_os',
-    help="The operating system type: i.e. redhat6, redhat7, debian7, ubuntu12, ubuntu14, suse11, suse12")
+    help="The operating system type: i.e. redhat6, redhat7, debian7, debian9, ubuntu12, ubuntu14, ubuntu16, suse11, suse12")
   parser.add_option('--repo-url', dest='repo_url',
     help="The base url for the repository data")
+  parser.add_option('--repo-unique', dest='unique', type='choice', choices=['true', 'false'],
+                    help="Indicates base url should be unique")
   parser.add_option('--repo-id', dest='repo_id', help="The ID of the repo")
   parser.add_option('--repo-name', dest='repo_name', help="The name of the repo")
+  parser.add_option('--repo-tags', dest='repo_tags', help="The CSV tags for the repo")
 
   (options, args) = parser.parse_args()
 
@@ -415,6 +466,7 @@ def main(argv):
 
   validate_manifest(parser, options)
   validate_available(parser, options)
+  validate_os(parser, options)
   validate_repo(parser, options)
 
   vb = VersionBuilder(options.filename)
@@ -422,6 +474,7 @@ def main(argv):
   process_release(vb, options)
   process_manifest(vb, options)
   process_available(vb, options)
+  process_os(vb, options)
   process_repo(vb, options)
 
   # save file

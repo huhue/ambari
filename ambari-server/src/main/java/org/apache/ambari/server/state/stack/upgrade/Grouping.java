@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,7 +19,9 @@ package org.apache.ambari.server.state.stack.upgrade;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,17 +30,23 @@ import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlSeeAlso;
 
+import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.stack.HostsType;
 import org.apache.ambari.server.state.UpgradeContext;
 import org.apache.ambari.server.state.stack.UpgradePack;
+import org.apache.ambari.server.state.stack.UpgradePack.OrderService;
 import org.apache.ambari.server.state.stack.UpgradePack.ProcessingComponent;
 import org.apache.ambari.server.utils.SetUtils;
 import org.apache.commons.lang.StringUtils;
 
+import com.google.common.base.Objects;
+
 /**
  *
  */
-@XmlSeeAlso(value = { ColocatedGrouping.class, ClusterGrouping.class, UpdateStackGrouping.class, ServiceCheckGrouping.class, RestartGrouping.class, StartGrouping.class, StopGrouping.class })
+@XmlSeeAlso(value = { ColocatedGrouping.class, ClusterGrouping.class,
+    UpdateStackGrouping.class, ServiceCheckGrouping.class, RestartGrouping.class,
+    StartGrouping.class, StopGrouping.class, HostOrderGrouping.class })
 public class Grouping {
 
   @XmlAttribute(name="name")
@@ -46,6 +54,12 @@ public class Grouping {
 
   @XmlAttribute(name="title")
   public String title;
+
+  @XmlElement(name="add-after-group")
+  public String addAfterGroup;
+
+  @XmlElement(name="add-after-group-entry")
+  public String addAfterGroupEntry;
 
   @XmlElement(name="skippable", defaultValue="false")
   public boolean skippable = false;
@@ -57,7 +71,7 @@ public class Grouping {
   public boolean allowRetry = true;
 
   @XmlElement(name="service")
-  public List<UpgradePack.OrderService> services = new ArrayList<UpgradePack.OrderService>();
+  public List<UpgradePack.OrderService> services = new ArrayList<>();
 
   @XmlElement(name="service-check", defaultValue="true")
   public boolean performServiceCheck = true;
@@ -72,6 +86,28 @@ public class Grouping {
   public UpgradeScope scope = UpgradeScope.ANY;
 
   /**
+   * A condition element with can prevent this entire group from being scheduled
+   * in the upgrade.
+   */
+  @XmlElement(name = "condition")
+  public Condition condition;
+
+  /**
+   * @return {@code true} when the grouping is used to upgrade services and that it is
+   * appropriate to run service checks after orchestration.
+   */
+  public final boolean isProcessingGroup() {
+    return serviceCheckAfterProcessing();
+  }
+
+  /**
+   * Overridable function to indicate if full service checks can be run
+   */
+  protected boolean serviceCheckAfterProcessing() {
+    return true;
+  }
+
+  /**
    * Gets the default builder.
    */
   public StageWrapperBuilder getBuilder() {
@@ -80,8 +116,8 @@ public class Grouping {
 
   private static class DefaultBuilder extends StageWrapperBuilder {
 
-    private List<StageWrapper> m_stages = new ArrayList<StageWrapper>();
-    private Set<String> m_servicesToCheck = new HashSet<String>();
+    private List<StageWrapper> m_stages = new ArrayList<>();
+    private Set<String> m_servicesToCheck = new HashSet<>();
     private boolean m_serviceCheck = true;
 
     private DefaultBuilder(Grouping grouping, boolean serviceCheck) {
@@ -108,6 +144,7 @@ public class Grouping {
       for (TaskBucket bucket : buckets) {
         // The TaskWrappers take into account if a task is meant to run on all, any, or master.
         // A TaskWrapper may contain multiple tasks, but typically only one, and they all run on the same set of hosts.
+        // Generate a task wrapper for every task in the bucket
         List<TaskWrapper> preTasks = TaskWrapperBuilder.getTaskList(service, pc.name, hostsType, bucket.tasks, params);
         List<List<TaskWrapper>> organizedTasks = organizeTaskWrappersBySyncRules(preTasks);
         for (List<TaskWrapper> tasks : organizedTasks) {
@@ -118,7 +155,7 @@ public class Grouping {
       // Add the processing component
       Task t = resolveTask(context, pc);
       if (null != t) {
-        TaskWrapper tw = new TaskWrapper(service, pc.name, hostsType.hosts, params, Collections.singletonList(t));
+        TaskWrapper tw = new TaskWrapper(service, pc.name, hostsType.getHosts(), params, Collections.singletonList(t));
         addTasksToStageInBatches(Collections.singletonList(tw), t.getActionVerb(), context, service, pc, params);
       }
 
@@ -145,7 +182,7 @@ public class Grouping {
      * @return List of list of TaskWrappers, where each outer list is a separate stage.
      */
     private List<List<TaskWrapper>> organizeTaskWrappersBySyncRules(List<TaskWrapper> tasks) {
-      List<List<TaskWrapper>> groupedTasks = new ArrayList<List<TaskWrapper>>();
+      List<List<TaskWrapper>> groupedTasks = new ArrayList<>();
 
       List<TaskWrapper> subTasks = new ArrayList<>();
       for (TaskWrapper tw : tasks) {
@@ -188,8 +225,13 @@ public class Grouping {
       // Expand some of the TaskWrappers into multiple based on the batch size.
       for (TaskWrapper tw : tasks) {
         List<Set<String>> hostSets = null;
-        if (m_grouping.parallelScheduler != null && m_grouping.parallelScheduler.maxDegreeOfParallelism > 0) {
-          hostSets = SetUtils.split(tw.getHosts(), m_grouping.parallelScheduler.maxDegreeOfParallelism);
+
+        if (m_grouping.parallelScheduler != null) {
+          int taskParallelism = m_grouping.parallelScheduler.maxDegreeOfParallelism;
+          if (taskParallelism == Integer.MAX_VALUE) {
+            taskParallelism = ctx.getDefaultMaxDegreeOfParallelism();
+          }
+          hostSets = SetUtils.split(tw.getHosts(), taskParallelism);
         } else {
           hostSets = SetUtils.split(tw.getHosts(), 1);
         }
@@ -198,7 +240,6 @@ public class Grouping {
         int batchNum = 0;
         for (Set<String> hostSubset : hostSets) {
           batchNum++;
-          TaskWrapper expandedTW = new TaskWrapper(tw.getService(), tw.getComponent(), hostSubset, tw.getParams(), tw.getTasks());
 
           String stageText = getStageText(verb, ctx.getComponentDisplay(service, pc.name), hostSubset, batchNum, numBatchesNeeded);
 
@@ -226,11 +267,11 @@ public class Grouping {
         m_stages.addAll(0, stageWrappers);
       }
 
-      List<TaskWrapper> tasks = new ArrayList<TaskWrapper>();
-      List<String> displays = new ArrayList<String>();
+      List<TaskWrapper> tasks = new ArrayList<>();
+      List<String> displays = new ArrayList<>();
       for (String service : m_servicesToCheck) {
         tasks.add(new TaskWrapper(
-            service, "", Collections.<String>emptySet(), new ServiceCheckTask()));
+            service, "", Collections.emptySet(), new ServiceCheckTask()));
 
         displays.add(upgradeContext.getServiceDisplay(service));
       }
@@ -256,7 +297,7 @@ public class Grouping {
       return Collections.emptyList();
     }
 
-    List<TaskBucket> holders = new ArrayList<TaskBucket>();
+    List<TaskBucket> holders = new ArrayList<>();
 
     TaskBucket current = null;
 
@@ -280,7 +321,7 @@ public class Grouping {
 
   private static class TaskBucket {
     private StageWrapper.Type type;
-    private List<Task> tasks = new ArrayList<Task>();
+    private List<Task> tasks = new ArrayList<>();
     private TaskBucket(Task initial) {
       switch (initial.getType()) {
         case CONFIGURE:
@@ -289,7 +330,7 @@ public class Grouping {
           type = StageWrapper.Type.SERVER_SIDE_ACTION;
           break;
         case EXECUTE:
-          type = StageWrapper.Type.RU_TASKS;
+          type = StageWrapper.Type.UPGRADE_TASKS;
           break;
         case CONFIGURE_FUNCTION:
           type = StageWrapper.Type.CONFIGURE;
@@ -309,5 +350,72 @@ public class Grouping {
       }
       tasks.add(initial);
     }
+  }
+
+  /**
+   * Merge the services of all the child groups, with the current services.
+   * Keeping the order specified by the group.
+   */
+  public void merge(Iterator<Grouping> iterator) throws AmbariException {
+    Map<String, List<OrderService>> skippedServices = new HashMap<>();
+    while (iterator.hasNext()) {
+      Grouping group = iterator.next();
+
+      boolean added = addGroupingServices(group.services, group.addAfterGroupEntry);
+      if (added) {
+        addSkippedServices(skippedServices, group.services);
+      } else {
+        // store these services until later
+        if (skippedServices.containsKey(group.addAfterGroupEntry)) {
+          List<OrderService> tmp = skippedServices.get(group.addAfterGroupEntry);
+          tmp.addAll(group.services);
+        } else {
+          skippedServices.put(group.addAfterGroupEntry, group.services);
+        }
+      }
+    }
+  }
+
+  /**
+   * Merge the services to add after a particular service name
+   */
+  private boolean addGroupingServices(List<OrderService> servicesToAdd, String after) {
+    if (after == null) {
+      services.addAll(servicesToAdd);
+      return true;
+    }
+    else {
+      // Check the current services, if the "after" service is there then add these
+      for (int index = services.size() - 1; index >= 0; index--) {
+        OrderService service = services.get(index);
+        if (service.serviceName.equals(after)) {
+          services.addAll(index + 1, servicesToAdd);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Adds services which were previously skipped, if the service they are supposed
+   * to come after has been added.
+   */
+  private void addSkippedServices(Map<String, List<OrderService>> skippedServices, List<OrderService> servicesJustAdded) {
+    for (OrderService service : servicesJustAdded) {
+      if (skippedServices.containsKey(service.serviceName)) {
+        List<OrderService> servicesToAdd = skippedServices.remove(service.serviceName);
+        addGroupingServices(servicesToAdd, service.serviceName);
+        addSkippedServices(skippedServices, servicesToAdd);
+      }
+    }
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this).add("name", name).toString();
   }
 }

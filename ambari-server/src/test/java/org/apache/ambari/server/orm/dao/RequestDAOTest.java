@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,6 +17,7 @@
  */
 package org.apache.ambari.server.orm.dao;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.actionmanager.HostRoleStatus;
@@ -40,6 +42,7 @@ import org.apache.ambari.server.orm.entities.RequestEntity;
 import org.apache.ambari.server.orm.entities.ResourceEntity;
 import org.apache.ambari.server.orm.entities.ResourceTypeEntity;
 import org.apache.ambari.server.orm.entities.StageEntity;
+import org.apache.ambari.server.orm.entities.StageEntityPK;
 import org.apache.ambari.server.security.authorization.ResourceType;
 import org.junit.After;
 import org.junit.Assert;
@@ -48,7 +51,6 @@ import org.junit.Test;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 
 /**
  * RequestDAO unit tests
@@ -76,8 +78,8 @@ public class RequestDAOTest {
   }
 
   @After
-  public void teardown() throws AmbariException {
-    injector.getInstance(PersistService.class).stop();
+  public void teardown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
 
@@ -117,13 +119,31 @@ public class RequestDAOTest {
     Assert.assertEquals(calc1.getPercent(), calc2.getPercent(), 0.01d);
 
     // !!! simulate an upgrade group
-    Set<Long> group = new HashSet<Long>();
+    Set<Long> group = new HashSet<>();
     group.add(2L);
     group.add(3L);
     group.add(4L);
 
     // !!! accepted
-    List<StageEntity> stages = stageDAO.findByStageIds(requestEntity.getRequestId(), group);
+    List<StageEntity> stages = new ArrayList<>();
+    StageEntityPK primaryKey = new StageEntityPK();
+    primaryKey.setRequestId(requestEntity.getRequestId());
+    primaryKey.setStageId(2L);
+
+    StageEntity stage = stageDAO.findByPK(primaryKey);
+    Assert.assertNotNull(stage);
+    stages.add(stage);
+
+    primaryKey.setStageId(3L);
+    stage = stageDAO.findByPK(primaryKey);
+    Assert.assertNotNull(stage);
+    stages.add(stage);
+
+    primaryKey.setStageId(4L);
+    stage = stageDAO.findByPK(primaryKey);
+    Assert.assertNotNull(stage);
+    stages.add(stage);
+
     CalculatedStatus calc3 = CalculatedStatus.statusFromStageEntities(stages);
 
     // !!! aggregated
@@ -155,11 +175,11 @@ public class RequestDAOTest {
     RequestEntity requestEntity = new RequestEntity();
     requestEntity.setRequestId(requestId);
     requestEntity.setClusterId(clusterEntity.getClusterId());
-    requestEntity.setStages(new ArrayList<StageEntity>());
+    requestEntity.setStages(new ArrayList<>());
     requestDAO.create(requestEntity);
 
     HostEntity host = hostDAO.findByName(hostName);
-    host.setHostRoleCommandEntities(new ArrayList<HostRoleCommandEntity>());
+    host.setHostRoleCommandEntities(new ArrayList<>());
 
     long stageId = 1L;
 
@@ -182,7 +202,7 @@ public class RequestDAOTest {
       stageEntity.setClusterId(clusterEntity.getClusterId());
       stageEntity.setRequest(re);
       stageEntity.setStageId(stageId);
-      stageEntity.setHostRoleCommands(new ArrayList<HostRoleCommandEntity>());
+      stageEntity.setHostRoleCommands(new ArrayList<>());
       stageEntity.setSkippable(skipStage);
       stageDAO.create(stageEntity);
 

@@ -101,6 +101,9 @@ App.WizardStep3View = App.TableView.extend({
 
   didInsertElement: function () {
     this.get('controller').loadStep();
+    this.$().on('mouseover', '#confirm-hosts-table tr', function () {
+      App.tooltip($(this).find('.action .glyphicon'), {placement: 'bottom'});
+    });
   },
 
   /**
@@ -134,7 +137,7 @@ App.WizardStep3View = App.TableView.extend({
    */
   watchSelectionOnce: function () {
     Em.run.once(this, 'watchSelection');
-  }.observes('content.@each.isChecked', 'pageContent'),
+  }.observes('content.@each.isChecked', 'content.@each.bootStatus', 'pageContent'),
 
   /**
    * Watch selection and calculate such flags as:
@@ -149,14 +152,15 @@ App.WizardStep3View = App.TableView.extend({
     this.set('selectionInProgress', true);
     this.set('pageChecked', !!this.get('pageContent.length') && this.get('pageContent').everyProperty('isChecked', true));
     this.set('selectionInProgress', false);
-    var noHostsSelected = true;
-    var selectedHostsCount = 0;
+    var noNotRunningHostsSelected = true;
+    var selectedNotRunningHostsCount = 0;
     this.get('content').forEach(function(host){
-      selectedHostsCount += host.get('isChecked') ? 1 : 0;
-      noHostsSelected = (noHostsSelected) ? !host.get('isChecked') : noHostsSelected;
+      var isSelectedAndNotRunning = host.get('isChecked') && (host.get('bootStatus') !== 'RUNNING');
+      selectedNotRunningHostsCount += isSelectedAndNotRunning ? 1 : 0;
+      noNotRunningHostsSelected = (noNotRunningHostsSelected) ? !isSelectedAndNotRunning : noNotRunningHostsSelected;
     });
-    this.set('noHostsSelected', noHostsSelected);
-    this.set('selectedHostsCount', selectedHostsCount);
+    this.set('noNotRunningHostsSelected', noNotRunningHostsSelected);
+    this.set('selectedNotRunningHostsCount', selectedNotRunningHostsCount);
   },
 
   /**
@@ -260,7 +264,7 @@ App.WizardStep3View = App.TableView.extend({
     var failedHosts = hosts.filterProperty('bootStatus', 'FAILED').length;
 
     if (hosts.length === 0) {
-      this.set('status', 'alert-warn');
+      this.set('status', 'alert-warning');
       this.set('linkText', '');
       this.set('message', Em.I18n.t('installer.step3.warnings.missingHosts'));
     }
@@ -273,7 +277,7 @@ App.WizardStep3View = App.TableView.extend({
       else {
         if (this.get('controller.isHostHaveWarnings') || this.get('controller.repoCategoryWarnings.length') || this.get('controller.diskCategoryWarnings.length') || this.get('controller.jdkCategoryWarnings.length')
           || this.get('controller.hostCheckWarnings.length') || this.get('controller.thpCategoryWarnings.length')) {
-          this.set('status', 'alert-warn');
+          this.set('status', 'alert-warning');
           this.set('linkText', Em.I18n.t('installer.step3.warnings.linkText'));
           this.set('message', Em.I18n.t('installer.step3.warnings.fails').format(hosts.length - failedHosts));
         }
@@ -287,7 +291,7 @@ App.WizardStep3View = App.TableView.extend({
           else {
             if (failedHosts == hosts.length) {
               // all failed
-              this.set('status', 'alert-warn');
+              this.set('status', 'alert-warning');
               this.set('linkText', '');
               this.set('message', Em.I18n.t('installer.step3.warnings.allFailed').format(failedHosts));
             }
@@ -308,7 +312,7 @@ App.WizardHostView = Em.View.extend({
 
   tagName: 'tr',
 
-  classNameBindings: ['hostInfo.bootStatus'],
+  classNameBindings: ['hostInfo.bootStatus', 'hostInfo.isChecked:active'],
 
   /**
    * Host from parent view

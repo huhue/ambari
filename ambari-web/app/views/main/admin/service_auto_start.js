@@ -20,49 +20,43 @@ var App = require('app');
 
 App.MainAdminServiceAutoStartView = Em.View.extend({
   templateName: require('templates/main/admin/service_auto_start'),
+
   /**
-   * Value used in the checkbox.
-   *
-   * @property switcherValue
    * @type {boolean}
    */
-  switcherValue: false,
-
-  savedRecoveryEnabled: false,
-
-  didInsertElement: function () {
-    var self = this;
-    this.get('controller').loadClusterConfig().done(function (data) {
-      var tag = [
-        {
-          siteName: 'cluster-env',
-          tagName: data.Clusters.desired_configs['cluster-env'].tag,
-          newTagName: null
-        }
-      ];
-      App.router.get('configurationController').getConfigsByTags(tag).done(function (data) {
-        self.set('controller.clusterConfigs', data[0].properties);
-        self.set('switcherValue', data[0].properties.recovery_enabled === 'true');
-        self.set('savedRecoveryEnabled', self.get('switcherValue'));
-        // plugin should be initiated after applying binding for switcherValue
-        Em.run.later('sync', function() {
-          self.initSwitcher();
-        }.bind(self), 10);
-        self.get('controller').loadComponentsConfigs();
-      });
-    });
-  },
+  isSaveDisabled: Em.computed.or('!controller.isModified', 'controller.saveInProgress'),
 
   /**
-   * Init switcher plugin.
-   *
-   * @method initSwitcher
+   * @type {boolean}
+   * @default false
    */
-  updateClusterConfigs: function (state){
-    this.set('switcherValue', state);
-    this.set('controller.clusterConfigs.recovery_enabled', '' + state);
-    this.set('controller.valueChanged', this.get('savedRecoveryEnabled') !== state);
+  isDisabled: false,
+
+  /**
+   * @type {boolean}
+   */
+  skipCyclicCall: false,
+
+  /**
+   * @type {boolean}
+   */
+  allComponentsChecked: false,
+
+  /**
+   * @type {?object}
+   */
+  switcher: null,
+
+  didInsertElement: function () {
+    this.set('isDisabled', !App.isAuthorized('CLUSTER.MANAGE_AUTO_START'));
+    this.get('controller').load();
   },
+
+  onValueChange: function () {
+    if (this.get('switcher')) {
+      this.get('switcher').bootstrapSwitch('state', this.get('controller.isGeneralRecoveryEnabled'));
+    }
+  }.observes('controller.isGeneralRecoveryEnabled'),
 
   /**
    * Init switcher plugin.
@@ -70,19 +64,41 @@ App.MainAdminServiceAutoStartView = Em.View.extend({
    * @method initSwitcher
    */
   initSwitcher: function () {
-    var self = this;
-    if (this.$()) {
-      this.$("input:eq(0)").bootstrapSwitch({
+    const self = this.get('parentView');
+    if (self.get('controller.isLoaded')) {
+      self.set('switcher', $(".general-auto-start>input").bootstrapSwitch({
+        state: self.get('controller.isGeneralRecoveryEnabled'),
         onText: Em.I18n.t('common.enabled'),
         offText: Em.I18n.t('common.disabled'),
         offColor: 'default',
         onColor: 'success',
+        disabled: self.get('isDisabled'),
         handleWidth: Math.max(Em.I18n.t('common.enabled').length, Em.I18n.t('common.disabled').length) * 8,
-        onSwitchChange: function (event, state) {
-          self.updateClusterConfigs(state);
+        onSwitchChange: (event, state) => {
+          self.set('controller.isGeneralRecoveryEnabled', state);
         }
-      });
+      }));
     }
-  }
+  },
+
+  observeAllComponentsChecked: function() {
+    if (this.get('skipCyclicCall')) {
+      this.set('skipCyclicCall', false);
+    } else {
+      this.get('controller.componentsConfigsGrouped').setEach('recoveryEnabled', this.get('allComponentsChecked'));
+    }
+  }.observes('allComponentsChecked'),
+
+  observesEachComponentChecked: function() {
+    const components = this.get('controller.componentsConfigsGrouped');
+    if (this.get('allComponentsChecked') && components.someProperty('recoveryEnabled', false)) {
+      this.set('skipCyclicCall', true);
+      this.set('allComponentsChecked', false);
+    } else if (!this.get('allComponentsChecked') && components.everyProperty('recoveryEnabled', true)) {
+      this.set('skipCyclicCall', true);
+      this.set('allComponentsChecked', true);
+    }
+  }.observes('controller.componentsConfigsGrouped.@each.recoveryEnabled')
+
 });
 

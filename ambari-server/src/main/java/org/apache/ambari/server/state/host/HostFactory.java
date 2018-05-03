@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -21,5 +21,5 @@ import org.apache.ambari.server.orm.entities.HostEntity;
 import org.apache.ambari.server.state.Host;
 
 public interface HostFactory {
-  Host create(HostEntity hostEntity, boolean persisted);
+  Host create(HostEntity hostEntity);
 }

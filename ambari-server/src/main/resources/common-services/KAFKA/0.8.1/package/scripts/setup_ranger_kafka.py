@@ -17,11 +17,12 @@ limitations under the License.
 from resource_management.core.logger import Logger
 from resource_management.core.resources import File, Execute
 from resource_management.libraries.functions.format import format
+from resource_management.libraries.functions.setup_ranger_plugin_xml import setup_configuration_file_for_required_plugins
 
 def setup_ranger_kafka():
   import params
 
-  if params.has_ranger_admin:
+  if params.enable_ranger_kafka:
 
     from resource_management.libraries.functions.setup_ranger_plugin_xml import setup_ranger_plugin
 
@@ -50,7 +51,7 @@ def setup_ranger_kafka():
         )
         params.HdfsResource(None, action="execute")
 
-    setup_ranger_plugin('kafka-broker', 'kafka',
+    setup_ranger_plugin('kafka-broker', 'kafka', params.previous_jdbc_jar,
                         params.downloaded_custom_connector, params.driver_curl_source,
                         params.driver_curl_target, params.java64_home,
                         params.repo_name, params.kafka_ranger_plugin_repo,
@@ -65,10 +66,10 @@ def setup_ranger_kafka():
                         credential_file=params.credential_file, xa_audit_db_password=params.xa_audit_db_password, 
                         ssl_truststore_password=params.ssl_truststore_password, ssl_keystore_password=params.ssl_keystore_password,
                         api_version = 'v2', skip_if_rangeradmin_down= not params.retryAble,
-                        is_security_enabled = params.security_enabled,
+                        is_security_enabled = params.kerberos_security_enabled,
                         is_stack_supports_ranger_kerberos = params.stack_supports_ranger_kerberos,
-                        component_user_principal=params.kafka_jaas_principal if params.security_enabled else None,
-                        component_user_keytab=params.kafka_keytab_path if params.security_enabled else None)
+                        component_user_principal=params.kafka_jaas_principal if params.kerberos_security_enabled else None,
+                        component_user_keytab=params.kafka_keytab_path if params.kerberos_security_enabled else None)
     
     if params.enable_ranger_kafka: 
       Execute(('cp', '--remove-destination', params.setup_ranger_env_sh_source, params.setup_ranger_env_sh_target),
@@ -80,5 +81,19 @@ def setup_ranger_kafka():
         group = params.user_group,
         mode = 0755
       )
+    if params.stack_supports_core_site_for_ranger_plugin and params.enable_ranger_kafka and params.kerberos_security_enabled:
+      if params.has_namenode:
+        Logger.info("Stack supports core-site.xml creation for Ranger plugin and Namenode is installed, creating create core-site.xml from namenode configurations")
+        setup_configuration_file_for_required_plugins(component_user = params.kafka_user, component_group = params.user_group,
+                                             create_core_site_path = params.conf_dir, configurations = params.config['configurations']['core-site'],
+                                             configuration_attributes = params.config['configurationAttributes']['core-site'], file_name='core-site.xml')
+      else:
+        Logger.info("Stack supports core-site.xml creation for Ranger plugin and Namenode is not installed, creating create core-site.xml from default configurations")
+        setup_configuration_file_for_required_plugins(component_user = params.kafka_user, component_group = params.user_group,
+                                             create_core_site_path = params.conf_dir, configurations = { 'hadoop.security.authentication' : 'kerberos' if params.kerberos_security_enabled else 'simple' },
+                                             configuration_attributes = {}, file_name='core-site.xml')
+
+    else:
+      Logger.info("Stack does not support core-site.xml creation for Ranger plugin, skipping core-site.xml configurations")
   else:
-    Logger.info('Ranger admin not installed')
+    Logger.info('Ranger Kafka plugin is not enabled')

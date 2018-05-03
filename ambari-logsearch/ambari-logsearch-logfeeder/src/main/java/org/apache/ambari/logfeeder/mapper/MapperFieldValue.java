@@ -19,37 +19,34 @@
 
 package org.apache.ambari.logfeeder.mapper;
 
-import java.util.Map;
-
-import org.apache.ambari.logfeeder.LogFeederUtil;
+import org.apache.ambari.logfeeder.conf.LogFeederProps;
+import org.apache.ambari.logfeeder.plugin.filter.mapper.Mapper;
+import org.apache.ambari.logfeeder.util.LogFeederUtil;
+import org.apache.ambari.logsearch.config.api.model.inputconfig.MapFieldDescriptor;
+import org.apache.ambari.logsearch.config.api.model.inputconfig.MapFieldValueDescriptor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 
+import java.util.Map;
+
 /**
  * Overrides the value for the field
  */
-public class MapperFieldValue extends Mapper {
-  Logger logger = Logger.getLogger(MapperFieldValue.class);
-  String prevValue = null;
-  String newValue = null;
+public class MapperFieldValue extends Mapper<LogFeederProps> {
+  private static final Logger LOG = Logger.getLogger(MapperFieldValue.class);
+  
+  private String prevValue = null;
+  private String newValue = null;
 
-  @SuppressWarnings("hiding")
   @Override
-  public boolean init(String inputDesc, String fieldName,
-      String mapClassCode, Object mapConfigs) {
-    super.init(inputDesc, fieldName, mapClassCode, mapConfigs);
-    if (!(mapConfigs instanceof Map)) {
-      logger.fatal("Can't initialize object. mapConfigs class is not of type Map. "
-          + mapConfigs.getClass().getName());
-      return false;
-    }
-    @SuppressWarnings("unchecked")
-    Map<String, Object> mapObjects = (Map<String, Object>) mapConfigs;
-    prevValue = (String) mapObjects.get("pre_value");
-    newValue = (String) mapObjects.get("post_value");
+  public boolean init(String inputDesc, String fieldName, String mapClassCode, MapFieldDescriptor mapFieldDescriptor) {
+    init(inputDesc, fieldName, mapClassCode);
+    
+    prevValue = ((MapFieldValueDescriptor)mapFieldDescriptor).getPreValue();
+    newValue = ((MapFieldValueDescriptor)mapFieldDescriptor).getPostValue();;
     if (StringUtils.isEmpty(newValue)) {
-      logger.fatal("Map field value is empty.");
+      LOG.fatal("Map field value is empty.");
       return false;
     }
     return true;
@@ -57,20 +54,15 @@ public class MapperFieldValue extends Mapper {
 
   @Override
   public Object apply(Map<String, Object> jsonObj, Object value) {
-    if (newValue != null) {
-      if (prevValue != null) {
-        if (prevValue.equalsIgnoreCase(value.toString())) {
-          value = newValue;
-          jsonObj.put(fieldName, value);
-        }
+    if (newValue != null && prevValue != null) {
+      if (prevValue.equalsIgnoreCase(value.toString())) {
+        value = newValue;
+        jsonObj.put(getFieldName(), value);
       }
     } else {
-      LogFeederUtil.logErrorMessageByInterval(
-          this.getClass().getSimpleName() + ":apply",
-          "New value is null, so transformation is not applied. "
-              + this.toString(), null, logger, Level.ERROR);
+      LogFeederUtil.logErrorMessageByInterval(this.getClass().getSimpleName() + ":apply",
+          "New value is null, so transformation is not applied. " + this.toString(), null, LOG, Level.ERROR);
     }
     return value;
   }
-
 }

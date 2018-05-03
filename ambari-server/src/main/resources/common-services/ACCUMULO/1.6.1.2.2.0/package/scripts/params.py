@@ -28,6 +28,7 @@ from resource_management.libraries.functions.get_bare_principal import get_bare_
 from resource_management.libraries.script.script import Script
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions import StackFeature
+from ambari_commons.ambari_metrics_helper import select_metric_collector_hosts_from_hostnames
 
 import status_params
 
@@ -44,7 +45,7 @@ stack_name = status_params.stack_name
 
 # stack version
 version = default("/commandParams/version", None)
-stack_version_unformatted = config['hostLevelParams']['stack_version']
+stack_version_unformatted = config['clusterLevelParams']['stack_version']
 stack_version_formatted = format_stack_version(stack_version_unformatted)
 
 has_secure_user_auth = False
@@ -76,7 +77,7 @@ user_group = config['configurations']['cluster-env']['user_group']
 pid_dir = status_params.pid_dir
 
 # accumulo env
-java64_home = config['hostLevelParams']['java_home']
+java64_home = config['ambariLevelParams']['java_home']
 accumulo_master_heapsize = config['configurations']['accumulo-env']['accumulo_master_heapsize']
 accumulo_tserver_heapsize = config['configurations']['accumulo-env']['accumulo_tserver_heapsize']
 accumulo_monitor_heapsize = config['configurations']['accumulo-env']['accumulo_monitor_heapsize']
@@ -119,21 +120,25 @@ info_log_size = config['configurations']['accumulo-log4j']['info_log_size']
 info_num_logs = config['configurations']['accumulo-log4j']['info_num_logs']
 
 # metrics2 properties
-ganglia_server_hosts = default('/clusterHostInfo/ganglia_server_host', []) # is not passed when ganglia is not present
+ganglia_server_hosts = default('/clusterHostInfo/ganglia_server_hosts', []) # is not passed when ganglia is not present
 ganglia_server_host = '' if len(ganglia_server_hosts) == 0 else ganglia_server_hosts[0]
-ams_collector_hosts = default("/clusterHostInfo/metrics_collector_hosts", [])
+
+set_instanceId = "false"
+cluster_name = config["clusterName"]
+
+if 'cluster-env' in config['configurations'] and \
+        'metrics_collector_external_hosts' in config['configurations']['cluster-env']:
+  ams_collector_hosts = config['configurations']['cluster-env']['metrics_collector_external_hosts']
+  set_instanceId = "true"
+else:
+  ams_collector_hosts = ",".join(default("/clusterHostInfo/metrics_collector_hosts", []))
 has_metric_collector = not len(ams_collector_hosts) == 0
 if has_metric_collector:
   if 'cluster-env' in config['configurations'] and \
-      'metrics_collector_vip_host' in config['configurations']['cluster-env']:
-    metric_collector_host = config['configurations']['cluster-env']['metrics_collector_vip_host']
+      'metrics_collector_external_port' in config['configurations']['cluster-env']:
+    metric_collector_port = config['configurations']['cluster-env']['metrics_collector_external_port']
   else:
-    metric_collector_host = ams_collector_hosts[0]
-  if 'cluster-env' in config['configurations'] and \
-      'metrics_collector_vip_port' in config['configurations']['cluster-env']:
-    metric_collector_port = config['configurations']['cluster-env']['metrics_collector_vip_port']
-  else:
-    metric_collector_web_address = default("/configurations/ams-site/timeline.metrics.service.webapp.address", "localhost:6188")
+    metric_collector_web_address = default("/configurations/ams-site/timeline.metrics.service.webapp.address", "0.0.0.0:6188")
     if metric_collector_web_address.find(':') != -1:
       metric_collector_port = metric_collector_web_address.split(':')[1]
     else:
@@ -148,16 +153,25 @@ if has_metric_collector:
   pass
 metrics_report_interval = default("/configurations/ams-site/timeline.metrics.sink.report.interval", 60)
 metrics_collection_period = default("/configurations/ams-site/timeline.metrics.sink.collection.period", 10)
+host_in_memory_aggregation = default("/configurations/ams-site/timeline.metrics.host.inmemory.aggregation", True)
+host_in_memory_aggregation_port = default("/configurations/ams-site/timeline.metrics.host.inmemory.aggregation.port", 61888)
+is_aggregation_https_enabled = False
+if default("/configurations/ams-site/timeline.metrics.host.inmemory.aggregation.http.policy", "HTTP_ONLY") == "HTTPS_ONLY":
+  host_in_memory_aggregation_protocol = 'https'
+  is_aggregation_https_enabled = True
+else:
+  host_in_memory_aggregation_protocol = 'http'
 
 # if accumulo is selected accumulo_tserver_hosts should not be empty, but still default just in case
 if 'slave_hosts' in config['clusterHostInfo']:
-  tserver_hosts = default('/clusterHostInfo/accumulo_tserver_hosts', '/clusterHostInfo/slave_hosts')
+  tserver_hosts = default('/clusterHostInfo/accumulo_tserver_hosts', '/clusterHostInfo/datanode_hosts')
 else:
   tserver_hosts = default('/clusterHostInfo/accumulo_tserver_hosts', '/clusterHostInfo/all_hosts')
 master_hosts = default('/clusterHostInfo/accumulo_master_hosts', [])
 monitor_hosts = default('/clusterHostInfo/accumulo_monitor_hosts', [])
 gc_hosts = default('/clusterHostInfo/accumulo_gc_hosts', [])
 tracer_hosts = default('/clusterHostInfo/accumulo_tracer_hosts', [])
+hostname = status_params.hostname
 
 # security properties
 accumulo_user_keytab = config['configurations']['accumulo-env']['accumulo_user_keytab']
@@ -168,13 +182,13 @@ kinit_path_local = status_params.kinit_path_local
 if security_enabled:
   bare_accumulo_principal = get_bare_principal(config['configurations']['accumulo-site']['general.kerberos.principal'])
   kinit_cmd = format("{kinit_path_local} -kt {accumulo_user_keytab} {accumulo_principal_name};")
+  general_kerberos_keytab = config['configurations']['accumulo-site']['general.kerberos.keytab']
+  general_kerberos_principal = config['configurations']['accumulo-site']['general.kerberos.principal'].replace('_HOST', hostname.lower())
+  accumulo_jaas_file = format("{server_conf_dir}/accumulo_jaas.conf")
 else:
   kinit_cmd = ""
 
-host_sys_prepped = default("/hostLevelParams/host_sys_prepped", False)
-
 #for create_hdfs_directory
-hostname = status_params.hostname
 hdfs_user_keytab = config['configurations']['hadoop-env']['hdfs_user_keytab']
 hdfs_user = config['configurations']['hadoop-env']['hdfs_user']
 hdfs_principal_name = config['configurations']['hadoop-env']['hdfs_principal_name']

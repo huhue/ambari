@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -31,6 +31,7 @@ import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
 
+import org.apache.ambari.annotations.ApiIgnore;
 import org.apache.ambari.server.api.resources.ResourceInstance;
 import org.apache.ambari.server.controller.spi.Resource;
 
@@ -50,7 +51,7 @@ public class UpgradeService extends BaseService {
     m_clusterName = clusterName;
   }
 
-  @POST
+  @POST @ApiIgnore // until documented
   @Produces("text/plain")
   public Response createUpgrade(String body,
       @Context HttpHeaders headers,
@@ -59,30 +60,27 @@ public class UpgradeService extends BaseService {
         createResourceInstance(null));
   }
 
-  @GET
+  @GET @ApiIgnore // until documented
   @Produces("text/plain")
-  public Response getUpgrades(String body,
-      @Context HttpHeaders headers,
+  public Response getUpgrades( @Context HttpHeaders headers,
       @Context UriInfo ui) {
-    return handleRequest(headers, body, ui, Request.Type.GET,
+    return handleRequest(headers, null, ui, Request.Type.GET,
         createResourceInstance(null));
   }
 
-  @GET
+  @GET @ApiIgnore // until documented
   @Path("{upgradeId}")
   @Produces("text/plain")
-  public Response getUpgradeItem(String body,
-      @Context HttpHeaders headers,
+  public Response getUpgradeItem(@Context HttpHeaders headers,
       @Context UriInfo ui, @PathParam("upgradeId") Long id) {
-    return handleRequest(headers, body, ui, Request.Type.GET,
+    return handleRequest(headers, null, ui, Request.Type.GET,
         createResourceInstance(id));
   }
 
-  @PUT
+  @PUT @ApiIgnore // until documented
   @Path("{upgradeId}")
   @Produces("text/plain")
-  public Response updateUpgradeItem(String body,
-      @Context HttpHeaders headers,
+  public Response updateUpgradeItem(String body, @Context HttpHeaders headers,
       @Context UriInfo ui, @PathParam("upgradeId") Long id) {
     return handleRequest(headers, body, ui, Request.Type.PUT,
         createResourceInstance(id));
@@ -96,14 +94,12 @@ public class UpgradeService extends BaseService {
     return new UpgradeGroupService(m_clusterName, upgradeId);
   }
 
-
-
   /**
    * @param upgradeId the upgrade id
    * @return the resource instance
    */
   private ResourceInstance createResourceInstance(Long upgradeId) {
-    Map<Resource.Type, String> mapIds = new HashMap<Resource.Type, String>();
+    Map<Resource.Type, String> mapIds = new HashMap<>();
     mapIds.put(Resource.Type.Cluster, m_clusterName);
 
     if (null != upgradeId) {

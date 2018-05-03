@@ -4,12 +4,13 @@
       "name": "HBASE",
       "identities": [
         {
-          "name": "/spnego"
+          "name": "hbase_spnego",
+          "reference": "/spnego"
         },
         {
           "name": "hbase",
           "principal": {
-            "value": "${hbase-env/hbase_user}-${cluster_name|toLower()}@${realm}",
+            "value": "${hbase-env/hbase_user}${principal_suffix}@${realm}",
             "type" : "user",
             "configuration": "hbase-env/hbase_principal_name",
             "local_username": "${hbase-env/hbase_user}"
@@ -28,7 +29,8 @@
           }
         },
         {
-          "name": "/smokeuser"
+          "name": "hbase_smokeuser",
+          "reference": "/smokeuser"
         }
       ],
       "configurations": [
@@ -49,7 +51,8 @@
           "name": "HBASE_MASTER",
           "identities": [
             {
-              "name": "/HDFS/NAMENODE/hdfs"
+              "name": "hbase_hbase_master_hdfs",
+              "reference": "/HDFS/NAMENODE/hdfs"
             },
             {
               "name": "hbase_master_hbase",
@@ -104,23 +107,12 @@
           "name": "PHOENIX_QUERY_SERVER",
           "identities": [
             {
-              "name": "hbase_queryserver_hbase",
+              "name": "phoenix_spnego",
+              "reference": "/spnego",
               "principal": {
-                "value": "hbase/_HOST@${realm}",
-                "type" : "service",
-                "configuration": "hbase-site/phoenix.queryserver.kerberos.principal",
-                "local_username": "${hbase-env/hbase_user}"
+                "configuration": "hbase-site/phoenix.queryserver.kerberos.principal"
               },
               "keytab": {
-                "file": "${keytab_dir}/hbase.service.keytab",
-                "owner": {
-                  "name": "${hbase-env/hbase_user}",
-                  "access": "r"
-                },
-                "group": {
-                  "name": "${cluster-env/user_group}",
-                  "access": ""
-                },
                 "configuration": "hbase-site/phoenix.queryserver.keytab.file"
               }
             }

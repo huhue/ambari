@@ -22,14 +22,13 @@ Ambari Agent
 
 import os
 import re
-import subprocess
 import socket
 import getpass
 import tempfile
 
-from resource_management.libraries.functions import packages_analyzer
 from resource_management.libraries.functions.default import default
 from ambari_commons import os_utils
+from ambari_commons.repo_manager import ManagerFactory
 from ambari_commons.os_check import OSCheck, OSConst
 from ambari_commons.inet_utils import download_file
 from resource_management import Script, Execute, format
@@ -40,6 +39,7 @@ from resource_management.core.exceptions import Fail
 from ambari_commons.constants import AMBARI_SUDO_BINARY
 from resource_management.core import shell
 from resource_management.core.logger import Logger
+
 
 # WARNING. If you are adding a new host check that is used by cleanup, add it to BEFORE_CLEANUP_HOST_CHECKS
 # It is used by HostCleanup.py
@@ -81,10 +81,10 @@ THP_FILE_UBUNTU = "/sys/kernel/mm/transparent_hugepage/enabled"
 class CheckHost(Script):
   # Package prefixes that are used to find repos (then repos are used to find other packages)
   PACKAGES = [
-    "hadoop", "zookeeper", "webhcat", "oozie", "ambari", "*-manager-server-db",
-    "*-manager-daemons", "mahout", "spark", "falcon", "hbase", "kafka", "knox",
-    "slider", "sqoop", "storm", "flume","hcatalog", "phoenix", "ranger", "accumulo", "hive_*",
-    "pig_", "pig-", "pig." # there's a default 'pigz' package which we should avoid
+    "^hadoop.*$", "^zookeeper.*$", "^webhcat.*$", "^oozie.*$", "^ambari.*$", "^.+-manager-server-db.*$",
+    "^.+-manager-daemons.*$", "^mahout[_\-]\d.*$", "^spark.*$", "^falcon.*$", "^hbase.*$", "^kafka.*$", "^knox.*$",
+    "^slider.*$", "^sqoop.*$", "^storm.*$", "^flume.*$","^hcatalog.*$", "^phoenix.*$", "^ranger.*$", "^accumulo.*$", "^hive_.*$",
+    "^pig[_\-.].*$" # there's a default 'pigz' package which we should avoid
   ]
   
 
@@ -110,9 +110,10 @@ class CheckHost(Script):
   IGNORE_REPOS = [
     "HDP-UTILS", "AMBARI", "BASE", "EXTRAS"
   ]
-  
+
   def __init__(self):
     self.reportFileHandler = HostCheckReportFileHandler()
+    self.pkg_provider = ManagerFactory.get()
   
   def actionexecute(self, env):
     Logger.info("Host checks started.")
@@ -228,22 +229,18 @@ class CheckHost(Script):
 
   def execute_existing_repos_and_installed_packages_check(self, config):
       Logger.info("Installed packages and existing repos checks started.")
+      installedPackages = self.pkg_provider.installed_packages()
+      availablePackages = self.pkg_provider.available_packages()
 
-      installedPackages = []
-      availablePackages = []
-      packages_analyzer.allInstalledPackages(installedPackages)
-      packages_analyzer.allAvailablePackages(availablePackages)
+      repos = self.pkg_provider.get_installed_repos(self.PACKAGES, installedPackages + availablePackages,
+                                                    self.IGNORE_PACKAGES_FROM_REPOS)
 
-      repos = []
-      packages_analyzer.getInstalledRepos(self.PACKAGES, installedPackages + availablePackages,
-                                      self.IGNORE_PACKAGES_FROM_REPOS, repos)
-      packagesInstalled = packages_analyzer.getInstalledPkgsByRepo(repos, self.IGNORE_PACKAGES, installedPackages)
-      additionalPkgsInstalled = packages_analyzer.getInstalledPkgsByNames(
-        self.ADDITIONAL_PACKAGES, installedPackages)
+      packagesInstalled = self.pkg_provider.get_installed_pkgs_by_repo(repos, self.IGNORE_PACKAGES, installedPackages)
+      additionalPkgsInstalled = self.pkg_provider.get_installed_pkgs_by_names(self.ADDITIONAL_PACKAGES, installedPackages)
       allPackages = list(set(packagesInstalled + additionalPkgsInstalled))
       
-      installedPackages = packages_analyzer.getPackageDetails(installedPackages, allPackages)
-      repos = packages_analyzer.getReposToRemove(repos, self.IGNORE_REPOS)
+      installedPackages = self.pkg_provider.get_package_details(installedPackages, allPackages)
+      repos = self.pkg_provider.get_repos_to_remove(repos, self.IGNORE_REPOS)
 
       Logger.info("Installed packages and existing repos checks completed.")
       return installedPackages, repos
@@ -279,38 +276,60 @@ class CheckHost(Script):
     jdk_location = config['commandParams']['jdk_location']
     java_home = config['commandParams']['java_home']
     db_name = config['commandParams']['db_name']
+    no_jdbc_error_message = None
 
     if db_name == DB_MYSQL:
-      jdbc_driver_mysql_name = default("/hostLevelParams/custom_mysql_jdbc_name", None)
-      jdbc_url = jdk_location + jdbc_driver_mysql_name
-      jdbc_driver_class = JDBC_DRIVER_CLASS_MYSQL
-      jdbc_name = jdbc_driver_mysql_name
+      jdbc_driver_mysql_name = default("/ambariLevelParams/custom_mysql_jdbc_name", None)
+      if not jdbc_driver_mysql_name:
+        no_jdbc_error_message = "The MySQL JDBC driver has not been set. Please ensure that you have executed 'ambari-server setup --jdbc-db=mysql --jdbc-driver=/path/to/jdbc_driver'."
+      else:
+        jdbc_url = CheckHost.build_url(jdk_location, jdbc_driver_mysql_name)
+        jdbc_driver_class = JDBC_DRIVER_CLASS_MYSQL
+        jdbc_name = jdbc_driver_mysql_name
     elif db_name == DB_ORACLE:
-      jdbc_driver_oracle_name = default("/hostLevelParams/custom_oracle_jdbc_name", None)
-      jdbc_url = jdk_location + jdbc_driver_oracle_name
-      jdbc_driver_class = JDBC_DRIVER_CLASS_ORACLE
-      jdbc_name = jdbc_driver_oracle_name
+      jdbc_driver_oracle_name = default("/ambariLevelParams/custom_oracle_jdbc_name", None)
+      if not jdbc_driver_oracle_name:
+        no_jdbc_error_message = "The Oracle JDBC driver has not been set. Please ensure that you have executed 'ambari-server setup --jdbc-db=oracle --jdbc-driver=/path/to/jdbc_driver'."
+      else:
+        jdbc_url = CheckHost.build_url(jdk_location, jdbc_driver_oracle_name)
+        jdbc_driver_class = JDBC_DRIVER_CLASS_ORACLE
+        jdbc_name = jdbc_driver_oracle_name
     elif db_name == DB_POSTGRESQL:
-      jdbc_driver_postgres_name = default("/hostLevelParams/custom_postgres_jdbc_name", None)
-      jdbc_url = jdk_location + jdbc_driver_postgres_name
-      jdbc_driver_class = JDBC_DRIVER_CLASS_POSTGRESQL
-      jdbc_name = jdbc_driver_postgres_name
+      jdbc_driver_postgres_name = default("/ambariLevelParams/custom_postgres_jdbc_name", None)
+      if not jdbc_driver_postgres_name:
+        no_jdbc_error_message = "The Postgres JDBC driver has not been set. Please ensure that you have executed 'ambari-server setup --jdbc-db=postgres --jdbc-driver=/path/to/jdbc_driver'."
+      else:
+        jdbc_url = CheckHost.build_url(jdk_location, jdbc_driver_postgres_name)
+        jdbc_driver_class = JDBC_DRIVER_CLASS_POSTGRESQL
+        jdbc_name = jdbc_driver_postgres_name
     elif db_name == DB_MSSQL:
-      jdbc_driver_mssql_name = default("/hostLevelParams/custom_mssql_jdbc_name", None)
-      jdbc_url = jdk_location + jdbc_driver_mssql_name
-      jdbc_driver_class = JDBC_DRIVER_CLASS_MSSQL
-      jdbc_name = jdbc_driver_mssql_name
+      jdbc_driver_mssql_name = default("/ambariLevelParams/custom_mssql_jdbc_name", None)
+      if not jdbc_driver_mssql_name:
+        no_jdbc_error_message = "The MSSQL JDBC driver has not been set. Please ensure that you have executed 'ambari-server setup --jdbc-db=mssql --jdbc-driver=/path/to/jdbc_driver'."
+      else:
+        jdbc_url = CheckHost.build_url(jdk_location, jdbc_driver_mssql_name)
+        jdbc_driver_class = JDBC_DRIVER_CLASS_MSSQL
+        jdbc_name = jdbc_driver_mssql_name
     elif db_name == DB_SQLA:
-      jdbc_driver_sqla_name = default("/hostLevelParams/custom_sqlanywhere_jdbc_name", None)
-      jdbc_url = jdk_location + jdbc_driver_sqla_name
-      jdbc_driver_class = JDBC_DRIVER_CLASS_SQLA
-      jdbc_name = jdbc_driver_sqla_name
-  
+      jdbc_driver_sqla_name = default("/ambariLevelParams/custom_sqlanywhere_jdbc_name", None)
+      if not jdbc_driver_sqla_name:
+        no_jdbc_error_message = "The SQLAnywhere JDBC driver has not been set. Please ensure that you have executed 'ambari-server setup --jdbc-db=sqlanywhere --jdbc-driver=/path/to/jdbc_driver'."
+      else:
+        jdbc_url = CheckHost.build_url(jdk_location, jdbc_driver_sqla_name)
+        jdbc_driver_class = JDBC_DRIVER_CLASS_SQLA
+        jdbc_name = jdbc_driver_sqla_name
+    else: no_jdbc_error_message = format("'{db_name}' database type not supported.")
+
+    if no_jdbc_error_message:
+      Logger.warning(no_jdbc_error_message)
+      db_connection_check_structured_output = {"exit_code" : 1, "message": no_jdbc_error_message}
+      return db_connection_check_structured_output
+
     db_connection_url = config['commandParams']['db_connection_url']
     user_name = config['commandParams']['user_name']
     user_passwd = config['commandParams']['user_passwd']
-    agent_cache_dir = os.path.abspath(config["hostLevelParams"]["agentCacheDir"])
-    check_db_connection_url = jdk_location + check_db_connection_jar_name
+    agent_cache_dir = os.path.abspath(config["agentLevelParams"]["agentCacheDir"])
+    check_db_connection_url = CheckHost.build_url(jdk_location, check_db_connection_jar_name)
     jdbc_path = os.path.join(agent_cache_dir, jdbc_name)
     class_path_delimiter = ":"
     if db_name == DB_SQLA:
@@ -342,7 +361,7 @@ class CheckHost(Script):
     # download and install java if it doesn't exists
     if not os.path.isfile(java_exec):
       jdk_name = config['commandParams']['jdk_name']
-      jdk_url = "{0}/{1}".format(jdk_location, jdk_name)
+      jdk_url = CheckHost.build_url(jdk_location, jdk_name)
       jdk_download_target = os.path.join(agent_cache_dir, jdk_name)
       java_dir = os.path.dirname(java_home)
       try:
@@ -380,7 +399,7 @@ class CheckHost(Script):
           Execute(chmod_cmd, not_if = format("test -e {java_exec}"), sudo = True)
           Execute(install_cmd, not_if = format("test -e {java_exec}"))
           File(format("{java_home}/bin/java"), mode=0755, cd_access="a")
-          Directory(java_home, user=getpass.getuser(), recursive_ownership=True)
+          Directory(java_home, owner=getpass.getuser(), recursive_ownership=True)
           Execute(('chmod', '-R', '755', java_home), sudo = True)
         except Exception, e:
           message = "Error installing java.\n" + str(e)
@@ -406,7 +425,7 @@ class CheckHost(Script):
       download_file(jdbc_url, jdbc_path)
       if db_name == DB_MSSQL and OSCheck.is_windows_family():
         jdbc_auth_path = os.path.join(agent_cache_dir, JDBC_AUTH_SYMLINK_MSSQL)
-        jdbc_auth_url = jdk_location + JDBC_AUTH_SYMLINK_MSSQL
+        jdbc_auth_url = CheckHost.build_url(jdk_location, JDBC_AUTH_SYMLINK_MSSQL)
         download_file(jdbc_auth_url, jdbc_auth_path)
       elif db_name == DB_SQLA:
         # unpack tar.gz jdbc which was donaloaded
@@ -452,6 +471,7 @@ class CheckHost(Script):
     
     failedCount = 0
     failures = []
+    hosts_with_failures = []
    
     if config['commandParams']['hosts'] is not None :
       hosts = config['commandParams']['hosts'].split(",")
@@ -459,34 +479,37 @@ class CheckHost(Script):
     else :
       successCount = 0
       hosts = ""
-          
-    socket.setdefaulttimeout(3)          
+
+    socket.setdefaulttimeout(3)
     for host in hosts:
       try:
-        host = host.strip()        
+        host = host.strip()
         socket.gethostbyname(host)
       except socket.error,exception:
         successCount -= 1
         failedCount += 1
-        
-        failure = { "host": host, "type": FORWARD_LOOKUP_REASON, 
+
+        hosts_with_failures.append(host)
+
+        failure = { "host": host, "type": FORWARD_LOOKUP_REASON,
           "cause": exception.args }
-        
+
         failures.append(failure)
-  
+
     if failedCount > 0 :
       message = "There were " + str(failedCount) + " host(s) that could not resolve to an IP address."
     else :
       message = "All hosts resolved to an IP address."
 
     Logger.info(message)
-        
+
     host_resolution_check_structured_output = {
       "exit_code" : 0,
-      "message" : message,                                          
-      "failed_count" : failedCount, 
+      "message" : message,
+      "failed_count" : failedCount,
       "success_count" : successCount,
-      "failures" : failures
+      "failures" : failures,
+      "hosts_with_failures" : hosts_with_failures
       }
 
     Logger.info("IP address forward resolution check completed.")
@@ -497,10 +520,27 @@ class CheckHost(Script):
     Logger.info("Last Agent Env check started.")
     hostInfo = HostInfo()
     last_agent_env_check_structured_output = { }
-    hostInfo.register(last_agent_env_check_structured_output, False, False)
+    hostInfo.register(last_agent_env_check_structured_output, runExpensiveChecks=False, checkJavaProcs=True)
     Logger.info("Last Agent Env check completed successfully.")
 
     return last_agent_env_check_structured_output
+
+  @staticmethod
+  def build_url(base_url, path):
+    """
+    Builds a URL by appending a relative path to a base URL, ensuring additional /'s are not added
+    between the two parts.
+
+    :param base_url: a base URL
+    :param path: a relative path
+    :return: the resulting URL
+    """
+
+    url = base_url[0:-1] if base_url and base_url.endswith('/') else base_url
+    url = url + '/'
+    url = url + (path[1:] if path and path.startswith('/') else path)
+    return url
+
 
 if __name__ == "__main__":
   CheckHost().execute()

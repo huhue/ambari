@@ -39,12 +39,16 @@ class ExitHelper(object):
   """
   Class to cleanup resources before exiting. Replacement for atexit module. sys.exit(code) works only from threads and
   os._exit(code) will ignore atexit and cleanup will be ignored.
+
+  WARNING: always import as `ambari_agent.ExitHelper import ExitHelper`, otherwise it will be imported twice and nothing
+  will work as expected.
   """
   __metaclass__ = _singleton
 
   def __init__(self):
     self.exit_functions = []
     self.exit_functions_executed = False
+    self.exitcode = 0
     atexit.register(self.execute_cleanup)
 
   def execute_cleanup(self):
@@ -62,10 +66,10 @@ class ExitHelper(object):
   def register(self, func, *args, **kwargs):
     self.exit_functions.append((func, args, kwargs))
 
-  def exit(self, code):
+  def exit(self):
     self.execute_cleanup()
-    logger.info("Cleanup finished, exiting with code:" + str(code))
-    os._exit(code)
+    logger.info("Cleanup finished, exiting with code:" + str(self.exitcode))
+    os._exit(self.exitcode)
 
 
 if __name__ == '__main__':

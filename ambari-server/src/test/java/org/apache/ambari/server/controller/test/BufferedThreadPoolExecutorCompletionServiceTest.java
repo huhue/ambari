@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -22,23 +22,23 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import junit.framework.Assert;
-
 import org.apache.ambari.server.controller.utilities.BufferedThreadPoolExecutorCompletionService;
 import org.apache.ambari.server.controller.utilities.ScalingThreadPoolExecutor;
 import org.junit.Test;
 
+import junit.framework.Assert;
+
 public class BufferedThreadPoolExecutorCompletionServiceTest {
 
   private void longOp() throws InterruptedException {
-    Thread.sleep(3000);
+    Thread.sleep(700);
     System.out.println("Completed " + Thread.currentThread());
   }
 
   /**
    * Tests that when unbounded queue provided to executor, only
    * {@link ThreadPoolExecutor#getCorePoolSize()} threads are launched
-   * 
+   *
    * @throws InterruptedException
    */
   @Test
@@ -46,7 +46,7 @@ public class BufferedThreadPoolExecutorCompletionServiceTest {
     int CORE_POOL_SIZE = 2;
     int MAX_POOL_SIZE = 5;
     int TASKS_COUNT = 8;
-    LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<Runnable>();
+    LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<>();
     ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(CORE_POOL_SIZE, MAX_POOL_SIZE, 30000, TimeUnit.MILLISECONDS, queue);
     BufferedThreadPoolExecutorCompletionService<Runnable> service = new BufferedThreadPoolExecutorCompletionService<>(threadPoolExecutor);
     for (int tc = 0; tc < TASKS_COUNT; tc++) {
@@ -76,7 +76,7 @@ public class BufferedThreadPoolExecutorCompletionServiceTest {
   /**
    * Tests that when load is more than core-pool-size and less than
    * max-pool-size, the number of threads scales up.
-   * 
+   *
    * @throws InterruptedException
    */
   @Test
@@ -84,7 +84,7 @@ public class BufferedThreadPoolExecutorCompletionServiceTest {
     int CORE_POOL_SIZE = 2;
     int MAX_POOL_SIZE = 10;
     int TASKS_COUNT = 8;
-    LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<Runnable>(CORE_POOL_SIZE);
+    LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(CORE_POOL_SIZE);
     ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(CORE_POOL_SIZE, MAX_POOL_SIZE, 30000, TimeUnit.MILLISECONDS, queue);
     BufferedThreadPoolExecutorCompletionService<Runnable> service = new BufferedThreadPoolExecutorCompletionService<>(threadPoolExecutor);
     for (int tc = 0; tc < TASKS_COUNT; tc++) {
@@ -114,7 +114,7 @@ public class BufferedThreadPoolExecutorCompletionServiceTest {
   /**
    * Tests that when load is more than max-pool-size, the number of threads
    * scales up.
-   * 
+   *
    * @throws InterruptedException
    */
   @Test
@@ -122,7 +122,7 @@ public class BufferedThreadPoolExecutorCompletionServiceTest {
     int CORE_POOL_SIZE = 2;
     int MAX_POOL_SIZE = 10;
     int TASKS_COUNT = 24;
-    LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<Runnable>(CORE_POOL_SIZE);
+    LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(CORE_POOL_SIZE);
     ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(CORE_POOL_SIZE, MAX_POOL_SIZE, 30000, TimeUnit.MILLISECONDS, queue);
     BufferedThreadPoolExecutorCompletionService<Runnable> service = new BufferedThreadPoolExecutorCompletionService<>(threadPoolExecutor);
     for (int tc = 0; tc < TASKS_COUNT; tc++) {
@@ -152,7 +152,7 @@ public class BufferedThreadPoolExecutorCompletionServiceTest {
   /**
    * Tests that when load is more than max-pool-size, the number of threads
    * scales up.
-   * 
+   *
    * @throws InterruptedException
    */
   @Test
@@ -160,7 +160,8 @@ public class BufferedThreadPoolExecutorCompletionServiceTest {
     int CORE_POOL_SIZE = 2;
     int MAX_POOL_SIZE = 10;
     int TASKS_COUNT = 24;
-    ThreadPoolExecutor threadPoolExecutor = new ScalingThreadPoolExecutor(CORE_POOL_SIZE, MAX_POOL_SIZE, 30000, TimeUnit.MILLISECONDS);
+    ThreadPoolExecutor threadPoolExecutor = new ScalingThreadPoolExecutor(CORE_POOL_SIZE,
+        MAX_POOL_SIZE, 30000, TimeUnit.MILLISECONDS, CORE_POOL_SIZE);
     BufferedThreadPoolExecutorCompletionService<Runnable> service = new BufferedThreadPoolExecutorCompletionService<>(threadPoolExecutor);
     for (int tc = 0; tc < TASKS_COUNT; tc++) {
       service.submit(new Runnable() {

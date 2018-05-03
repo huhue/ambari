@@ -25,6 +25,8 @@ class TestSqoop(RMFTestCase):
   COMMON_SERVICES_PACKAGE_DIR = "SQOOP/1.4.4.2.0/package"
   STACK_VERSION = "2.0.6"
 
+  CONFIG_OVERRIDES = {"serviceName":"SQOOP", "role":"SQOOP"}
+
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/sqoop_client.py",
                        classname = "SqoopClient",
@@ -44,7 +46,7 @@ class TestSqoop(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/usr/lib/sqoop/conf',
                               configurations = self.getConfig()['configurations']['sqoop-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['sqoop-site'])
+                              configuration_attributes = self.getConfig()['configurationAttributes']['sqoop-site'])
     self.assertResourceCalled('File', '/usr/lib/sqoop/conf/sqoop-env.sh',
                               owner = 'sqoop',
                               group = 'hadoop',
@@ -83,11 +85,11 @@ class TestSqoop(RMFTestCase):
                               to = '/usr/share/java/mysql-connector-java.jar',
                               )
     self.assertResourceCalled('File', '/usr/lib/sqoop/lib/test-postgres-jdbc.jar',
-                              content = DownloadSource('http://c6401.ambari.apache.org:8080/resources//test-postgres-jdbc.jar'),
+                              content = DownloadSource('http://c6401.ambari.apache.org:8080/resources/test-postgres-jdbc.jar'),
                               mode = 0644,
                               )
     self.assertResourceCalled('File', '/usr/lib/sqoop/lib/oracle-jdbc-driver.jar',
-                              content = DownloadSource('http://c6401.ambari.apache.org:8080/resources//oracle-jdbc-driver.jar'),
+                              content = DownloadSource('http://c6401.ambari.apache.org:8080/resources/oracle-jdbc-driver.jar'),
                               mode = 0644,
                               )
     self.assertResourceCalled('Directory', '/usr/lib/sqoop/conf',
@@ -100,7 +102,7 @@ class TestSqoop(RMFTestCase):
                               group = 'hadoop',
                               conf_dir = '/usr/lib/sqoop/conf',
                               configurations = self.getConfig()['configurations']['sqoop-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['sqoop-site'])
+                              configuration_attributes = self.getConfig()['configurationAttributes']['sqoop-site'])
     self.assertResourceCalled('File', '/usr/lib/sqoop/conf/sqoop-env.sh',
                               content = InlineTemplate(self.getConfig()['configurations']['sqoop-env']['content']),
                               owner = 'sqoop',
@@ -136,19 +138,9 @@ class TestSqoop(RMFTestCase):
                        classname = "SqoopClient",
                        command = "pre_upgrade_restart",
                        config_dict = json_content,
+                       config_overrides = self.CONFIG_OVERRIDES,
                        stack_version = self.STACK_VERSION,
                        target = RMFTestCase.TARGET_COMMON_SERVICES,
-                       call_mocks = [(0, None, ''), (0, None)],
                        mocks_dict = mocks_dict)
 
-    self.assertResourceCalled('Link', ('/etc/sqoop/conf'), to='/usr/hdp/current/sqoop-client/conf')
     self.assertResourceCalled("Execute", ('ambari-python-wrap', '/usr/bin/hdp-select', 'set', 'sqoop-client', version), sudo=True)
-
-    self.assertEquals(1, mocks_dict['call'].call_count)
-    self.assertEquals(1, mocks_dict['checked_call'].call_count)
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'set-conf-dir', '--package', 'sqoop', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['checked_call'].call_args_list[0][0][0])
-    self.assertEquals(
-      ('ambari-python-wrap', '/usr/bin/conf-select', 'create-conf-dir', '--package', 'sqoop', '--stack-version', '2.3.0.0-1234', '--conf-version', '0'),
-       mocks_dict['call'].call_args_list[0][0][0])

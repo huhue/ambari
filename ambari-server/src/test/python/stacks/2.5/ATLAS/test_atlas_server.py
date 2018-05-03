@@ -19,6 +19,7 @@ limitations under the License.
 '''
 
 from stacks.utils.RMFTestCase import *
+from mock.mock import MagicMock, call, patch
 
 from only_for_platform import not_for_platform, PLATFORM_WINDOWS
 
@@ -28,105 +29,141 @@ class TestAtlasServer(RMFTestCase):
   STACK_VERSION = "2.5"
 
   def configureResourcesCalled(self):
+    # Both server and client
+    self.assertResourceCalled('Directory', '/usr/hdp/current/atlas-server/conf',
+                              owner='atlas',
+                              group='hadoop',
+                              create_parents = True,
+                              cd_access='a',
+                              mode=0755
+    )
+    # Pid dir
     self.assertResourceCalled('Directory', '/var/run/atlas',
                               owner='atlas',
                               group='hadoop',
                               create_parents = True,
                               cd_access='a',
                               mode=0755
-                              )
-    self.assertResourceCalled('Directory', '/etc/atlas/conf',
+    )
+    self.assertResourceCalled('Directory', '/usr/hdp/current/atlas-server/conf/solr',
                               owner='atlas',
                               group='hadoop',
                               create_parents = True,
                               cd_access='a',
-                              mode=0755
-                              )
+                              mode=0755,
+                              recursive_ownership = True
+    )
+    # Log dir
     self.assertResourceCalled('Directory', '/var/log/atlas',
                               owner='atlas',
                               group='hadoop',
                               create_parents = True,
                               cd_access='a',
                               mode=0755
-                              )
-    self.assertResourceCalled('Directory', '/usr/hdp/current/atlas-server/hbase/logs',
-                              owner='atlas',
-                              group='hadoop',
-                              create_parents = True,
-                              cd_access='a',
-                              mode=0755
-                              )
+    )
+    # Data dir
     self.assertResourceCalled('Directory', '/usr/hdp/current/atlas-server/data',
                               owner='atlas',
                               group='hadoop',
                               create_parents = True,
                               cd_access='a',
-                              mode=0755
-                              )
-    self.assertResourceCalled('Directory', '/var/lib/atlas/data',
+                              mode=0644
+    )
+    # Expanded war dir
+    self.assertResourceCalled('Directory', '/usr/hdp/current/atlas-server/server/webapp',
                               owner='atlas',
                               group='hadoop',
                               create_parents = True,
                               cd_access='a',
                               mode=0644
-                              )
-    self.assertResourceCalled('Directory', '/var/lib/atlas/server/webapp',
-                              owner='atlas',
-                              group='hadoop',
-                              create_parents = True,
-                              cd_access='a',
-                              mode=0644
-                              )
-    self.assertResourceCalled('File', '/var/lib/atlas/server/webapp/atlas.war',
+    )
+    self.assertResourceCalled('File', '/usr/hdp/current/atlas-server/server/webapp/atlas.war',
                               content = StaticFile('/usr/hdp/current/atlas-server/server/webapp/atlas.war'),
-                              )
-    appprops =  dict(self.getConfig()['configurations'][
+    )
+    host_name = u"c6401.ambari.apache.org"
+    app_props =  dict(self.getConfig()['configurations'][
                        'application-properties'])
-    appprops['atlas.http.authentication.kerberos.name.rules'] = ' \\ \n'.join(appprops['atlas.http.authentication.kerberos.name.rules'].splitlines())
-    appprops['atlas.server.bind.address'] = 'c6401.ambari.apache.org'
+    app_props['atlas.http.authentication.kerberos.name.rules'] = ' \\ \n'.join(app_props['atlas.http.authentication.kerberos.name.rules'].splitlines())
+    app_props['atlas.server.bind.address'] = host_name
+    metadata_protocol = "https" if app_props["atlas.enableTLS"] is True else "http"
+    metadata_port = app_props["atlas.server.https.port"] if metadata_protocol == "https" else app_props["atlas.server.http.port"]
+    app_props["atlas.rest.address"] = u'%s://%s:%s' % (metadata_protocol, host_name, metadata_port)
+    app_props["atlas.server.ids"] = "id1"
+    app_props["atlas.server.address.id1"] = u"%s:%s" % (host_name, metadata_port)
+    app_props["atlas.server.ha.enabled"] = "false"
 
-    self.assertResourceCalled('PropertiesFile',
-                              '/etc/atlas/conf/atlas-application.properties',
-                              properties=appprops,
-                              owner='atlas',
-                              group='hadoop',
-                              mode=0644,
-                              )
-    self.assertResourceCalled('File', '/etc/atlas/conf/atlas-env.sh',
+    self.assertResourceCalled('File', '/usr/hdp/current/atlas-server/conf/atlas-log4j.xml',
+                          content=InlineTemplate(
+                            self.getConfig()['configurations'][
+                              'atlas-log4j']['content']),
+                          owner='atlas',
+                          group='hadoop',
+                          mode=0644,
+    )
+    self.assertResourceCalled('File', '/usr/hdp/current/atlas-server/conf/atlas-env.sh',
                               content=InlineTemplate(
                                   self.getConfig()['configurations'][
                                     'atlas-env']['content']),
                               owner='atlas',
                               group='hadoop',
                               mode=0755,
-                              )
-    self.assertResourceCalled('File', '/etc/atlas/conf/atlas-log4j.xml',
+    )
+    self.assertResourceCalled('File', '/usr/hdp/current/atlas-server/conf/solr/solrconfig.xml',
                               content=InlineTemplate(
                                   self.getConfig()['configurations'][
-                                    'atlas-log4j']['content']),
+                                    'atlas-solrconfig']['content']),
                               owner='atlas',
                               group='hadoop',
                               mode=0644,
+    )
+    # application.properties file
+    self.assertResourceCalled('PropertiesFile',
+                              '/usr/hdp/current/atlas-server/conf/atlas-application.properties',
+                              properties=app_props,
+                              owner=u'atlas',
+                              group=u'hadoop',
+                              mode=0600,
                               )
-    self.assertResourceCalled('File', '/etc/atlas/conf/users-credentials.properties',
-                              content=StaticFile('users-credentials.properties'),
-                              owner='atlas',
-                              group='hadoop',
+    self.assertResourceCalled('Directory', '/var/log/ambari-infra-solr-client',
+                              create_parents=True,
+                              cd_access='a',
+                              mode=0755
+    )
+    self.assertResourceCalled('Directory', '/usr/lib/ambari-infra-solr-client',
+                              create_parents = True,
+                              recursive_ownership = True,
+                              cd_access='a',
+                              mode=0755
+    )
+    self.assertResourceCalled('File', '/usr/lib/ambari-infra-solr-client/solrCloudCli.sh',
+                              content=StaticFile('/usr/lib/ambari-infra-solr-client/solrCloudCli.sh'),
+                              mode=0755
+    )
+    self.assertResourceCalled('File', '/usr/lib/ambari-infra-solr-client/log4j.properties',
+                              content=self.getConfig()['configurations']['infra-solr-client-log4j']['content'],
                               mode=0644,
-                              )
-    self.assertResourceCalled('File', '/etc/atlas/conf/policy-store.txt',
-                              content=StaticFile('policy-store.txt'),
-                              owner='atlas',
-                              group='hadoop',
-                              mode=0644,
-                              )
-    self.assertResourceCalled('XmlConfig', 'hbase-site.xml',
-                              owner = 'atlas',
-                              group = 'hadoop',
-                              conf_dir = '/usr/hdp/current/atlas-server/hbase/conf',
-                              configurations = self.getConfig()['configurations']['atlas-hbase-site'],
-                              configuration_attributes = self.getConfig()['configuration_attributes']['atlas-hbase-site']
-                              )
+    )
+    self.assertResourceCalled('File', '/var/log/ambari-infra-solr-client/solr-client.log',
+                              mode=0664,
+                              content = ''
+    )
+
+    self.assertResourceCalledRegexp('^Execute$', '^ambari-sudo.sh JAVA_HOME=/usr/jdk64/jdk1.7.0_45 /usr/lib/ambari-infra-solr-client/solrCloudCli.sh --zookeeper-connect-string c6401.ambari.apache.org:2181 --znode /infra-solr --check-znode --retry 5 --interval 10')
+    self.assertResourceCalledRegexp('^Execute$', '^ambari-sudo.sh JAVA_HOME=/usr/jdk64/jdk1.7.0_45 /usr/lib/ambari-infra-solr-client/solrCloudCli.sh --zookeeper-connect-string c6401.ambari.apache.org:2181/infra-solr --download-config --config-dir /tmp/solr_config_atlas_configs_0.[0-9]* --config-set atlas_configs --retry 30 --interval 5')
+    self.assertResourceCalledRegexp('^File$', '^/tmp/solr_config_atlas_configs_0.[0-9]*',
+                                    content=InlineTemplate(self.getConfig()['configurations']['atlas-solrconfig']['content']),
+                                    only_if='test -d /tmp/solr_config_atlas_configs_0.[0-9]*')
+    self.assertResourceCalledRegexp('^Execute$', '^ambari-sudo.sh JAVA_HOME=/usr/jdk64/jdk1.7.0_45 /usr/lib/ambari-infra-solr-client/solrCloudCli.sh --zookeeper-connect-string c6401.ambari.apache.org:2181/infra-solr --upload-config --config-dir /tmp/solr_config_atlas_configs_0.[0-9]* --config-set atlas_configs --retry 30 --interval 5',
+                                    only_if='test -d /tmp/solr_config_atlas_configs_0.[0-9]*')
+    self.assertResourceCalledRegexp('^Execute$', '^ambari-sudo.sh JAVA_HOME=/usr/jdk64/jdk1.7.0_45 /usr/lib/ambari-infra-solr-client/solrCloudCli.sh --zookeeper-connect-string c6401.ambari.apache.org:2181/infra-solr --upload-config --config-dir /usr/hdp/current/atlas-server/conf/solr --config-set atlas_configs --retry 30 --interval 5',
+                                    not_if='test -d /tmp/solr_config_atlas_configs_0.[0-9]*')
+    self.assertResourceCalledRegexp('^Directory$', '^/tmp/solr_config_atlas_configs_0.[0-9]*',
+                                    action=['delete'],
+                                    create_parents=True)
+    self.assertResourceCalledRegexp('^Execute$', '^ambari-sudo.sh JAVA_HOME=/usr/jdk64/jdk1.7.0_45 /usr/lib/ambari-infra-solr-client/solrCloudCli.sh --zookeeper-connect-string c6401.ambari.apache.org:2181/infra-solr --create-collection --collection vertex_index --config-set atlas_configs --shards 1 --replication 1 --max-shards 1 --retry 5 --interval 10')
+    self.assertResourceCalledRegexp('^Execute$', '^ambari-sudo.sh JAVA_HOME=/usr/jdk64/jdk1.7.0_45 /usr/lib/ambari-infra-solr-client/solrCloudCli.sh --zookeeper-connect-string c6401.ambari.apache.org:2181/infra-solr --create-collection --collection edge_index --config-set atlas_configs --shards 1 --replication 1 --max-shards 1 --retry 5 --interval 10')
+    self.assertResourceCalledRegexp('^Execute$', '^ambari-sudo.sh JAVA_HOME=/usr/jdk64/jdk1.7.0_45 /usr/lib/ambari-infra-solr-client/solrCloudCli.sh --zookeeper-connect-string c6401.ambari.apache.org:2181/infra-solr --create-collection --collection fulltext_index --config-set atlas_configs --shards 1 --replication 1 --max-shards 1 --retry 5 --interval 10')
+
 
   def test_configure_default(self):
     self.executeScript(self.COMMON_SERVICES_PACKAGE_DIR + "/scripts/metadata_server.py",
@@ -138,5 +175,12 @@ class TestAtlasServer(RMFTestCase):
                        )
 
     self.configureResourcesCalled()
-    self.assertNoMoreResources()
 
+    self.assertResourceCalled('File', '/tmp/atlas_hbase_setup.rb',
+                              owner = "hbase",
+                              group = "hadoop",
+                              content=Template("atlas_hbase_setup.rb.j2"))
+
+    self.assertResourceCalled('File', '/usr/hdp/current/atlas-server/conf/hdfs-site.xml',action = ['delete'],)
+    self.assertResourceCalled('Directory','/usr/hdp/current/atlas-server/', owner = 'atlas', group = 'hadoop', recursive_ownership = True, )
+    self.assertNoMoreResources()

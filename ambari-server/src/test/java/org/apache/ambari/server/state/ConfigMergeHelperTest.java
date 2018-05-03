@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,12 +17,23 @@
  */
 package org.apache.ambari.server.state;
 
-import com.google.inject.Binder;
-import com.google.inject.Guice;
-import com.google.inject.Injector;
-import com.google.inject.Module;
-import com.google.inject.persist.PersistService;
-import com.google.inject.util.Modules;
+import static org.apache.ambari.server.state.ConfigMergeHelper.ThreeWayValue;
+import static org.easymock.EasyMock.anyString;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
+
+import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
@@ -30,22 +41,11 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-
-import static org.easymock.EasyMock.anyString;
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.createNiceMock;
-import static org.junit.Assert.assertEquals;
-import static org.apache.ambari.server.state.ConfigMergeHelper.ThreeWayValue;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import com.google.inject.Binder;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
+import com.google.inject.Module;
+import com.google.inject.util.Modules;
 
 /**
  * Tests the {@link ConfigMergeHelper} class
@@ -78,8 +78,8 @@ public class ConfigMergeHelperTest {
   }
 
   @After
-  public void teardown() {
-    injector.getInstance(PersistService.class).stop();
+  public void teardown() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 
   @Test
@@ -136,25 +136,19 @@ public class ConfigMergeHelperTest {
       newStackId.getStackVersion())).andReturn(newStackProperties);
 
     // desired config of hdfs-env.xml
-    Map<String, String> desiredHdfsEnvProperties = new HashMap<String, String>() {{
-
-    }};
+    Map<String, String> desiredHdfsEnvProperties = new HashMap<>();
     expect(clusterMock.getDesiredConfigByType("hdfs-env.xml")).andReturn(
       createConfigMock(desiredHdfsEnvProperties)
     );
 
     // desired config of zk-env.xml
-    Map<String, String> desiredZkEnvProperties = new HashMap<String, String>() {{
-
-    }};
+    Map<String, String> desiredZkEnvProperties = new HashMap<>();
     expect(clusterMock.getDesiredConfigByType("hdfs-env.xml")).andReturn(
       createConfigMock(desiredZkEnvProperties)
     );
 
     // desired config of hadoop-env.xml
-    Map<String, String> desiredHadoopEnvProperties = new HashMap<String, String>() {{
-
-    }};
+    Map<String, String> desiredHadoopEnvProperties = new HashMap<>();
     expect(clusterMock.getDesiredConfigByType("hadoop-env.xml")).andReturn(
       createConfigMock(desiredHadoopEnvProperties)
     );

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,20 +18,14 @@
 
 package org.apache.ambari.server.stack;
 
-import org.apache.ambari.server.AmbariException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
+
+import org.apache.ambari.server.AmbariException;
 
 /**
  * Encapsulates IO operations on a common services directory.
  */
 public class CommonServiceDirectory extends ServiceDirectory {
-  /**
-   * logger instance
-   */
-  private static final Logger LOG = LoggerFactory.getLogger(CommonServiceDirectory.class);
 
   /**
    * Constructor.
@@ -43,12 +37,12 @@ public class CommonServiceDirectory extends ServiceDirectory {
     super(servicePath);
   }
 
-  @Override
   /**
    * Obtain the advisor name.
    *
    * @return advisor name
    */
+  @Override
   public String getAdvisorName(String serviceName) {
     if (getAdvisorFile() == null || serviceName == null)
       return null;
@@ -60,31 +54,32 @@ public class CommonServiceDirectory extends ServiceDirectory {
     return advisorName;
   }
 
-  @Override
   /**
-   * Parse common service directory
-   * packageDir Format: common-services/<serviceName>/<serviceVersion>/package
-   * Example:
-   *  directory: "/var/lib/ambari-server/resources/common-services/HDFS/1.0"
-   *  packageDir: "common-services/HDFS/1.0/package"
-   *
-   * @throws AmbariException
+   * @return the service name-version (will be used for logging purposes by superclass)
    */
-  protected void parsePath() throws AmbariException {
+  @Override
+  public String getService() {
     File serviceVersionDir = new File(getAbsolutePath());
     File serviceDir = serviceVersionDir.getParentFile();
 
-    String serviceId = String.format("%s/%s", serviceDir.getName(), serviceVersionDir.getName());
+    String service = String.format("%s-%s", serviceDir.getName(), serviceVersionDir.getName());
+    return service;
+  }
 
-    File absPackageDir = new File(getAbsolutePath() + File.separator + PACKAGE_FOLDER_NAME);
-    if(absPackageDir.isDirectory()) {
-      packageDir = absPackageDir.getPath().substring(serviceDir.getParentFile().getParentFile().getPath().length() + 1);
-      LOG.debug(String.format("Service package folder for common service %s has been resolved to %s",
-          serviceId, packageDir));
-    } else {
-      LOG.debug(String.format("Service package folder %s for common service %s does not exist.",
-          absPackageDir, serviceId ));
-    }
-    parseMetaInfoFile();
+  /**
+   * @return the resources directory
+   */
+  @Override
+  protected File getResourcesDirectory() {
+    File serviceVersionDir = new File(getAbsolutePath());
+    return serviceVersionDir.getParentFile().getParentFile().getParentFile();
+  }
+
+  /**
+   * @return the text common-services (will be used for logging purposes by superclass)
+   */
+  @Override
+  public String getStack() {
+    return "common-services";
   }
 }

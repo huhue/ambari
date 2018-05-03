@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,9 +17,24 @@
  */
 package org.apache.ambari.server.security.authorization;
 
-import com.google.common.collect.Lists;
-import com.google.inject.AbstractModule;
-import com.google.inject.Provider;
+import static org.easymock.EasyMock.eq;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.expectLastCall;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.reset;
+import static org.easymock.EasyMock.verify;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.Set;
+
 import org.apache.ambari.server.orm.dao.PrivilegeDAO;
 import org.apache.ambari.server.orm.dao.ViewInstanceDAO;
 import org.apache.ambari.server.orm.entities.PermissionEntity;
@@ -29,12 +44,15 @@ import org.apache.ambari.server.orm.entities.PrivilegeEntity;
 import org.apache.ambari.server.orm.entities.ResourceEntity;
 import org.apache.ambari.server.orm.entities.ResourceTypeEntity;
 import org.apache.ambari.server.orm.entities.RoleAuthorizationEntity;
-import org.apache.ambari.server.orm.entities.ViewInstanceEntity;
+import org.apache.ambari.server.orm.entities.UserEntity;
+import org.apache.ambari.server.security.authentication.AmbariUserAuthentication;
 import org.easymock.EasyMockRule;
 import org.easymock.EasyMockSupport;
 import org.easymock.Mock;
 import org.easymock.MockType;
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -46,23 +64,7 @@ import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.HashSet;
-import java.util.Set;
-
-import static org.easymock.EasyMock.eq;
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.expectLastCall;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.reset;
-import static org.easymock.EasyMock.verify;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import com.google.inject.Provider;
 
 public class AuthorizationHelperTest  extends EasyMockSupport {
 
@@ -72,10 +74,21 @@ public class AuthorizationHelperTest  extends EasyMockSupport {
   @Mock(type = MockType.NICE)
   private ServletRequestAttributes servletRequestAttributes;
 
+  @Before
+  public void setup() {
+    // Ensure the security context has been clean up
+    SecurityContextHolder.getContext().setAuthentication(null);
+  }
+
+  @After
+  public void cleanup() {
+    // Clean up the security context for the next test
+    SecurityContextHolder.getContext().setAuthentication(null);
+  }
 
   @Test
   public void testConvertPrivilegesToAuthorities() throws Exception {
-    Collection<PrivilegeEntity> privilegeEntities = new ArrayList<PrivilegeEntity>();
+    Collection<PrivilegeEntity> privilegeEntities = new ArrayList<>();
 
     ResourceTypeEntity resourceTypeEntity = new ResourceTypeEntity();
     resourceTypeEntity.setId(1);
@@ -124,7 +137,7 @@ public class AuthorizationHelperTest  extends EasyMockSupport {
 
     assertEquals("Wrong number of authorities", 2, authorities.size());
 
-    Set<String> authorityNames = new HashSet<String>();
+    Set<String> authorityNames = new HashSet<>();
 
     for (GrantedAuthority authority : authorities) {
       authorityNames.add(authority.getAuthority());
@@ -147,26 +160,29 @@ public class AuthorizationHelperTest  extends EasyMockSupport {
   }
 
   @Test
-  public void testLoginAliasAuthName() throws Exception {
+  public void testAuthId() throws Exception {
+    Integer userId = AuthorizationHelper.getAuthenticatedId();
+    Assert.assertEquals(Integer.valueOf(-1), userId);
 
-    reset(servletRequestAttributes);
+    PrincipalEntity principalEntity = new PrincipalEntity();
+    UserEntity userEntity = new UserEntity();
+    userEntity.setUserId(1);
+    userEntity.setPrincipal(principalEntity);
+    User user = new User(userEntity);
+    Authentication auth = new AmbariUserAuthentication(null, user, null);
+    SecurityContextHolder.getContext().setAuthentication(auth);
 
-    RequestContextHolder.setRequestAttributes(servletRequestAttributes);
-    expect(servletRequestAttributes.getAttribute(eq("user1@domain.com"), eq(RequestAttributes.SCOPE_SESSION)))
-      .andReturn("user1").atLeastOnce(); // user1@domain.com is a login alias for user1
+    userId = AuthorizationHelper.getAuthenticatedId();
+    Assert.assertEquals(Integer.valueOf(1), userId);
+  }
 
-    replay(servletRequestAttributes);
+  @Test
+  public void testAuthWithoutId() throws Exception {
+    Authentication auth = new UsernamePasswordAuthenticationToken("admin", null);
+    SecurityContextHolder.getContext().setAuthentication(auth);
 
-    Authentication auth = new UsernamePasswordAuthenticationToken("user1@domain.com", null);
-    SecurityContextHolder.getContext().setAuthentication(new AmbariAuthentication(auth));
-
-    String user = AuthorizationHelper.getAuthenticatedName();
-    Assert.assertEquals("user1", user);
-
-    SecurityContextHolder.getContext().setAuthentication(null); // clean up security context
-
-    verify(servletRequestAttributes);
-
+    Integer userId = AuthorizationHelper.getAuthenticatedId();
+    Assert.assertEquals(Integer.valueOf(-1), userId);
   }
 
   @Test
@@ -222,16 +238,16 @@ public class AuthorizationHelperTest  extends EasyMockSupport {
     cluster2ResourceEntity.setId(2L);
 
     PermissionEntity readOnlyPermissionEntity = new PermissionEntity();
-    readOnlyPermissionEntity.setAuthorizations(Collections.singleton(readOnlyRoleAuthorizationEntity));
+    readOnlyPermissionEntity.addAuthorization(readOnlyRoleAuthorizationEntity);
 
     PermissionEntity privilegedPermissionEntity = new PermissionEntity();
-    privilegedPermissionEntity.setAuthorizations(Arrays.asList(readOnlyRoleAuthorizationEntity,
-        privilegedRoleAuthorizationEntity));
+    privilegedPermissionEntity.addAuthorization(readOnlyRoleAuthorizationEntity);
+    privilegedPermissionEntity.addAuthorization(privilegedRoleAuthorizationEntity);
 
     PermissionEntity administratorPermissionEntity = new PermissionEntity();
-    administratorPermissionEntity.setAuthorizations(Arrays.asList(readOnlyRoleAuthorizationEntity,
-        privilegedRoleAuthorizationEntity,
-        administratorRoleAuthorizationEntity));
+    administratorPermissionEntity.addAuthorization(readOnlyRoleAuthorizationEntity);
+    administratorPermissionEntity.addAuthorization(privilegedRoleAuthorizationEntity);
+    administratorPermissionEntity.addAuthorization(administratorRoleAuthorizationEntity);
 
     PrivilegeEntity readOnlyPrivilegeEntity = new PrivilegeEntity();
     readOnlyPrivilegeEntity.setPermission(readOnlyPermissionEntity);
@@ -322,72 +338,6 @@ public class AuthorizationHelperTest  extends EasyMockSupport {
   }
 
   @Test
-  public void testIsAuthorizedForClusterInheritedPermission() {
-
-    ResourceTypeEntity clusterResourceTypeEntity = new ResourceTypeEntity();
-    clusterResourceTypeEntity.setId(1);
-    clusterResourceTypeEntity.setName(ResourceType.CLUSTER.name());
-
-    ResourceEntity clusterResourceEntity = new ResourceEntity();
-    clusterResourceEntity.setResourceType(clusterResourceTypeEntity);
-    clusterResourceEntity.setId(1L);
-
-    PermissionEntity clusterPermissionEntity = new PermissionEntity();
-    clusterPermissionEntity.setPermissionName("CLUSTER.ADMINISTRATOR");
-
-    RoleAuthorizationEntity readOnlyRoleAuthorizationEntity = new RoleAuthorizationEntity();
-    readOnlyRoleAuthorizationEntity.setAuthorizationId(RoleAuthorization.CLUSTER_VIEW_METRICS.getId());
-
-    RoleAuthorizationEntity privilegedRoleAuthorizationEntity = new RoleAuthorizationEntity();
-    privilegedRoleAuthorizationEntity.setAuthorizationId(RoleAuthorization.CLUSTER_TOGGLE_KERBEROS.getId());
-
-
-    clusterPermissionEntity.setAuthorizations(Arrays.asList(readOnlyRoleAuthorizationEntity,
-      privilegedRoleAuthorizationEntity));
-
-    PrivilegeEntity clusterPrivilegeEntity = new PrivilegeEntity();
-    clusterPrivilegeEntity.setPermission(clusterPermissionEntity);
-    clusterPrivilegeEntity.setResource(clusterResourceEntity);
-
-    GrantedAuthority clusterAuthority = new AmbariGrantedAuthority(clusterPrivilegeEntity);
-    Authentication clusterUser = new TestAuthentication(Collections.singleton(clusterAuthority));
-
-
-    Provider viewInstanceDAOProvider = createNiceMock(Provider.class);
-    Provider privilegeDAOProvider = createNiceMock(Provider.class);
-
-    ViewInstanceDAO viewInstanceDAO = createNiceMock(ViewInstanceDAO.class);
-    PrivilegeDAO privilegeDAO = createNiceMock(PrivilegeDAO.class);
-
-    ViewInstanceEntity viewInstanceEntity = createNiceMock(ViewInstanceEntity.class);
-    expect(viewInstanceEntity.getClusterHandle()).andReturn("c1").anyTimes();
-
-    PrivilegeEntity privilegeEntity = createNiceMock(PrivilegeEntity.class);
-    PrincipalEntity principalEntity = createNiceMock(PrincipalEntity.class);
-    PrincipalTypeEntity principalTypeEntity = createNiceMock(PrincipalTypeEntity.class);
-
-    expect(viewInstanceDAOProvider.get()).andReturn(viewInstanceDAO).anyTimes();
-    expect(privilegeDAOProvider.get()).andReturn(privilegeDAO).anyTimes();
-
-    expect(viewInstanceDAO.findByResourceId(2L)).andReturn(viewInstanceEntity).anyTimes();
-
-    expect(privilegeDAO.findByResourceId(2L)).andReturn(Lists.newArrayList(privilegeEntity)).anyTimes();
-
-    expect(principalTypeEntity.getName()).andReturn("ALL.CLUSTER.ADMINISTRATOR").anyTimes();
-    expect(principalEntity.getPrincipalType()).andReturn(principalTypeEntity).anyTimes();
-    expect(privilegeEntity.getPrincipal()).andReturn(principalEntity).anyTimes();
-
-    replayAll();
-
-    AuthorizationHelper.viewInstanceDAOProvider = viewInstanceDAOProvider;
-    AuthorizationHelper.privilegeDAOProvider = privilegeDAOProvider;
-
-    SecurityContext context = SecurityContextHolder.getContext();
-    context.setAuthentication(clusterUser);
-
-    assertTrue(AuthorizationHelper.isAuthorized(ResourceType.VIEW, 2L, EnumSet.of(RoleAuthorization.VIEW_USE)));
-  }
-
   public void testIsAuthorizedForSpecificView() {
     RoleAuthorizationEntity readOnlyRoleAuthorizationEntity = new RoleAuthorizationEntity();
     readOnlyRoleAuthorizationEntity.setAuthorizationId(RoleAuthorization.CLUSTER_VIEW_METRICS.getId());
@@ -423,16 +373,16 @@ public class AuthorizationHelperTest  extends EasyMockSupport {
     viewResourceEntity.setId(53L);
 
     PermissionEntity readOnlyPermissionEntity = new PermissionEntity();
-    readOnlyPermissionEntity.setAuthorizations(Collections.singleton(readOnlyRoleAuthorizationEntity));
+    readOnlyPermissionEntity.addAuthorization(readOnlyRoleAuthorizationEntity);
 
     PermissionEntity viewUsePermissionEntity = new PermissionEntity();
-    viewUsePermissionEntity.setAuthorizations(Arrays.asList(readOnlyRoleAuthorizationEntity,
-        viewUseRoleAuthorizationEntity));
+    viewUsePermissionEntity.addAuthorization(readOnlyRoleAuthorizationEntity);
+    viewUsePermissionEntity.addAuthorization(viewUseRoleAuthorizationEntity);
 
     PermissionEntity administratorPermissionEntity = new PermissionEntity();
-    administratorPermissionEntity.setAuthorizations(Arrays.asList(readOnlyRoleAuthorizationEntity,
-        viewUseRoleAuthorizationEntity,
-        administratorRoleAuthorizationEntity));
+    administratorPermissionEntity.addAuthorization(readOnlyRoleAuthorizationEntity);
+    administratorPermissionEntity.addAuthorization(viewUseRoleAuthorizationEntity);
+    administratorPermissionEntity.addAuthorization(administratorRoleAuthorizationEntity);
 
     PrivilegeEntity readOnlyPrivilegeEntity = new PrivilegeEntity();
     readOnlyPrivilegeEntity.setPermission(readOnlyPermissionEntity);

@@ -23,8 +23,9 @@ App.MainDashboardServiceYARNView = App.MainDashboardServiceView.extend({
   templateName: require('templates/main/service/services/yarn'),
   serviceName: 'YARN',
 
-  nodeHeap: App.MainDashboardServiceView.formattedHeap('dashboard.services.yarn.summary', 'service.jvmMemoryHeapUsed', 'service.jvmMemoryHeapMax'),
-  
+  nodeHeap: App.MainDashboardServiceView.formattedHeap('dashboard.services.yarn.nodes.heapUsed', 'service.jvmMemoryHeapUsed', 'service.jvmMemoryHeapMax'),
+  nodeHeapPercent: App.MainDashboardServiceView.formattedHeapPercent('dashboard.services.yarn.nodes.heapUsedPercent', 'service.jvmMemoryHeapUsed', 'service.jvmMemoryHeapMax'),
+
   nodeManagerComponent: Em.Object.create({
     componentName: 'NODEMANAGER'
   }),
@@ -55,12 +56,10 @@ App.MainDashboardServiceYARNView = App.MainDashboardServiceView.extend({
   _nmUnhealthy: Em.computed.formatUnavailable('service.nodeManagersCountUnhealthy'),
   _nmRebooted: Em.computed.formatUnavailable('service.nodeManagersCountRebooted'),
   _nmDecom: Em.computed.formatUnavailable('service.nodeManagersCountDecommissioned'),
-  nodeManagersStatus: Em.computed.i18nFormat('dashboard.services.yarn.nodeManagers.status.msg', '_nmActive', '_nmLost', '_nmUnhealthy', '_nmRebooted', '_nmDecom'),
 
   _allocated: Em.computed.formatUnavailable('service.containersAllocated'),
   _pending: Em.computed.formatUnavailable('service.containersPending'),
   _reserved: Em.computed.formatUnavailable('service.containersReserved'),
-  containers: Em.computed.i18nFormat('dashboard.services.yarn.containers.msg', '_allocated', '_pending', '_reserved'),
 
   _appsSubmitted: Em.computed.formatUnavailable('service.appsSubmitted'),
   _appsRunning: Em.computed.formatUnavailable('service.appsRunning'),
@@ -68,23 +67,32 @@ App.MainDashboardServiceYARNView = App.MainDashboardServiceView.extend({
   _appsCompleted: Em.computed.formatUnavailable('service.appsCompleted'),
   _appsKilled: Em.computed.formatUnavailable('service.appsKilled'),
   _appsFailed: Em.computed.formatUnavailable('service.appsFailed'),
-  apps: Em.computed.i18nFormat('dashboard.services.yarn.apps.msg', '_appsSubmitted', '_appsRunning', '_appsPending', '_appsCompleted', '_appsKilled', '_appsFailed'),
 
-  memory: function () {
-    return Em.I18n.t('dashboard.services.yarn.memory.msg').format(
-        numberUtils.bytesToSize(this.get('service.allocatedMemory'), 1, 'parseFloat', 1024 * 1024), 
-        numberUtils.bytesToSize(this.get('service.reservedMemory'), 1, 'parseFloat', 1024 * 1024), 
-        numberUtils.bytesToSize(this.get('service.availableMemory'), 1, 'parseFloat', 1024 * 1024));
-  }.property('service.allocatedMemory', 'service.reservedMemory', 'service.availableMemory'),
+  allocatedMemoryFormatted: function() {
+    return numberUtils.bytesToSize(this.get('service.allocatedMemory'), 1, 'parseFloat', 1024 * 1024);
+  }.property('service.allocatedMemory'),
+
+  reservedMemoryFormatted: function() {
+    return numberUtils.bytesToSize(this.get('service.reservedMemory'), 1, 'parseFloat', 1024 * 1024);
+  }.property('service.reservedMemory'),
+
+  availableMemoryFormatted: function() {
+    return numberUtils.bytesToSize(this.get('service.availableMemory'), 1, 'parseFloat', 1024 * 1024);
+  }.property('service.availableMemory'),
 
   _queuesCountFormatted: Em.computed.formatUnavailable('service.queuesCount'),
   queues: Em.computed.i18nFormat('dashboard.services.yarn.queues.msg', '_queuesCountFormatted'),
 
   didInsertElement: function(){
     App.tooltip($("[rel='queue-tooltip']"), {html: true, placement: "right"});
+    App.tooltip($("[rel='tooltip']"));
   },
 
   willDestroyElement: function(){
     $("[rel='queue-tooltip']").tooltip('destroy');
-  }
+  },
+
+  isNodeManagerCreated: function () {
+    return this.isServiceComponentCreated('NODEMANAGER');
+  }.property('App.router.clusterController.isComponentsStateLoaded')
 });

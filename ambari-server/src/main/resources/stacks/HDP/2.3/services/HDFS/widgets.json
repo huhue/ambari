@@ -378,8 +378,8 @@
           "is_visible": true,
           "metrics": [
             {
-              "name": "FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.DfsUsed",
-              "metric_path": "metrics/dfs/datanode/DfsUsed",
+              "name": "FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Remaining",
+              "metric_path": "metrics/FSDatasetState/org/apache/hadoop/hdfs/server/datanode/fsdataset/impl/FsDatasetImpl/Remaining",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             },
@@ -393,7 +393,7 @@
           "values": [
             {
               "name": "HDFS Space Utilization",
-              "value": "${FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.DfsUsed/FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Capacity}"
+              "value": "${(FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Capacity - FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Remaining)/FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Capacity}"
             }
           ],
           "properties": {
@@ -416,8 +416,8 @@
           "is_visible": true,
           "metrics": [
             {
-              "name": "dfs.datanode.BytesRead._rate",
-              "metric_path": "metrics/dfs/datanode/bytes_read._rate",
+              "name": "dfs.datanode.BytesRead",
+              "metric_path": "metrics/dfs/datanode/bytes_read",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             }
@@ -425,7 +425,7 @@
           "values": [
             {
               "name": "HDFS Bytes Read",
-              "value": "${dfs.datanode.BytesRead._rate}"
+              "value": "${dfs.datanode.BytesRead}"
             }
           ],
           "properties": {
@@ -440,8 +440,8 @@
           "is_visible": false,
           "metrics": [
             {
-              "name": "dfs.datanode.BytesWritten._rate",
-              "metric_path": "metrics/dfs/datanode/bytes_written._rate",
+              "name": "dfs.datanode.BytesWritten",
+              "metric_path": "metrics/dfs/datanode/bytes_written",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             }
@@ -449,7 +449,7 @@
           "values": [
             {
               "name": "HDFS Bytes Written",
-              "value": "${dfs.datanode.BytesWritten._rate}"
+              "value": "${dfs.datanode.BytesWritten}"
             }
           ],
           "properties": {
@@ -537,26 +537,26 @@
           "is_visible": false,
           "metrics": [
             {
-              "name": "dfs.datanode.BytesRead._rate",
-              "metric_path": "metrics/dfs/datanode/bytes_read._rate",
+              "name": "dfs.datanode.BytesRead",
+              "metric_path": "metrics/dfs/datanode/bytes_read",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             },
             {
-              "name": "dfs.datanode.BytesWritten._rate",
-              "metric_path": "metrics/dfs/datanode/bytes_written._rate",
+              "name": "dfs.datanode.BytesWritten",
+              "metric_path": "metrics/dfs/datanode/bytes_written",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             },
             {
-              "name": "dfs.datanode.TotalReadTime._rate",
-              "metric_path": "metrics/dfs/datanode/TotalReadTime._rate",
+              "name": "dfs.datanode.TotalReadTime",
+              "metric_path": "metrics/dfs/datanode/TotalReadTime",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             },
             {
-              "name": "dfs.datanode.TotalWriteTime._rate",
-              "metric_path": "metrics/dfs/datanode/TotalWriteTime._rate",
+              "name": "dfs.datanode.TotalWriteTime",
+              "metric_path": "metrics/dfs/datanode/TotalWriteTime",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             }
@@ -564,7 +564,7 @@
           "values": [
             {
               "name": "DataNode Process Disk I/O Utilization",
-              "value": "${((dfs.datanode.BytesRead._rate/dfs.datanode.TotalReadTime._rate)+(dfs.datanode.BytesWritten._rate/dfs.datanode.TotalWriteTime._rate))*50}"
+              "value": "${((dfs.datanode.BytesRead/dfs.datanode.TotalReadTime)+(dfs.datanode.BytesWritten/dfs.datanode.TotalWriteTime))*50}"
             }
           ],
           "properties": {
@@ -579,26 +579,26 @@
           "is_visible": false,
           "metrics": [
             {
-              "name": "dfs.datanode.RemoteBytesRead._rate",
-              "metric_path": "metrics/dfs/datanode/RemoteBytesRead._rate",
+              "name": "dfs.datanode.RemoteBytesRead",
+              "metric_path": "metrics/dfs/datanode/RemoteBytesRead",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             },
             {
-              "name": "dfs.datanode.ReadsFromRemoteClient._rate",
-              "metric_path": "metrics/dfs/datanode/reads_from_remote_client._rate",
+              "name": "dfs.datanode.ReadsFromRemoteClient",
+              "metric_path": "metrics/dfs/datanode/reads_from_remote_client",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             },
             {
-              "name": "dfs.datanode.RemoteBytesWritten._rate",
-              "metric_path": "metrics/dfs/datanode/RemoteBytesWritten._rate",
+              "name": "dfs.datanode.RemoteBytesWritten",
+              "metric_path": "metrics/dfs/datanode/RemoteBytesWritten",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             },
             {
-              "name": "dfs.datanode.WritesFromRemoteClient._rate",
-              "metric_path": "metrics/dfs/datanode/writes_from_remote_client._rate",
+              "name": "dfs.datanode.WritesFromRemoteClient",
+              "metric_path": "metrics/dfs/datanode/writes_from_remote_client",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             }
@@ -606,7 +606,7 @@
           "values": [
             {
               "name": "DataNode Process Network I/O Utilization",
-              "value": "${((dfs.datanode.RemoteBytesRead._rate/dfs.datanode.ReadsFromRemoteClient._rate)+(dfs.datanode.RemoteBytesWritten._rate/dfs.datanode.WritesFromRemoteClient._rate))*50}"
+              "value": "${((dfs.datanode.RemoteBytesRead/dfs.datanode.ReadsFromRemoteClient)+(dfs.datanode.RemoteBytesWritten/dfs.datanode.WritesFromRemoteClient))*50}"
             }
           ],
           "properties": {
@@ -620,8 +620,8 @@
           "is_visible": false,
           "metrics": [
             {
-              "name": "FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.DfsUsed",
-              "metric_path": "metrics/dfs/datanode/DfsUsed",
+              "name": "FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Remaining",
+              "metric_path": "metrics/FSDatasetState/org/apache/hadoop/hdfs/server/datanode/fsdataset/impl/FsDatasetImpl/Remaining",
               "service_name": "HDFS",
               "component_name": "DATANODE"
             },
@@ -635,7 +635,7 @@
           "values": [
             {
               "name": "HDFS Space Utilization",
-              "value": "${(FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.DfsUsed/FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Capacity) * 100}"
+              "value": "${((FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Capacity - FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Remaining)/FSDatasetState.org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.FsDatasetImpl.Capacity) * 100}"
             }
           ],
           "properties": {

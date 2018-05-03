@@ -16,17 +16,25 @@
 
 What's New with Ambari?
 
-  * The latest release of Ambari is Ambari 2.2.2
+  * The latest release of Ambari is Ambari 2.6.2.
 
-  * Ambari 2.2.2 added the following features:
+  * Ambari 2.6.2 added the following features:
 
-    * Grafana integration with Ambari Metrics
+    * Protecting Zeppelin Notebook SSL credentials
 
-    * Blueprints support for High Availability, Kerberos and Ranger using stack-advisor recommendations
+    * Setting appropriate HTTP headers for using Cloud Object Stores with HDP
 
-    * HDFS alerts based on metrics
+  * Ambari 2.6.1 added the following feature:
 
-    * Scalability and performance improvements for large clusters
+    * Conditionally Install LZO packages through Ambari (AMBARI-22457)
+
+  * Ambari 2.6.0 added the following features:
+
+    * Ambari Metrics System's (AMS) distributed mode with multiple Collectors (General Availability) (AMBARI-15901)
+
+    * Improvements in Host Recovery (Restart only), moving masters with minimum impact and scale testing (AMBARI-21898, AMBARI-21929, AMBARI-21834)
+
+    * Improvement in Data Archival & Purging in Ambari Infra (AMBARI-21810)
 
 Getting Ambari Source
 
@@ -41,7 +49,7 @@ JIRA
 
 User Guide
 
-  Take a look at {{{https://cwiki.apache.org/confluence/display/AMBARI/Installation+Guide+for+Ambari+2.2.2} how to install a Hadoop cluster using Ambari 2.2.2}}.
+  Take a look at {{{https://cwiki.apache.org/confluence/display/AMBARI/Installation+Guide+for+Ambari+2.5.1} how to install a Hadoop cluster using Ambari 2.5.1}}.
 
 Stay Tuned
 

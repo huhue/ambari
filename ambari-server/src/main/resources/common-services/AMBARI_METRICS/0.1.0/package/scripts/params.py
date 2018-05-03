@@ -18,22 +18,25 @@ limitations under the License.
 
 """
 
+import ConfigParser
+import os
+import re
+
+from ambari_commons import OSCheck
+from ambari_commons.ambari_metrics_helper import select_metric_collector_hosts_from_hostnames
+from resource_management.core.logger import Logger
+from resource_management.libraries import functions
+from resource_management.libraries.functions.default import default
+from resource_management.libraries.functions.expect import expect
+from resource_management.libraries.functions.format import format
+from resource_management.libraries.functions.get_not_managed_resources import get_not_managed_resources
+from resource_management.libraries.functions.substitute_vars import substitute_vars
+from resource_management.libraries.resources.hdfs_resource import HdfsResource
+
+import status_params
 from functions import calc_xmn_from_xms
 from functions import check_append_heap_property
 from functions import trim_heap_property
-from resource_management.core.logger import Logger
-from resource_management.libraries.script.script import Script
-from resource_management.libraries.functions.get_not_managed_resources import get_not_managed_resources
-from resource_management.libraries import functions
-from resource_management.libraries.functions.expect import expect
-from resource_management.libraries.functions.default import default
-from resource_management.libraries.functions.format import format
-from resource_management.libraries.functions.substitute_vars import substitute_vars
-from resource_management.libraries.resources.hdfs_resource import HdfsResource
-import status_params
-from ambari_commons import OSCheck
-import ConfigParser
-import os
 
 if OSCheck.is_windows_family():
   from params_windows import *
@@ -54,10 +57,41 @@ pass
 
 #AMBARI_METRICS data
 ams_pid_dir = status_params.ams_collector_pid_dir
-
+is_ams_distributed = config['configurations']['ams-site']['timeline.metrics.service.operation.mode'] == 'distributed'
 ams_collector_script = "/usr/sbin/ambari-metrics-collector"
 ams_collector_pid_dir = status_params.ams_collector_pid_dir
-ams_collector_hosts = default("/clusterHostInfo/metrics_collector_hosts", [])
+ams_collector_hosts = ",".join(default("/clusterHostInfo/metrics_collector_hosts", []))
+ams_collector_list = default("/clusterHostInfo/metrics_collector_hosts", [])
+embedded_mode_multiple_instances = False
+
+if not is_ams_distributed and len(ams_collector_list) > 1:
+  embedded_mode_multiple_instances = True
+
+set_instanceId = "false"
+cluster_name = config["clusterName"]
+if 'cluster-env' in config['configurations'] and \
+    'metrics_collector_external_hosts' in config['configurations']['cluster-env']:
+  ams_collector_hosts = config['configurations']['cluster-env']['metrics_collector_external_hosts']
+  set_instanceId = "true"
+else:
+  ams_collector_hosts = ",".join(default("/clusterHostInfo/metrics_collector_hosts", []))
+
+metric_collector_host = select_metric_collector_hosts_from_hostnames(ams_collector_hosts)
+
+random_metric_collector_host = select_metric_collector_hosts_from_hostnames(ams_collector_hosts)
+
+if 'cluster-env' in config['configurations'] and \
+    'metrics_collector_external_port' in config['configurations']['cluster-env']:
+  metric_collector_port = config['configurations']['cluster-env']['metrics_collector_external_port']
+else:
+  metric_collector_web_address = default("/configurations/ams-site/timeline.metrics.service.webapp.address", "0.0.0.0:6188")
+  if metric_collector_web_address.find(':') != -1:
+    metric_collector_port = metric_collector_web_address.split(':')[1]
+  else:
+    metric_collector_port = '6188'
+
+failover_strategy_blacklisted_interval_seconds = default("/configurations/ams-env/failover_strategy_blacklisted_interval", "600")
+failover_strategy = default("/configurations/ams-site/failover.strategy", "round-robin")
 if default("/configurations/ams-site/timeline.metrics.service.http.policy", "HTTP_ONLY") == "HTTPS_ONLY":
   metric_collector_https_enabled = True
   metric_collector_protocol = 'https'
@@ -69,9 +103,16 @@ metric_truststore_type= default("/configurations/ams-ssl-client/ssl.client.trust
 metric_truststore_password= default("/configurations/ams-ssl-client/ssl.client.truststore.password", "")
 metric_truststore_ca_certs='ca.pem'
 
-agent_cache_dir = config['hostLevelParams']['agentCacheDir']
-service_package_folder = config['commandParams']['service_package_folder']
-stack_name = default("/hostLevelParams/stack_name", None)
+metric_truststore_alias_list = []
+for host in ams_collector_hosts.split(","):
+  metric_truststore_alias = default("/configurations/ams-ssl-client/{host}.ssl.client.truststore.alias", None)
+  if not metric_truststore_alias:
+    metric_truststore_alias = host
+  metric_truststore_alias_list.append(metric_truststore_alias)
+
+agent_cache_dir = config['agentLevelParams']['agentCacheDir']
+service_package_folder = config['serviceLevelParams']['service_package_folder']
+stack_name = default("/clusterLevelParams/stack_name", None)
 dashboards_dirs = []
 # Stack specific
 dashboards_dirs.append(os.path.join(agent_cache_dir, service_package_folder,
@@ -79,6 +120,9 @@ dashboards_dirs.append(os.path.join(agent_cache_dir, service_package_folder,
 # Default
 dashboards_dirs.append(os.path.join(agent_cache_dir, service_package_folder,
                                    'files', 'grafana-dashboards', 'default'))
+
+# Custom services
+dashboards_dirs.append(os.path.join(agent_cache_dir, 'dashboards', 'grafana-dashboards'))
 
 def get_grafana_dashboard_defs():
   dashboard_defs = []
@@ -111,21 +155,7 @@ def get_ambari_version():
     pass
   return ambari_version
 
-
-if 'cluster-env' in config['configurations'] and \
-    'metrics_collector_vip_host' in config['configurations']['cluster-env']:
-  metric_collector_host = config['configurations']['cluster-env']['metrics_collector_vip_host']
-else:
-  metric_collector_host = ams_collector_hosts[0]
-if 'cluster-env' in config['configurations'] and \
-    'metrics_collector_vip_port' in config['configurations']['cluster-env']:
-  metric_collector_port = config['configurations']['cluster-env']['metrics_collector_vip_port']
-else:
-  metric_collector_web_address = default("/configurations/ams-site/timeline.metrics.service.webapp.address", "localhost:6188")
-  if metric_collector_web_address.find(':') != -1:
-    metric_collector_port = metric_collector_web_address.split(':')[1]
-  else:
-    metric_collector_port = '6188'
+hostname = config['agentLevelParams']['hostname']
 
 ams_collector_log_dir = config['configurations']['ams-env']['metrics_collector_log_dir']
 ams_collector_conf_dir = "/etc/ambari-metrics-collector/conf"
@@ -153,11 +183,10 @@ ams_grafana_port = default("/configurations/ams-grafana-ini/port", 3000)
 ams_grafana_protocol = default("/configurations/ams-grafana-ini/protocol", 'http')
 ams_grafana_cert_file = default("/configurations/ams-grafana-ini/cert_file", '/etc/ambari-metrics/conf/ams-grafana.crt')
 ams_grafana_cert_key = default("/configurations/ams-grafana-ini/cert_key", '/etc/ambari-metrics/conf/ams-grafana.key')
+ams_grafana_ca_cert = default("/configurations/ams-grafana-ini/ca_cert", None)
 
 ams_hbase_home_dir = "/usr/lib/ams-hbase/"
 
-ams_hbase_normalizer_enabled = default("/configurations/ams-hbase-site/hbase.normalizer.enabled", None)
-ams_hbase_fifo_compaction_enabled = default("/configurations/ams-site/timeline.metrics.hbase.fifo.compaction.enabled", None)
 ams_hbase_init_check_enabled = default("/configurations/ams-site/timeline.metrics.hbase.init.check.enabled", True)
 
 #hadoop params
@@ -173,7 +202,6 @@ hbase_pid_dir = status_params.hbase_pid_dir
 
 is_hbase_distributed = config['configurations']['ams-hbase-site']['hbase.cluster.distributed']
 is_local_fs_rootdir = hbase_root_dir.startswith('file://')
-is_ams_distributed = config['configurations']['ams-site']['timeline.metrics.service.operation.mode'] == 'distributed'
 
 # security is disabled for embedded mode, when HBase is backed by file
 security_enabled = False if not is_hbase_distributed else config['configurations']['cluster-env']['security_enabled']
@@ -181,14 +209,22 @@ security_enabled = False if not is_hbase_distributed else config['configurations
 # this is "hadoop-metrics.properties" for 1.x stacks
 metric_prop_file_name = "hadoop-metrics2-hbase.properties"
 
+java_home = config['ambariLevelParams']['java_home']
+ambari_java_home = default("/ambariLevelParams/ambari_java_home", None)
 # not supporting 32 bit jdk.
-java64_home = config['hostLevelParams']['java_home']
-java_version = expect("/hostLevelParams/java_version", int)
+java64_home = ambari_java_home if ambari_java_home is not None else java_home
+ambari_java_version = default("/ambariLevelParams/ambari_java_version", None)
+if ambari_java_version:
+  java_version = expect("/ambariLevelParams/ambari_java_version", int)
+else :
+  java_version = expect("/ambariLevelParams/java_version", int)
 
 metrics_collector_heapsize = default('/configurations/ams-env/metrics_collector_heapsize', "512")
-host_sys_prepped = default("/hostLevelParams/host_sys_prepped", False)
 metrics_report_interval = default("/configurations/ams-site/timeline.metrics.sink.report.interval", 60)
 metrics_collection_period = default("/configurations/ams-site/timeline.metrics.sink.collection.period", 10)
+skip_disk_metrics_patterns = default("/configurations/ams-env/timeline.metrics.skip.disk.metrics.patterns", None)
+skip_network_interfaces_patterns = default("/configurations/ams-env/timeline.metrics.skip.network.interfaces.patterns", None)
+skip_virtual_interfaces = default("/configurations/ams-env/timeline.metrics.skip.virtual.interfaces", False)
 
 hbase_log_dir = config['configurations']['ams-hbase-env']['hbase_log_dir']
 hbase_classpath_additional = default("/configurations/ams-hbase-env/hbase_classpath_additional", None)
@@ -199,6 +235,17 @@ regionserver_heapsize = config['configurations']['ams-hbase-env']['hbase_regions
 metrics_collector_heapsize = check_append_heap_property(str(metrics_collector_heapsize), "m")
 master_heapsize = check_append_heap_property(str(master_heapsize), "m")
 regionserver_heapsize = check_append_heap_property(str(regionserver_heapsize), "m")
+
+host_in_memory_aggregation = default("/configurations/ams-site/timeline.metrics.host.inmemory.aggregation", False)
+host_in_memory_aggregation_port = default("/configurations/ams-site/timeline.metrics.host.inmemory.aggregation.port", 61888)
+is_aggregation_https_enabled = False
+if default("/configurations/ams-site/timeline.metrics.host.inmemory.aggregation.http.policy", "HTTP_ONLY") == "HTTPS_ONLY":
+  host_in_memory_aggregation_protocol = 'https'
+  is_aggregation_https_enabled = True
+else:
+  host_in_memory_aggregation_protocol = 'http'
+host_in_memory_aggregation_jvm_arguments = default("/configurations/ams-env/timeline.metrics.host.inmemory.aggregation.jvm.arguments",
+                                                   "-Xmx256m -Xms128m -XX:PermSize=68m")
 
 regionserver_xmn_max = default('/configurations/ams-hbase-env/hbase_regionserver_xmn_max', None)
 if regionserver_xmn_max:
@@ -226,17 +273,19 @@ else:
   hbase_heapsize = master_heapsize
 
 max_open_files_limit = default("/configurations/ams-hbase-env/max_open_files_limit", "32768")
-hostname = config["hostname"]
+
+cluster_zookeeper_quorum_hosts = ",".join(config['clusterHostInfo']['zookeeper_server_hosts'])
+if 'zoo.cfg' in config['configurations'] and 'clientPort' in config['configurations']['zoo.cfg']:
+  cluster_zookeeper_clientPort = config['configurations']['zoo.cfg']['clientPort']
+else:
+  cluster_zookeeper_clientPort = '2181'
 
 if not is_hbase_distributed:
   zookeeper_quorum_hosts = hostname
   zookeeper_clientPort = '61181'
 else:
-  zookeeper_quorum_hosts = ",".join(config['clusterHostInfo']['zookeeper_hosts'])
-  if 'zoo.cfg' in config['configurations'] and 'clientPort' in config['configurations']['zoo.cfg']:
-    zookeeper_clientPort = config['configurations']['zoo.cfg']['clientPort']
-  else:
-    zookeeper_clientPort = '2181'
+  zookeeper_quorum_hosts = cluster_zookeeper_quorum_hosts
+  zookeeper_clientPort = cluster_zookeeper_clientPort
 
 ams_checkpoint_dir = config['configurations']['ams-site']['timeline.metrics.aggregator.checkpoint.dir']
 _hbase_tmp_dir = config['configurations']['ams-hbase-site']['hbase.tmp.dir']
@@ -266,12 +315,17 @@ service_check_data = functions.get_unique_id_and_date()
 user_group = config['configurations']['cluster-env']["user_group"]
 hadoop_user = "hadoop"
 
-kinit_cmd = ""
+kinit_path_local = functions.get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))
+monitor_kinit_cmd = ""
+klist_path_local = functions.get_klist_path(default('/configurations/kerberos-env/executable_search_paths', None))
+klist_cmd = ""
 
 if security_enabled:
-  _hostname_lowercase = config['hostname'].lower()
+  _hostname_lowercase = config['agentLevelParams']['hostname'].lower()
   client_jaas_config_file = format("{hbase_conf_dir}/hbase_client_jaas.conf")
   smoke_user_keytab = config['configurations']['cluster-env']['smokeuser_keytab']
+  smoke_user_princ = config['configurations']['cluster-env']['smokeuser_principal_name']
+  smoke_user = config['configurations']['cluster-env']['smokeuser']
   hbase_user_keytab = config['configurations']['ams-hbase-env']['hbase_user_keytab']
 
   ams_collector_jaas_config_file = format("{hbase_conf_dir}/ams_collector_jaas.conf")
@@ -290,6 +344,27 @@ if security_enabled:
   regionserver_keytab_path = config['configurations']['ams-hbase-security-site']['hbase.regionserver.keytab.file']
   regionserver_jaas_princ = config['configurations']['ams-hbase-security-site']['hbase.regionserver.kerberos.principal'].replace('_HOST',_hostname_lowercase)
 
+  # Monitor SPNEGO configs
+  ams_monitor_keytab = None
+  if (('ams-hbase-security-site' in config['configurations']) and ('ams.monitor.keytab' in config['configurations']['ams-hbase-security-site'])):
+    ams_monitor_keytab = config['configurations']['ams-hbase-security-site']['ams.monitor.keytab']
+
+  ams_monitor_principal = None
+  if (('ams-hbase-security-site' in config['configurations']) and ('ams.monitor.principal' in config['configurations']['ams-hbase-security-site'])):
+    ams_monitor_principal = config['configurations']['ams-hbase-security-site']['ams.monitor.principal']
+
+  if ams_monitor_keytab and ams_monitor_principal:
+    monitor_kinit_cmd = '%s -kt %s %s' % (kinit_path_local, ams_monitor_keytab, ams_monitor_principal.replace('_HOST',_hostname_lowercase))
+    klist_cmd = '%s' % klist_path_local
+
+#Ambari metrics log4j settings
+ams_hbase_log_maxfilesize = default('configurations/ams-hbase-log4j/ams_hbase_log_maxfilesize',256)
+ams_hbase_log_maxbackupindex = default('configurations/ams-hbase-log4j/ams_hbase_log_maxbackupindex',20)
+ams_hbase_security_log_maxfilesize = default('configurations/ams-hbase-log4j/ams_hbase_security_log_maxfilesize',256)
+ams_hbase_security_log_maxbackupindex = default('configurations/ams-hbase-log4j/ams_hbase_security_log_maxbackupindex',20)
+ams_log_max_backup_size = default('configurations/ams-log4j/ams_log_max_backup_size',80)
+ams_log_number_of_backup_files = default('configurations/ams-log4j/ams_log_number_of_backup_files',60)
+
 #log4j.properties
 if (('ams-hbase-log4j' in config['configurations']) and ('content' in config['configurations']['ams-hbase-log4j'])):
   hbase_log4j_props = config['configurations']['ams-hbase-log4j']['content']
@@ -307,12 +382,15 @@ ams_grafana_env_sh_template = config['configurations']['ams-grafana-env']['conte
 ams_grafana_ini_template = config['configurations']['ams-grafana-ini']['content']
 
 hbase_staging_dir = default("/configurations/ams-hbase-site/hbase.bulkload.staging.dir", "/amshbase/staging")
+skip_create_hbase_root_dir = default("/configurations/ams-site/timeline.metrics.skip.create.hbase.root.dir", False)
+hbase_wal_dir = default("/configurations/ams-hbase-site/hbase.wal.dir", None)
+if hbase_wal_dir and re.search("^file://|/", hbase_wal_dir): #If wal dir is on local file system, create it.
+  hbase_wal_dir = re.sub("^file://|/", "", hbase_wal_dir, count=1)
 
 #for create_hdfs_directory
 hdfs_user_keytab = config['configurations']['hadoop-env']['hdfs_user_keytab']
 hdfs_user = config['configurations']['hadoop-env']['hdfs_user']
 hdfs_principal_name = config['configurations']['hadoop-env']['hdfs_principal_name']
-kinit_path_local = functions.get_kinit_path(default('/configurations/kerberos-env/executable_search_paths', None))
 
 
 

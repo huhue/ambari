@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,6 +18,11 @@
 
 package org.apache.ambari.server.orm.dao;
 
+import java.sql.SQLException;
+import java.util.ArrayList;
+
+import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.H2DatabaseCleaner;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.orm.GuiceJpaInitializer;
 import org.apache.ambari.server.orm.InMemoryDefaultTestModule;
@@ -31,7 +36,6 @@ import org.junit.Test;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.google.inject.persist.PersistService;
 
 /**
  * CrudDAO unit tests.
@@ -51,9 +55,11 @@ public class CrudDAOTest {
   @Before
   public void before() {
     injector = Guice.createInjector(new InMemoryDefaultTestModule());
+    H2DatabaseCleaner.resetSequences(injector);
+    injector.getInstance(GuiceJpaInitializer.class);
+
     stackDAO = injector.getInstance(StackDAO.class);
     repositoryVersionDAO = injector.getInstance(RepositoryVersionDAO.class);
-    injector.getInstance(GuiceJpaInitializer.class);
 
     // required to populate stacks into the database
     injector.getInstance(AmbariMetaInfo.class);
@@ -67,7 +73,7 @@ public class CrudDAOTest {
 
     final RepositoryVersionEntity entity = new RepositoryVersionEntity();
     entity.setDisplayName("display name" + uniqueCounter);
-    entity.setOperatingSystems("repositories");
+    entity.addRepoOsEntities(new ArrayList<>());
     entity.setStack(stackEntity);
     entity.setVersion("version" + uniqueCounter);
     repositoryVersionDAO.create(entity);
@@ -120,8 +126,7 @@ public class CrudDAOTest {
   }
 
   @After
-  public void after() {
-    injector.getInstance(PersistService.class).stop();
-    injector = null;
+  public void after() throws AmbariException, SQLException {
+    H2DatabaseCleaner.clearDatabaseAndStopPersistenceService(injector);
   }
 }

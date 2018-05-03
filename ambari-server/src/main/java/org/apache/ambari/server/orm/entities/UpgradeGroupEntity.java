@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -33,13 +33,20 @@ import javax.persistence.Table;
 import javax.persistence.TableGenerator;
 
 /**
- * Models a single upgrade group as part of an entire {@link UpgradeEntity}
+ * Models a single upgrade group as part of an entire {@link UpgradeEntity}.
+ * <p/>
+ * Since {@link UpgradeGroupEntity} instances are rarely created, yet created in
+ * bulk, we have an abnormally high {@code allocationSize}} for the
+ * {@link TableGenerator}. This helps prevent locks caused by frequenty queries
+ * to the sequence ID table.
  */
 @Table(name = "upgrade_group")
 @Entity
 @TableGenerator(name = "upgrade_group_id_generator",
     table = "ambari_sequences", pkColumnName = "sequence_name", valueColumnName = "sequence_value",
-    pkColumnValue = "upgrade_group_id_seq", initialValue = 0)
+    pkColumnValue = "upgrade_group_id_seq",
+    initialValue = 0,
+    allocationSize = 200)
 public class UpgradeGroupEntity {
 
   @Id
@@ -104,7 +111,7 @@ public class UpgradeGroupEntity {
   }
 
   /**
-   * @param text the item text
+   * @param title the item text
    */
   public void setTitle(String title) {
     groupTitle = title;

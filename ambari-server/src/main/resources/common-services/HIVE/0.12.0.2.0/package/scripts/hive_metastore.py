@@ -22,12 +22,12 @@ import os
 from resource_management.core.logger import Logger
 from resource_management.core.resources.system import Execute, Directory
 from resource_management.libraries.script import Script
-from resource_management.libraries.functions import conf_select
 from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions.constants import Direction
 from resource_management.libraries.functions.format import format
 from resource_management.libraries.functions.version import format_stack_version
 from resource_management.libraries.functions import StackFeature
+from resource_management.libraries.functions import upgrade_summary
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions.security_commons import build_expectations
 from resource_management.libraries.functions.security_commons import cached_kinit_executor
@@ -35,9 +35,9 @@ from resource_management.libraries.functions.security_commons import get_params_
 from resource_management.libraries.functions.security_commons import validate_security_config_properties
 from resource_management.libraries.functions.security_commons import FILE_TYPE_XML
 from resource_management.core.resources.system import File
+from setup_ranger_hive import setup_ranger_hive_metastore_service
 
-from hive import hive
-from hive import jdbc_connector
+from hive import create_metastore_schema, hive, jdbc_connector
 from hive_service import hive_service
 from ambari_commons.os_family_impl import OsFamilyImpl
 from ambari_commons import OSConst
@@ -57,9 +57,13 @@ class HiveMetastore(Script):
 
     # writing configurations on start required for securtity
     self.configure(env)
+    if params.init_metastore_schema:
+      create_metastore_schema() # execute without config lock
 
     hive_service('metastore', action='start', upgrade_type=upgrade_type)
 
+    # below function call is used for cluster depolyed in cloud env to create ranger hive service in ranger admin.
+    setup_ranger_hive_metastore_service()
 
   def stop(self, env, upgrade_type=None):
     import params
@@ -83,18 +87,13 @@ class HiveMetastoreWindows(HiveMetastore):
 
 @OsFamilyImpl(os_family=OsFamilyImpl.DEFAULT)
 class HiveMetastoreDefault(HiveMetastore):
-  def get_component_name(self):
-    return "hive-metastore"
-
-
   def status(self, env):
     import status_params
     from resource_management.libraries.functions import check_process_status
-
     env.set_params(status_params)
-    pid_file = format("{hive_pid_dir}/{hive_metastore_pid}")
+
     # Recursively check all existing gmetad pid files
-    check_process_status(pid_file)
+    check_process_status(status_params.hive_metastore_pid)
 
 
   def pre_upgrade_restart(self, env, upgrade_type=None):
@@ -106,64 +105,11 @@ class HiveMetastoreDefault(HiveMetastore):
     is_upgrade = params.upgrade_direction == Direction.UPGRADE
 
     if params.version and check_stack_feature(StackFeature.ROLLING_UPGRADE, params.version):
-      conf_select.select(params.stack_name, "hive", params.version)
-      stack_select.select("hive-metastore", params.version)
+      stack_select.select_packages(params.version)
 
     if is_upgrade and params.stack_version_formatted_major and \
             check_stack_feature(StackFeature.HIVE_METASTORE_UPGRADE_SCHEMA, params.stack_version_formatted_major):
       self.upgrade_schema(env)
-
-
-  def security_status(self, env):
-    import status_params
-    env.set_params(status_params)
-    if status_params.security_enabled:
-      props_value_check = {"hive.server2.authentication": "KERBEROS",
-                           "hive.metastore.sasl.enabled": "true",
-                           "hive.security.authorization.enabled": "true"}
-      props_empty_check = ["hive.metastore.kerberos.keytab.file",
-                           "hive.metastore.kerberos.principal"]
-
-      props_read_check = ["hive.metastore.kerberos.keytab.file"]
-      hive_site_props = build_expectations('hive-site', props_value_check, props_empty_check,
-                                            props_read_check)
-
-      hive_expectations ={}
-      hive_expectations.update(hive_site_props)
-
-      security_params = get_params_from_filesystem(status_params.hive_conf_dir,
-                                                   {'hive-site.xml': FILE_TYPE_XML})
-      result_issues = validate_security_config_properties(security_params, hive_expectations)
-      if not result_issues: # If all validations passed successfully
-        try:
-          # Double check the dict before calling execute
-          if 'hive-site' not in security_params \
-            or 'hive.metastore.kerberos.keytab.file' not in security_params['hive-site'] \
-            or 'hive.metastore.kerberos.principal' not in security_params['hive-site']:
-            self.put_structured_out({"securityState": "UNSECURED"})
-            self.put_structured_out({"securityIssuesFound": "Keytab file or principal are not set property."})
-            return
-
-          cached_kinit_executor(status_params.kinit_path_local,
-                                status_params.hive_user,
-                                security_params['hive-site']['hive.metastore.kerberos.keytab.file'],
-                                security_params['hive-site']['hive.metastore.kerberos.principal'],
-                                status_params.hostname,
-                                status_params.tmp_dir)
-
-          self.put_structured_out({"securityState": "SECURED_KERBEROS"})
-        except Exception as e:
-          self.put_structured_out({"securityState": "ERROR"})
-          self.put_structured_out({"securityStateErrorInfo": str(e)})
-      else:
-        issues = []
-        for cf in result_issues:
-          issues.append("Configuration file %s did not pass the validation. Reason: %s" % (cf, result_issues[cf]))
-        self.put_structured_out({"securityIssuesFound": ". ".join(issues)})
-        self.put_structured_out({"securityState": "UNSECURED"})
-    else:
-      self.put_structured_out({"securityState": "UNSECURED"})
-
 
   def upgrade_schema(self, env):
     """
@@ -181,6 +127,7 @@ class HiveMetastoreDefault(HiveMetastore):
     Should not be invoked for a DOWNGRADE; Metastore only supports schema upgrades.
     """
     Logger.info("Upgrading Hive Metastore Schema")
+    import status_params
     import params
     env.set_params(params)
 
@@ -189,9 +136,13 @@ class HiveMetastoreDefault(HiveMetastore):
     self.configure(env)
 
     if params.security_enabled:
-      kinit_command=format("{kinit_path_local} -kt {smoke_user_keytab} {smokeuser_principal}; ")
-      Execute(kinit_command,user=params.smokeuser)
-
+      cached_kinit_executor(status_params.kinit_path_local,
+        status_params.hive_user,
+        params.hive_metastore_keytab_path,
+        params.hive_metastore_principal,
+        status_params.hostname,
+        status_params.tmp_dir)
+      
     # ensure that the JDBC drive is present for the schema tool; if it's not
     # present, then download it first
     if params.hive_jdbc_driver in params.hive_jdbc_drivers_list:
@@ -199,7 +150,7 @@ class HiveMetastoreDefault(HiveMetastore):
 
       # download it if it does not exist
       if not os.path.exists(params.source_jdbc_file):
-        jdbc_connector(params.target_hive)
+        jdbc_connector(params.hive_jdbc_target, params.hive_previous_jdbc_jar)
 
       target_directory_and_filename = os.path.join(target_directory, os.path.basename(params.source_jdbc_file))
 
@@ -229,10 +180,12 @@ class HiveMetastoreDefault(HiveMetastore):
     # since the configurations have not been written out yet during an upgrade
     # we need to choose the original legacy location
     schematool_hive_server_conf_dir = params.hive_server_conf_dir
-    if params.current_version is not None:
-      current_version = format_stack_version(params.current_version)
-      if not(check_stack_feature(StackFeature.CONFIG_VERSIONING, current_version)):
-        schematool_hive_server_conf_dir = LEGACY_HIVE_SERVER_CONF
+
+    upgrade_from_version = upgrade_summary.get_source_version("HIVE",
+      default_version = params.version_for_stack_feature_checks)
+
+    if not (check_stack_feature(StackFeature.CONFIG_VERSIONING, upgrade_from_version)):
+      schematool_hive_server_conf_dir = LEGACY_HIVE_SERVER_CONF
 
     env_dict = {
       'HIVE_CONF_DIR': schematool_hive_server_conf_dir
@@ -248,6 +201,10 @@ class HiveMetastoreDefault(HiveMetastore):
   def get_user(self):
     import params
     return params.hive_user
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.hive_metastore_pid]
 
 
 if __name__ == "__main__":

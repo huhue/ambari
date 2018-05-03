@@ -29,18 +29,20 @@ from resource_management.core.source import InlineTemplate
 from resource_management.libraries.functions.format import format
 from resource_management.core.environment import Environment
 from resource_management.core.logger import Logger
+from resource_management.libraries.functions.is_empty import is_empty
 
 class XmlConfigProvider(Provider):
   def action_create(self):
     filename = self.resource.filename
     xml_config_provider_config_dir = self.resource.conf_dir
+    configuration_attrs = {} if is_empty(self.resource.configuration_attributes) else self.resource.configuration_attributes
 
     # |e - for html-like escaping of <,>,',"
     config_content = InlineTemplate('''  <configuration>
     {% for key, value in configurations_dict|dictsort %}
     <property>
       <name>{{ key|e }}</name>
-      <value>{{ resource_management.core.source.InlineTemplate(str(value)).get_content() |e }}</value>
+      <value>{{ resource_management.core.source.InlineTemplate(unicode(value)).get_content() |e }}</value>
       {%- if not configuration_attrs is none -%}
       {%- for attrib_name, attrib_occurances in  configuration_attrs.items() -%}
       {%- for property_name, attrib_value in  attrib_occurances.items() -%}
@@ -53,7 +55,7 @@ class XmlConfigProvider(Provider):
     </property>
     {% endfor %}
   </configuration>''', extra_imports=[time, resource_management, resource_management.core, resource_management.core.source], configurations_dict=self.resource.configurations,
-                                    configuration_attrs=self.resource.configuration_attributes)
+                                    configuration_attrs=configuration_attrs)
 
     xml_config_dest_file_path = os.path.join(xml_config_provider_config_dir, filename)
     Logger.info("Generating config: {0}".format(xml_config_dest_file_path))

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,35 +18,50 @@
 
 package org.apache.ambari.server.controller.logging;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.StringReader;
+import java.net.HttpCookie;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.security.KeyStore;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
 
 import org.apache.ambari.server.AmbariException;
+import org.apache.ambari.server.configuration.ComponentSSLConfiguration;
 import org.apache.ambari.server.security.credential.Credential;
 import org.apache.ambari.server.security.credential.PrincipalKeyCredential;
 import org.apache.ambari.server.security.encryption.CredentialStoreService;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Config;
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.collections.MapUtils;
+import org.apache.commons.lang.StringUtils;
 import org.apache.http.client.utils.URIBuilder;
-import org.apache.log4j.Logger;
 import org.codehaus.jackson.map.AnnotationIntrospector;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.codehaus.jackson.map.ObjectReader;
 import org.codehaus.jackson.map.annotate.JsonSerialize;
 import org.codehaus.jackson.map.introspect.JacksonAnnotationIntrospector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.StringReader;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Convenience class to handle the connection details of a LogSearch query request.
@@ -54,7 +69,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class LoggingRequestHelperImpl implements LoggingRequestHelper {
 
-  private static Logger LOG = Logger.getLogger(LoggingRequestHelperImpl.class);
+  private static final Logger LOG = LoggerFactory.getLogger(LoggingRequestHelperImpl.class);
 
   private static final String LOGSEARCH_ADMIN_JSON_CONFIG_TYPE_NAME = "logsearch-admin-json";
 
@@ -62,9 +77,11 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
 
   private static final String LOGSEARCH_ADMIN_PASSWORD_PROPERTY_NAME = "logsearch_admin_password";
 
-  private static final String LOGSEARCH_QUERY_PATH = "/service/dashboard/solr/logs_search";
+  private static final String LOGSEARCH_QUERY_PATH = "/api/v1/service/logs";
 
-  private static final String LOGSEARCH_GET_LOG_LEVELS_PATH = "/service/dashboard/getLogLevelCounts";
+  private static final String LOGSEARCH_GET_LOG_LEVELS_PATH = "/api/v1/service/logs/levels/counts";
+
+  private static final String LOGSEARCH_GET_LOG_FILES_PATH = "/api/v1/service/logs/files";
 
   private static final String LOGSEARCH_ADMIN_CREDENTIAL_NAME = "logsearch.admin.credential";
 
@@ -76,46 +93,91 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
 
   private static final String PAGE_SIZE_QUERY_PARAMETER_NAME = "pageSize";
 
+  private static final String COOKIE_HEADER = "Cookie";
+
+  private static final String SET_COOKIES_HEADER = "Set-Cookie";
+
+  private static final int DEFAULT_LOGSEARCH_CONNECT_TIMEOUT_IN_MILLISECONDS = 5000;
+
+  private static final int DEFAULT_LOGSEARCH_READ_TIMEOUT_IN_MILLISECONDS = 5000;
+
+  private static final String LOGSEARCH_CLUSTERS_QUERY_PARAMETER_NAME = "clusters";
+
   private static AtomicInteger errorLogCounterForLogSearchConnectionExceptions = new AtomicInteger(0);
 
   private final String hostName;
 
   private final String portNumber;
 
+  private final String protocol;
+
   private final CredentialStoreService credentialStoreService;
 
   private final Cluster cluster;
 
+  private final String externalAddress;
+
   private final NetworkConnection networkConnection;
 
-  public LoggingRequestHelperImpl(String hostName, String portNumber, CredentialStoreService credentialStoreService, Cluster cluster) {
-    this(hostName, portNumber, credentialStoreService, cluster, new DefaultNetworkConnection());
+  private SSLSocketFactory sslSocketFactory;
+
+  private int logSearchConnectTimeoutInMilliseconds = DEFAULT_LOGSEARCH_CONNECT_TIMEOUT_IN_MILLISECONDS;
+
+  private int logSearchReadTimeoutInMilliseconds = DEFAULT_LOGSEARCH_READ_TIMEOUT_IN_MILLISECONDS;
+
+
+  public LoggingRequestHelperImpl(String hostName, String portNumber, String protocol, CredentialStoreService credentialStoreService, Cluster cluster, String externalAddress) {
+    this(hostName, portNumber, protocol, credentialStoreService, cluster, externalAddress, new DefaultNetworkConnection());
   }
 
-  protected LoggingRequestHelperImpl(String hostName, String portNumber, CredentialStoreService credentialStoreService, Cluster cluster, NetworkConnection networkConnection) {
+  protected LoggingRequestHelperImpl(String hostName, String portNumber, String protocol, CredentialStoreService credentialStoreService, Cluster cluster, String externalAddress, NetworkConnection networkConnection) {
     this.hostName = hostName;
     this.portNumber = portNumber;
+    this.protocol = protocol;
     this.credentialStoreService = credentialStoreService;
     this.cluster = cluster;
+    this.externalAddress = externalAddress;
     this.networkConnection = networkConnection;
+  }
+
+  public int getLogSearchConnectTimeoutInMilliseconds() {
+    return this.logSearchConnectTimeoutInMilliseconds;
+  }
+
+  public void setLogSearchConnectTimeoutInMilliseconds(int logSearchConnectTimeoutInMilliseconds) {
+    this.logSearchConnectTimeoutInMilliseconds = logSearchConnectTimeoutInMilliseconds;
+  }
+
+  public int getLogSearchReadTimeoutInMilliseconds() {
+    return this.logSearchReadTimeoutInMilliseconds;
+  }
+
+  public void setLogSearchReadTimeoutInMilliseconds(int logSearchReadTimeoutInMilliseconds) {
+    this.logSearchReadTimeoutInMilliseconds = logSearchReadTimeoutInMilliseconds;
   }
 
   public LogQueryResponse sendQueryRequest(Map<String, String> queryParameters) {
     try {
       // use the Apache builder to create the correct URI
-      URI logSearchURI = createLogSearchQueryURI("http", queryParameters);
-      LOG.debug("Attempting to connect to LogSearch server at " + logSearchURI);
-
-      HttpURLConnection httpURLConnection  = (HttpURLConnection)logSearchURI.toURL().openConnection();
+      URI logSearchURI = createLogSearchQueryURI(protocol, queryParameters);
+      LOG.debug("Attempting to connect to LogSearch server at {}", logSearchURI);
+      HttpURLConnection httpURLConnection  = (HttpURLConnection) logSearchURI.toURL().openConnection();
+      secure(httpURLConnection, protocol);
       httpURLConnection.setRequestMethod("GET");
+      httpURLConnection.setConnectTimeout(logSearchConnectTimeoutInMilliseconds);
+      httpURLConnection.setReadTimeout(logSearchReadTimeoutInMilliseconds);
+
+      addCookiesFromCookieStore(httpURLConnection);
+      LOG.debug("Attempting request to LogSearch Portal Server, with connect timeout = {} milliseconds and read timeout = {} milliseconds",
+        logSearchConnectTimeoutInMilliseconds, logSearchReadTimeoutInMilliseconds);
 
       setupCredentials(httpURLConnection);
 
       StringBuffer buffer = networkConnection.readQueryResponseFromServer(httpURLConnection);
+      addCookiesToCookieStoreFromResponse(httpURLConnection);
 
       // setup a reader for the JSON response
-      StringReader stringReader =
-        new StringReader(buffer.toString());
+      StringReader stringReader = new StringReader(buffer.toString());
 
       ObjectReader logQueryResponseReader =
         createObjectReader(LogQueryResponse.class);
@@ -130,6 +192,62 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
     return null;
   }
 
+  private void secure(HttpURLConnection connection, String protocol) {
+    if ("https".equals(protocol)) {
+      HttpsURLConnection secureConnection = (HttpsURLConnection) connection;
+      loadTrustStore();
+      secureConnection.setSSLSocketFactory(this.sslSocketFactory);
+    }
+  }
+
+  private void loadTrustStore() {
+    if (this.sslSocketFactory == null) {
+      ComponentSSLConfiguration sslConfig = ComponentSSLConfiguration.instance();
+      String trustStorePath = sslConfig.getTruststorePath();
+      String trustStoreType = sslConfig.getTruststoreType();
+      String trustStorePassword = sslConfig.getTruststorePassword();
+
+      if (trustStorePath == null || trustStorePassword == null) {
+        String trustStoreErrorMsg = "Can\'t load TrustStore. Truststore path or password is not set.";
+        LOG.error(trustStoreErrorMsg);
+        throw new IllegalStateException(trustStoreErrorMsg);
+      }
+
+      try (FileInputStream in = new FileInputStream(new File(trustStorePath))) {
+        KeyStore e = KeyStore.getInstance(trustStoreType == null ? KeyStore.getDefaultType() : trustStoreType);
+        e.load(in, trustStorePassword.toCharArray());
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(e);
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init((KeyManager[]) null, tmf.getTrustManagers(), (SecureRandom) null);
+        this.sslSocketFactory = context.getSocketFactory();
+      } catch (Exception ex) {
+        LOG.error("Unable to load TrustStore", ex);
+      }
+    }
+  }
+
+  private void addCookiesFromCookieStore(HttpURLConnection httpURLConnection) {
+    if (LoggingCookieStore.INSTANCE.getCookiesMap().size() > 0) {
+      List<String> cookiesStrList = new ArrayList<>();
+      for (Map.Entry<String, String> entry : LoggingCookieStore.INSTANCE.getCookiesMap().entrySet()) {
+        cookiesStrList.add(String.format("%s=%s", entry.getKey(), entry.getValue()));
+      }
+      httpURLConnection.setRequestProperty(COOKIE_HEADER, StringUtils.join(cookiesStrList, "; "));
+    }
+  }
+
+  private void addCookiesToCookieStoreFromResponse(HttpURLConnection httpURLConnection) {
+    Map<String, List<String>> headerFields = httpURLConnection.getHeaderFields();
+    List<String> cookiesHeader = headerFields.get(SET_COOKIES_HEADER);
+    if (cookiesHeader != null) {
+      for (String cookie : cookiesHeader) {
+        HttpCookie cookie1 = HttpCookie.parse(cookie).get(0);
+        LoggingCookieStore.INSTANCE.addCookie(cookie1.getName(), cookie1.getValue());
+      }
+    }
+  }
+
 
   private void setupCredentials(HttpURLConnection httpURLConnection) {
     final String logSearchAdminUser =
@@ -139,7 +257,7 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
 
     // first attempt to use the LogSearch admin configuration to
     // obtain the LogSearch server credential
-    if ((logSearchAdminUser != null) && (logSearchAdminPassword != null)) {
+    if ((logSearchAdminUser != null) && (logSearchAdminPassword != null) && StringUtils.isEmpty(externalAddress)) {
       LOG.debug("Credential found in config, will be used to connect to LogSearch");
       networkConnection.setupBasicAuthentication(httpURLConnection, createEncodedCredentials(logSearchAdminUser, logSearchAdminPassword));
     } else {
@@ -155,6 +273,9 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
         networkConnection.setupBasicAuthentication(httpURLConnection, createEncodedCredentials(principalKeyCredential));
       } else {
         LOG.debug("No LogSearch credential could be found, this is probably an error in configuration");
+        if (StringUtils.isEmpty(externalAddress)) {
+          LOG.error("No LogSearch credential could be found, this is required for external LogSearch (credential: {})", LOGSEARCH_ADMIN_CREDENTIAL_NAME);
+        }
       }
     }
   }
@@ -181,45 +302,69 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
     return null;
   }
 
-  public Set<String> sendGetLogFileNamesRequest(String componentName, String hostName) {
-    Map<String, String> queryParameters =
-      new HashMap<String, String>();
+  public HostLogFilesResponse sendGetLogFileNamesRequest(String hostName) {
+    try {
+      // use the Apache builder to create the correct URI
+      URIBuilder uriBuilder = createBasicURI(protocol);
+      appendUriPath(uriBuilder, LOGSEARCH_GET_LOG_FILES_PATH);
+      uriBuilder.addParameter(HOST_QUERY_PARAMETER_NAME, hostName);
+      uriBuilder.addParameter(LOGSEARCH_CLUSTERS_QUERY_PARAMETER_NAME, cluster.getClusterName());
 
-    // TODO, this current method will be a temporary workaround
-    // TODO, until the new LogSearch API method is available to handle this request
+      // add any query strings specified
+      URI logFileNamesURI = uriBuilder.build();
+      LOG.debug("Attempting to connect to LogSearch server at {}", logFileNamesURI);
 
-    queryParameters.put(HOST_QUERY_PARAMETER_NAME, hostName);
-    queryParameters.put(COMPONENT_QUERY_PARAMETER_NAME,componentName);
-    // ask for page size of 1, since we really only want a single entry to
-    // get the file path name
-    queryParameters.put("pageSize", "1");
+      HttpURLConnection httpURLConnection  = (HttpURLConnection) logFileNamesURI.toURL().openConnection();
+      secure(httpURLConnection, protocol);
+      httpURLConnection.setRequestMethod("GET");
 
-    LogQueryResponse response = sendQueryRequest(queryParameters);
-    if ((response != null) && (!response.getListOfResults().isEmpty())) {
-      LogLineResult lineOne = response.getListOfResults().get(0);
-      // this assumes that each component has only one associated log file,
-      // which may not always hold true
-      LOG.debug("For componentName = " + componentName + ", log file name is = " + lineOne.getLogFilePath());
-      return Collections.singleton(lineOne.getLogFilePath());
+      addCookiesFromCookieStore(httpURLConnection);
 
+      setupCredentials(httpURLConnection);
+
+      StringBuffer buffer = networkConnection.readQueryResponseFromServer(httpURLConnection);
+
+      addCookiesToCookieStoreFromResponse(httpURLConnection);
+
+      // setup a reader for the JSON response
+      StringReader stringReader =
+        new StringReader(buffer.toString());
+
+      ObjectReader hostFilesQueryResponseReader = createObjectReader(HostLogFilesResponse.class);
+
+      HostLogFilesResponse response = hostFilesQueryResponseReader.readValue(stringReader);
+
+      if (LOG.isDebugEnabled() && response != null && MapUtils.isNotEmpty(response.getHostLogFiles())) {
+        for (Map.Entry<String, List<String>> componentEntry : response.getHostLogFiles().entrySet()) {
+          LOG.debug("Log files for component '{}' : {}", componentEntry.getKey(), StringUtils.join(componentEntry.getValue(), ","));
+        }
+      }
+      return response;
+    } catch (Exception e) {
+      Utils.logErrorMessageWithThrowableWithCounter(LOG, errorLogCounterForLogSearchConnectionExceptions,
+        "Error occurred while trying to connect to the LogSearch service...", e);
     }
-
-    return Collections.emptySet();
+    return null;
   }
 
   @Override
   public LogLevelQueryResponse sendLogLevelQueryRequest(String componentName, String hostName) {
     try {
       // use the Apache builder to create the correct URI
-      URI logLevelQueryURI = createLogLevelQueryURI("http", componentName, hostName);
-      LOG.debug("Attempting to connect to LogSearch server at " + logLevelQueryURI);
+      URI logLevelQueryURI = createLogLevelQueryURI(protocol, componentName, hostName);
+      LOG.debug("Attempting to connect to LogSearch server at {}", logLevelQueryURI);
 
-      HttpURLConnection httpURLConnection = (HttpURLConnection) logLevelQueryURI.toURL().openConnection();
+      HttpURLConnection httpURLConnection  = (HttpURLConnection) logLevelQueryURI.toURL().openConnection();
+      secure(httpURLConnection, protocol);
       httpURLConnection.setRequestMethod("GET");
+
+      addCookiesFromCookieStore(httpURLConnection);
 
       setupCredentials(httpURLConnection);
 
       StringBuffer buffer = networkConnection.readQueryResponseFromServer(httpURLConnection);
+
+      addCookiesToCookieStoreFromResponse(httpURLConnection);
 
       // setup a reader for the JSON response
       StringReader stringReader =
@@ -264,7 +409,11 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
 
   private URI createLogSearchQueryURI(String scheme, Map<String, String> queryParameters) throws URISyntaxException {
     URIBuilder uriBuilder = createBasicURI(scheme);
-    uriBuilder.setPath(LOGSEARCH_QUERY_PATH);
+    appendUriPath(uriBuilder, LOGSEARCH_QUERY_PATH);
+
+    // set the current cluster name, in case this LogSearch service supports data
+    // for multiple clusters
+    uriBuilder.addParameter(LOGSEARCH_CLUSTERS_QUERY_PARAMETER_NAME, cluster.getClusterName());
 
     // add any query strings specified
     for (String key : queryParameters.keySet()) {
@@ -274,19 +423,40 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
     return uriBuilder.build();
   }
 
-  private URIBuilder createBasicURI(String scheme) {
+  private URIBuilder createBasicURI(String scheme) throws URISyntaxException {
     URIBuilder uriBuilder = new URIBuilder();
-    uriBuilder.setScheme(scheme);
-    uriBuilder.setHost(hostName);
-    uriBuilder.setPort(Integer.valueOf(portNumber));
+    if (StringUtils.isNotBlank(externalAddress)) {
+      final URI uri = new URI(externalAddress);
+      uriBuilder.setScheme(uri.getScheme());
+      uriBuilder.setHost(uri.getHost());
+      if (uri.getPort() != -1) {
+        uriBuilder.setPort(uri.getPort());
+      }
+      // add path as well to make it work with proxies like: https://sample.org/logsearch
+      if (StringUtils.isNotBlank(uri.getPath())) {
+        uriBuilder.setPath(uri.getPath());
+      }
+    } else {
+      uriBuilder.setScheme(scheme);
+      uriBuilder.setHost(hostName);
+      uriBuilder.setPort(Integer.valueOf(portNumber));
+    }
     return uriBuilder;
+  }
+
+  private void appendUriPath(URIBuilder uriBuilder, String path) {
+    if (StringUtils.isNotEmpty(uriBuilder.getPath())) {
+      uriBuilder.setPath(uriBuilder.getPath() + path);
+    } else {
+      uriBuilder.setPath(path);
+    }
   }
 
   private URI createLogLevelQueryURI(String scheme, String componentName, String hostName) throws URISyntaxException {
     URIBuilder uriBuilder = createBasicURI(scheme);
-    uriBuilder.setPath(LOGSEARCH_GET_LOG_LEVELS_PATH);
+    appendUriPath(uriBuilder, LOGSEARCH_GET_LOG_LEVELS_PATH);
 
-    Map<String, String> queryParameters = new HashMap<String, String>();
+    Map<String, String> queryParameters = new HashMap<>();
     // set the query parameters to limit this level count
     // request to the specific component on the specified host
     queryParameters.put(HOST_QUERY_PARAMETER_NAME, hostName);
@@ -323,7 +493,8 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
       if (credential == null) {
         LOG.debug("LogSearch credentials could not be obtained from store.");
       } else {
-        LOG.debug("LogSearch credentials were not of the correct type, this is likely an error in configuration, credential type is = " + credential.getClass().getName());
+        LOG.debug("LogSearch credentials were not of the correct type, this is likely an error in configuration, credential type is = {}",
+          credential.getClass().getName());
       }
     } catch (AmbariException ambariException) {
       LOG.debug("Error encountered while trying to obtain LogSearch admin credentials.", ambariException);
@@ -365,7 +536,8 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
         // read in the response from LogSearch
         resultStream = httpURLConnection.getInputStream();
         BufferedReader reader = new BufferedReader(new InputStreamReader(resultStream));
-        LOG.debug("Response code from LogSearch Service is = " + httpURLConnection.getResponseCode());
+        LOG.debug("Response code from LogSearch Service is = {}", httpURLConnection.getResponseCode());
+
 
         String line = reader.readLine();
         StringBuffer buffer = new StringBuffer();
@@ -374,7 +546,7 @@ public class LoggingRequestHelperImpl implements LoggingRequestHelper {
           line = reader.readLine();
         }
 
-        LOG.debug("Sucessfully retrieved response from server, response = " + buffer);
+        LOG.debug("Sucessfully retrieved response from server, response = {}", buffer);
 
         return buffer;
       } finally {

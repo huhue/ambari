@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,18 +18,19 @@
 
 package org.apache.ambari.server.utils;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
-import com.google.inject.Inject;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.StaticallyInject;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Config;
 import org.apache.ambari.server.state.PropertyInfo;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+import com.google.inject.Inject;
 
 
 @StaticallyInject
@@ -84,7 +85,7 @@ public class SecretReference {
   }
 
   public static String generateStub(String configType, Long configVersion, String propertyName) {
-    return secretPrefix + ":" + configType + ":" + configVersion.toString() + ":" + propertyName;
+    return secretPrefix + ":" + configType + ":" + configVersion + ":" + propertyName;
   }
 
   /**
@@ -139,6 +140,29 @@ public class SecretReference {
                                                     Long configVersion){
     if(propertiesTypes != null && propertiesTypes.containsKey(PropertyInfo.PropertyType.PASSWORD)) {
       for(String pwdPropertyName: propertiesTypes.get(PropertyInfo.PropertyType.PASSWORD)) {
+        if(propertiesMap.containsKey(pwdPropertyName)){
+          if(!propertiesMap.get(pwdPropertyName).equals("")) {
+            String stub = SecretReference.generateStub(configType, configVersion, pwdPropertyName);
+            propertiesMap.put(pwdPropertyName, stub);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Replace real passwords with secret references
+   * @param configAttributes map with config attributes containing properties types as part of their content
+   * @param propertiesMap map with properties in which replacement will be performed
+   * @param configType configuration type
+   * @param configVersion configuration version
+   */
+  public static void replacePasswordsWithReferencesForCustomProperties(Map<String, Map<String, String>> configAttributes,
+                                                    Map<String, String> propertiesMap,
+                                                    String configType,
+                                                    Long configVersion){
+    if(configAttributes != null && configAttributes.containsKey("password")) {
+      for(String pwdPropertyName: configAttributes.get("password").keySet()) {
         if(propertiesMap.containsKey(pwdPropertyName)){
           if(!propertiesMap.get(pwdPropertyName).equals("")) {
             String stub = SecretReference.generateStub(configType, configVersion, pwdPropertyName);

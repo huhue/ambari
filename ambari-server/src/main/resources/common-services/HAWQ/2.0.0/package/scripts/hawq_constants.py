@@ -22,12 +22,14 @@ STANDBY = "standby"
 SEGMENT = "segment"
 START = "start"
 INIT = "init"
+CHECK = "check"
 STOP = "stop"
 YARN = "yarn"
 CLUSTER = "cluster"
 IMMEDIATE = "immediate"
 FAST = "fast"
 ACTIVATE = "activate"
+POSTGRES = "postgres"
 
 # Users
 root_user = "root"
@@ -40,7 +42,7 @@ hawq_group_secured = hawq_user_secured
 hawq_home_dir = "/usr/local/hawq/"
 hawq_config_dir = "/usr/local/hawq/etc/"
 hawq_pid_dir = "/var/run/hawq/"
-hawq_tmp_dir = '/tmp/hawq/'
+hawq_tmp_dir = '/data/hawq/tmp'
 hawq_user_home_dir = os.path.expanduser("~{0}".format(hawq_user))
 limits_conf_dir = "/etc/security/limits.d"
 sysctl_conf_dir = "/etc/sysctl.d"
@@ -61,7 +63,7 @@ hawq_keytab_file = "/etc/security/keytabs/hawq.service.keytab"
 
 # HAWQ-PXF check params
 PXF_PORT = "51200"
-pxf_hdfs_test_dir = "/user/{0}/hawq_pxf_hdfs_service_check".format(hawq_user)
+pxf_hdfs_test_dir = "/tmp/hawq_pxf_hdfs_service_check"
 
 # Timeouts
 default_exec_timeout = 600

@@ -4,10 +4,12 @@
       "name": "YARN",
       "identities": [
         {
-          "name": "/spnego"
+          "name": "yarn_spnego",
+          "reference": "/spnego"
         },
         {
-          "name": "/smokeuser"
+          "name": "yarn_smokeuser",
+          "reference": "/smokeuser"
         }
       ],
       "configurations": [
@@ -24,15 +26,14 @@
             "yarn.timeline-service.http-authentication.token.validity": "",
             "yarn.timeline-service.http-authentication.cookie.domain": "",
             "yarn.timeline-service.http-authentication.cookie.path": "",
-            "yarn.timeline-service.http-authentication.proxyusers.*.hosts": "",
-            "yarn.timeline-service.http-authentication.proxyusers.*.users": "",
-            "yarn.timeline-service.http-authentication.proxyusers.*.groups": "",
+            "yarn.timeline-service.http-authentication.proxyuser.*.hosts": "",
+            "yarn.timeline-service.http-authentication.proxyuser.*.users": "",
+            "yarn.timeline-service.http-authentication.proxyuser.*.groups": "",
             "yarn.timeline-service.http-authentication.kerberos.name.rules": "",
-            "yarn.resourcemanager.proxyusers.*.groups": "",
-            "yarn.resourcemanager.proxyusers.*.hosts": "",
-            "yarn.resourcemanager.proxyusers.*.users": "",
-            "yarn.resourcemanager.proxy-user-privileges.enabled": "true",
-            "yarn.nodemanager.linux-container-executor.cgroups.mount-path": ""
+            "yarn.resourcemanager.proxyuser.*.groups": "",
+            "yarn.resourcemanager.proxyuser.*.hosts": "",
+            "yarn.resourcemanager.proxyuser.*.users": "",
+            "yarn.resourcemanager.proxy-user-privileges.enabled": "true"
           }
         },
         {
@@ -77,7 +78,8 @@
               }
             },
             {
-              "name": "/spnego",
+              "name": "yarn_nodemanager_spnego",
+              "reference": "/spnego",
               "principal": {
                 "configuration": "yarn-site/yarn.nodemanager.webapp.spnego-principal"
               },
@@ -119,7 +121,8 @@
               }
             },
             {
-              "name": "/spnego",
+              "name": "yarn_resourcemanager_spnego",
+              "reference": "/spnego",
               "principal": {
                 "configuration": "yarn-site/yarn.resourcemanager.webapp.spnego-principal"
               },
@@ -154,13 +157,18 @@
               }
             },
             {
-              "name": "/spnego",
+              "name": "yarn_app_timeline_server_spnego",
+              "reference": "/spnego",
               "principal": {
                 "configuration": "yarn-site/yarn.timeline-service.http-authentication.kerberos.principal"
               },
               "keytab": {
                 "configuration": "yarn-site/yarn.timeline-service.http-authentication.kerberos.keytab"
               }
+            },
+            {
+              "name": "yarn_app_timeline_server_hdfs",
+              "reference": "/HDFS/NAMENODE/hdfs"
             }
           ]
         }
@@ -170,10 +178,12 @@
       "name": "MAPREDUCE2",
       "identities": [
         {
-          "name": "/spnego"
+          "name": "mapreduce2_spnego",
+          "reference": "/spnego"
         },
         {
-          "name": "/smokeuser"
+          "name": "mapreduce2_smokeuser",
+          "reference": "/smokeuser"
         }
       ],
       "components": [
@@ -181,7 +191,8 @@
           "name": "HISTORYSERVER",
           "identities": [
             {
-              "name": "/HDFS/NAMENODE/hdfs"
+              "name": "mapreduce2_historyserver_hdfs",
+              "reference": "/HDFS/NAMENODE/hdfs"
             },
             {
               "name": "history_server_jhs",
@@ -205,7 +216,8 @@
               }
             },
             {
-              "name": "/spnego",
+              "name": "mapreduce2_historyserver_spnego",
+              "reference": "/spnego",
               "principal": {
                 "configuration": "mapred-site/mapreduce.jobhistory.webapp.spnego-principal"
               },

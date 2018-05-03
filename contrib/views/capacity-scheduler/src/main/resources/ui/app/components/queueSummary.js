@@ -20,33 +20,74 @@
 
  var _runState = 'RUNNING';
  var _stopState = 'STOPPED';
+ var _notStartedState = 'NOT SAVED';
 
  App.QueueSummaryComponent = Ember.Component.extend({
    layoutName: 'components/queueSummary',
    queue: null,
    allQueues: null,
+   precision: 2,
+   queuesNeedRefresh: null,
+
+   isQueueStateNeedRefresh: function() {
+     var qsNeedRefresh = this.get('queuesNeedRefresh'),
+       qq = this.get('queue');
+
+     if (qsNeedRefresh && qsNeedRefresh.findBy('path', qq.get('path'))) {
+       return true;
+     } else if (this.get('isDirtyState')) {
+       return true;
+     } else {
+       return false;
+     }
+   }.property('queuesNeedRefresh.[]', 'queue', 'isDirtyState'),
+
+   isQueueCapacityNeedRefresh: function() {
+     var qsNeedRefresh = this.get('queuesNeedRefresh'),
+       qq = this.get('queue');
+
+     if (qsNeedRefresh && qsNeedRefresh.findBy('path', qq.get('path'))) {
+       return true;
+     } else if (this.get('isDirtyCapacity')) {
+       return true;
+     } else {
+       return false;
+     }
+   }.property('queuesNeedRefresh.[]', 'queue', 'isDirtyCapacity'),
 
    isRunningState: function() {
      return this.get('queue.state') === _runState || this.get('queue.state') === null;
    }.property('queue.state'),
 
    queueState: function() {
-     if (this.get('isRunningState')) {
+     if (this.get('queue.isNewQueue')) {
+       return _notStartedState;
+     } else if (this.get('isRunningState')) {
        return _runState;
      } else {
        return _stopState;
      }
    }.property('queue.state'),
 
-   effectiveCapacity: function() {
-     var currentQ = this.get('queue'),
-     allQueues = this.get('allQueues'),
-     effectiveCapacityRatio = 1;
-     while (currentQ !== null) {
-       effectiveCapacityRatio *= (currentQ.get('capacity') / 100);
-       currentQ = allQueues.findBy('id', currentQ.get('parentPath').toLowerCase()) || null;
+   qStateColor: function() {
+     if (this.get('queue.isNewQueue')) {
+       return 'text-danger';
+     } else if (this.get('isRunningState')) {
+       return 'text-success';
+     } else {
+       return 'text-danger';
      }
-     var effectiveCapacityPercent = Math.round(effectiveCapacityRatio * 100);
-     return effectiveCapacityPercent;
-   }.property('queue.capacity', 'allQueues.@each.capacity', 'allQueues.length')
+   }.property('queue.state'),
+
+   isDirtyState: function() {
+     return this.get('queue').changedAttributes().hasOwnProperty('state');
+   }.property('queue.state'),
+
+   isDirtyCapacity: function() {
+     return this.get('queue').changedAttributes().hasOwnProperty('capacity');
+   }.property('queue.capacity'),
+
+   isNewQueue: function() {
+     return this.get('queue.isNewQueue');
+   }.property('queue.isNewQueue')
  });

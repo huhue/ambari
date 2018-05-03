@@ -17,15 +17,19 @@ limitations under the License.
 
 """
 
+import os
+
 from resource_management.libraries.functions.version import format_stack_version
 from resource_management.libraries.functions.default import default
 from resource_management.libraries.functions.get_kinit_path import get_kinit_path
 from resource_management.libraries.script import Script
+from resource_management.libraries.functions import stack_select
 from resource_management.libraries.functions.format import format
 from resource_management.libraries.functions import StackFeature
 from resource_management.libraries.functions.stack_features import check_stack_feature
 from resource_management.libraries.functions.expect import expect
-import os
+from resource_management.core.exceptions import Fail
+
 
 # a map of the Ambari role to the component name
 # for use with <stack-root>/current/<component>
@@ -38,17 +42,18 @@ component_directory = Script.get_component_from_role(SERVER_ROLE_DIRECTORY_MAP, 
 config = Script.get_config()
 stack_root = Script.get_stack_root()
 
+# Needed since this is an Atlas Hook service.
 cluster_name = config['clusterName']
 
-ambari_server_hostname = config['clusterHostInfo']['ambari_server_host'][0]
+ambari_server_hostname = config['ambariLevelParams']['ambari_server_host']
 
-stack_name = default("/hostLevelParams/stack_name", None)
+stack_name = default("/clusterLevelParams/stack_name", None)
 
-stack_version_unformatted = config['hostLevelParams']['stack_version']
+stack_version_unformatted = config['clusterLevelParams']['stack_version']
 stack_version_formatted = format_stack_version(stack_version_unformatted)
 
-agent_stack_retry_on_unavailability = config['hostLevelParams']['agent_stack_retry_on_unavailability']
-agent_stack_retry_count = expect("/hostLevelParams/agent_stack_retry_count", int)
+agent_stack_retry_on_unavailability = config['ambariLevelParams']['agent_stack_retry_on_unavailability']
+agent_stack_retry_count = expect("/ambariLevelParams/agent_stack_retry_count", int)
 
 # New Cluster Stack Version that is defined during the RESTART of a Rolling Upgrade
 version = default("/commandParams/version", None)
@@ -66,7 +71,7 @@ zoo_conf_dir = "/etc/zookeeper"
 if stack_version_formatted and check_stack_feature(StackFeature.ROLLING_UPGRADE, stack_version_formatted):
   sqoop_conf_dir = format("{stack_root}/current/sqoop-client/conf")
   sqoop_lib = format("{stack_root}/current/sqoop-client/lib")
-  hadoop_home = format("{stack_root}/current/hbase-client")
+  hadoop_home = stack_select.get_hadoop_dir("home")
   hbase_home = format("{stack_root}/current/hbase-client")
   hive_home = format("{stack_root}/current/hive-client")
   sqoop_bin_dir = format("{stack_root}/current/sqoop-client/bin/")
@@ -85,46 +90,48 @@ kinit_path_local = get_kinit_path(default('/configurations/kerberos-env/executab
 #JDBC driver jar name
 sqoop_jdbc_drivers_dict = []
 sqoop_jdbc_drivers_name_dict = {}
+sqoop_jdbc_drivers_to_remove = {}
 if "jdbc_drivers" in config['configurations']['sqoop-env']:
   sqoop_jdbc_drivers = config['configurations']['sqoop-env']['jdbc_drivers'].split(',')
 
   for driver_name in sqoop_jdbc_drivers:
+    previous_jdbc_jar_name = None
     driver_name = driver_name.strip()
     if driver_name and not driver_name == '':
       if driver_name == "com.microsoft.sqlserver.jdbc.SQLServerDriver":
-        jdbc_name = default("/hostLevelParams/custom_mssql_jdbc_name", None)
+        jdbc_name = default("/ambariLevelParams/custom_mssql_jdbc_name", None)
+        previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_mssql_jdbc_name", None)
         jdbc_driver_name = "mssql"
       elif driver_name == "com.mysql.jdbc.Driver":
-        jdbc_name = default("/hostLevelParams/custom_mysql_jdbc_name", None)
+        jdbc_name = default("/ambariLevelParams/custom_mysql_jdbc_name", None)
+        previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_mysql_jdbc_name", None)
         jdbc_driver_name = "mysql"
       elif driver_name == "org.postgresql.Driver":
-        jdbc_name = default("/hostLevelParams/custom_postgres_jdbc_name", None)
+        jdbc_name = default("/ambariLevelParams/custom_postgres_jdbc_name", None)
+        previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_postgres_jdbc_name", None)
         jdbc_driver_name = "postgres"
       elif driver_name == "oracle.jdbc.driver.OracleDriver":
-        jdbc_name = default("/hostLevelParams/custom_oracle_jdbc_name", None)
+        jdbc_name = default("/ambariLevelParams/custom_oracle_jdbc_name", None)
+        previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_oracle_jdbc_name", None)
         jdbc_driver_name = "oracle"
       elif driver_name == "org.hsqldb.jdbc.JDBCDriver":
-        jdbc_name = default("/hostLevelParams/custom_hsqldb_jdbc_name", None)
+        jdbc_name = default("/ambariLevelParams/custom_hsqldb_jdbc_name", None)
+        previous_jdbc_jar_name = default("/ambariLevelParams/previous_custom_hsqldb_jdbc_name", None)
         jdbc_driver_name = "hsqldb"
+      else: raise Fail(format("JDBC driver '{driver_name}' not supported."))
     else:
       continue
     sqoop_jdbc_drivers_dict.append(jdbc_name)
+    sqoop_jdbc_drivers_to_remove[jdbc_name] = previous_jdbc_jar_name
     sqoop_jdbc_drivers_name_dict[jdbc_name] = jdbc_driver_name
-jdk_location = config['hostLevelParams']['jdk_location']
+jdk_location = config['ambariLevelParams']['jdk_location']
 
-job_data_publish_class = ''
 
 ########################################################
 ############# Atlas related params #####################
 ########################################################
-
-atlas_hosts = default('/clusterHostInfo/atlas_server_hosts', [])
-has_atlas = len(atlas_hosts) > 0
-atlas_plugin_package = "atlas-metadata*-hive-plugin"
-atlas_ubuntu_plugin_package = "atlas-metadata.*-hive-plugin"
-
-if has_atlas:
-  atlas_conf_file = config['configurations']['atlas-env']['metadata_conf_file']
-  atlas_home_dir = os.environ['METADATA_HOME_DIR'] if 'METADATA_HOME_DIR' in os.environ else format("{stack_root}/current/atlas-server")
-  atlas_conf_dir = os.environ['METADATA_CONF'] if 'METADATA_CONF' in os.environ else '/etc/atlas/conf'
-  job_data_publish_class = 'org.apache.atlas.sqoop.hook.SqoopHook'
+#region Atlas Hooks
+sqoop_atlas_application_properties = default('/configurations/sqoop-atlas-application.properties', {})
+enable_atlas_hook = default('/configurations/sqoop-env/sqoop.atlas.hook', False)
+atlas_hook_filename = default('/configurations/atlas-env/metadata_conf_file', 'atlas-application.properties')
+#endregion

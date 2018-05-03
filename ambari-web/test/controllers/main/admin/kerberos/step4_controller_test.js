@@ -34,8 +34,6 @@ describe('App.KerberosWizardStep4Controller', function() {
     c = getController();
   });
 
-  App.TestAliases.testAsComputedEqual(getController(), 'isWithinAddService', 'wizardController.name', 'addServiceController');
-
   describe("#clearStep()", function () {
 
     beforeEach(function() {
@@ -56,11 +54,20 @@ describe('App.KerberosWizardStep4Controller', function() {
   });
 
   describe('#isSubmitDisabled', function() {
-    var controller = App.KerberosWizardStep4Controller.create({});
-    var configs = Em.A([
-      App.ServiceConfigProperty.create({ name: 'prop1', value: 'someVal1', identityType: 'user', category: 'Ambari Principals', serviceName: 'Cluster'})
-    ]);
-    controller.set('stepConfigs', controller.createServiceConfig(configs));
+    var controller, configs;
+    beforeEach(function() {
+      controller = App.KerberosWizardStep4Controller.create({});
+      configs = Em.A([
+        App.ServiceConfigProperty.create({
+          name: 'prop1',
+          value: 'someVal1',
+          identityType: 'user',
+          category: 'Ambari Principals',
+          serviceName: 'Cluster'
+        })
+      ]);
+      controller.set('stepConfigs', controller.createServiceConfig(configs));
+    });
 
     it('configuration errors are absent, submit should be not disabled', function() {
       expect(controller.get('stepConfigs')[0].get('errorCount')).to.be.equal(0);
@@ -70,6 +77,8 @@ describe('App.KerberosWizardStep4Controller', function() {
     it('config has invalid value, submit should be disabled', function() {
       var serviceConfig = controller.get('stepConfigs')[0];
       serviceConfig.get('configs').findProperty('name', 'prop1').set('value', '');
+      serviceConfig.setActivePropertiesOnce();
+      serviceConfig.setConfigsWithErrorsOnce();
       expect(serviceConfig.get('errorCount')).to.be.equal(1);
       expect(controller.get('isSubmitDisabled')).to.be.true;
     });
@@ -94,7 +103,9 @@ describe('App.KerberosWizardStep4Controller', function() {
       Em.Object.create({ name: 'falcon_keytab', value: 'falcon_keytab_value', serviceName: 'FALCON' }),
       Em.Object.create({ name: 'mapreduce_keytab', value: 'mapreduce_keytab_value', serviceName: 'MAPREDUCE2' }),
       Em.Object.create({ name: 'hdfs_principal', value: 'hdfs_principal_value', identityType: 'user', serviceName: 'HDFS' }),
-      Em.Object.create({ name: 'hadoop.security.auth_to_local', serviceName: 'HDFS' })
+      Em.Object.create({ name: 'hadoop.security.auth_to_local', serviceName: 'HDFS' }),
+      App.ServiceConfigProperty.create({ name: 'null_value', serviceName: 'HDFS', value: null, isVisible: true }),
+      App.ServiceConfigProperty.create({ name: 'null_value_observed_value_ok', serviceName: 'HDFS', value: null, isVisible: false, observesValueFrom: 'spnego_keytab' })
     ]);
 
     var propertyValidationCases = [
@@ -125,6 +136,18 @@ describe('App.KerberosWizardStep4Controller', function() {
         e: [
           { key: 'displayType', value: 'multiLine' }
         ]
+      },
+      {
+        property: 'null_value',
+        e: [
+          { key: 'isVisible', value: false }
+        ]
+      },
+      {
+        property: 'null_value_observed_value_ok',
+        e: [
+          { key: 'isVisible', value: true }
+        ]
       }
     ];
 
@@ -133,10 +156,10 @@ describe('App.KerberosWizardStep4Controller', function() {
     before(function() {
       var controller = App.KerberosWizardStep4Controller.create({
         wizardController: {
-          getDBProperty: function() {
-            return Em.A([
+          content: {
+            serviceConfigProperties: Em.A([
               Em.Object.create({ name: 'realm', value: 'realm_value' })
-            ]);
+            ])
           },
           loadCachedStepConfigValues: function() {
             return null;
@@ -188,85 +211,6 @@ describe('App.KerberosWizardStep4Controller', function() {
     });
   });
 
-  describe('#setStepConfigs', function() {
-    describe('Add Service Wizard', function() {
-
-      var properties = Em.A([
-        Em.Object.create({ name: 'realm', value: '', serviceName: 'Cluster' }),
-        Em.Object.create({ name: 'spnego_keytab', value: 'spnego_keytab_value', serviceName: 'Cluster', isEditable: true }),
-        Em.Object.create({ name: 'hdfs_keytab', value: '', serviceName: 'HDFS', observesValueFrom: 'spnego_keytab', isEditable: true }),
-        Em.Object.create({ name: 'falcon_keytab', value: 'falcon_keytab_value', serviceName: 'FALCON', isEditable: true }),
-        Em.Object.create({ name: 'mapreduce_keytab', value: 'mapreduce_keytab_value', serviceName: 'MAPREDUCE2', isEditable: true })
-      ]);
-
-      var res;
-      var controller;
-      before(function() {
-        sinon.stub(App.StackService, 'find').returns([
-          Em.Object.create({
-            serviceName: 'KERBEROS',
-            configCategories: [],
-            configTypeList: []
-          }),
-          Em.Object.create({
-            serviceName: 'HDFS',
-            configCategories: [],
-            configTypeList: []
-          }),
-          Em.Object.create({
-            serviceName: 'MAPREDUCE2',
-            configTypeList: []
-          })
-        ]);
-        sinon.stub(App.Service, 'find').returns([
-          Em.Object.create({
-            serviceName: 'HDFS'
-          }),
-          Em.Object.create({
-            serviceName: 'KERBEROS'
-          })
-        ]);
-        controller = App.KerberosWizardStep4Controller.create({
-          selectedServiceNames: ['FALCON', 'MAPREDUCE2'],
-          installedServiceNames: ['HDFS', 'KERBEROS'],
-          wizardController: Em.Object.create({
-            name: 'addServiceController',
-            getDBProperty: function() {
-              return Em.A([
-                Em.Object.create({ name: 'realm', value: 'realm_value' })
-              ]);
-            },
-            loadCachedStepConfigValues : function() {
-              return null;
-            }
-          })
-        });
-        sinon.stub(App.router, 'get').withArgs('mainAdminKerberosController.isManualKerberos').returns(false);
-        var stepConfigs = controller.setStepConfigs(properties);
-        res = stepConfigs[0].get('configs').concat(stepConfigs[1].get('configs'));
-      });
-
-      Em.A([
-        { name: 'spnego_keytab', e: false },
-        { name: 'falcon_keytab', e: true },
-        { name: 'hdfs_keytab', e: false },
-        { name: 'mapreduce_keytab', e: true }
-      ]).forEach(function(test) {
-        it('Add Service: property `{0}` should be {1} editable'.format(test.name, !!test.e ? '' : 'not '), function() {
-          expect(res.findProperty('name', test.name).get('isEditable')).to.eql(test.e);
-        });
-      });
-
-      after(function() {
-        controller.destroy();
-        controller = null;
-        App.StackService.find.restore();
-        App.Service.find.restore();
-        App.router.get.restore();
-      });
-    });
-  });
-
   describe("#createCategoryForServices()", function() {
     var controller = App.KerberosWizardStep4Controller.create({
       wizardController: {
@@ -308,66 +252,6 @@ describe('App.KerberosWizardStep4Controller', function() {
     it('for kerberos wizard', function() {
       controller.set('wizardController.name', 'KerberosWizard');
       expect(controller.createCategoryForServices()).to.eql([App.ServiceConfigCategory.create({ name: 'HDFS', displayName: 'HDFS', collapsedByDefault: true})]);
-    });
-  });
-
-  describe('#loadStep', function() {
-    var controller;
-    describe('skip "Configure Identities" step. ', function() {
-      beforeEach(function() {
-        controller = App.KerberosWizardStep4Controller.create({});
-        this.wizardController = App.AddServiceController.create({});
-        controller.set('wizardController', this.wizardController);
-        sinon.stub(controller, 'clearStep').returns(true);
-        sinon.stub(controller, 'getDescriptor').returns({ then: function() { return { always: function() {}}}});
-        sinon.stub(controller, 'setStepConfigs').returns(true);
-        sinon.stub(App.router, 'send').withArgs('next');
-      });
-
-      afterEach(function() {
-        controller.clearStep.restore();
-
-        controller.setStepConfigs.restore();
-        App.router.send.restore();
-      });
-
-      var tests = [
-        {
-          securityEnabled: true,
-          stepSkipped: false
-        },
-        {
-          securityEnabled: false,
-          stepSkipped: true
-        }
-      ];
-
-      tests.forEach(function(test) {
-        var message = 'Security {0} configure identities step should be {1}'.format(!!test.securityEnabled ? 'enabled' : 'disabled', !!test.stepSkipped ? 'skipped' : 'not skipped');
-        describe(message, function() {
-
-          beforeEach(function () {
-            sinon.stub(App, 'get').withArgs('isKerberosEnabled').returns(test.securityEnabled);
-            this.wizardController.checkSecurityStatus();
-            controller.loadStep();
-          });
-
-          afterEach(function () {
-            App.get.restore();
-          });
-
-          it('`send` is ' + (test.stepSkipped ? '' : 'not') + ' called with `next`', function () {
-            expect(App.router.send.calledWith('next')).to.be.eql(test.stepSkipped);
-          });
-
-        });
-      }, this);
-
-      it('step should not be disabled for Add Kerberos wizard', function() {
-        controller.set('wizardController', App.KerberosWizardController.create({}));
-        controller.loadStep();
-        expect(App.router.send.calledWith('next')).to.be.false;
-      });
     });
   });
 
@@ -573,34 +457,13 @@ describe('App.KerberosWizardStep4Controller', function() {
     };
 
     beforeEach(function() {
-      c.reopen({
-        isWithinAddService: true
-      });
-      sinon.stub(c, 'storeClusterDescriptorStatus');
       sinon.stub(c, 'loadClusterDescriptorConfigs').returns(mock);
-      sinon.stub(c, 'loadStackDescriptorConfigs').returns(mock);
       sinon.stub(mock, 'then');
     });
 
     afterEach(function() {
       c.loadClusterDescriptorConfigs.restore();
-      c.storeClusterDescriptorStatus.restore();
-      c.loadStackDescriptorConfigs.restore();
       mock.then.restore();
-    });
-
-    it("App.ajax.send should be called", function() {
-      c.getDescriptor();
-      var args = testHelpers.findAjaxRequest('name', 'admin.kerberize.cluster_descriptor_artifact');
-      expect(args[0]).to.be.eql({
-        sender: c,
-        name: 'admin.kerberize.cluster_descriptor_artifact'
-      });
-    });
-
-    it("storeClusterDescriptorStatus should be called", function() {
-      c.getDescriptor();
-      expect(c.storeClusterDescriptorStatus.calledOnce).to.be.true;
     });
 
     it("loadClusterDescriptorConfigs should be called", function() {
@@ -613,17 +476,6 @@ describe('App.KerberosWizardStep4Controller', function() {
       expect(mock.then.calledOnce).to.be.true;
     });
 
-    it("loadStackDescriptorConfigs should be called", function() {
-      c.set('isWithinAddService', false);
-      c.getDescriptor();
-      expect(c.loadStackDescriptorConfigs.calledOnce).to.be.true;
-    });
-
-    it("then should be called, isWithinAddService is false", function() {
-      c.set('isWithinAddService', false);
-      c.getDescriptor();
-      expect(mock.then.calledOnce).to.be.true;
-    });
   });
 
   describe("#tweakConfigProperty()", function () {
@@ -869,11 +721,15 @@ describe('App.KerberosWizardStep4Controller', function() {
       });
       expect(c.getBlueprintPayloadObject([], {})).to.be.eql({
         "blueprint": {
+          "host_groups": [],
           "configurations": {
             "t1": {
               "properties": []
             }
           }
+        },
+        "blueprint_cluster_binding": {
+          "host_groups": []
         }
       });
     });

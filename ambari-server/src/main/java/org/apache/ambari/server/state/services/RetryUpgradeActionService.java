@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -17,23 +17,6 @@
  */
 package org.apache.ambari.server.state.services;
 
-import com.google.common.util.concurrent.AbstractScheduledService;
-import com.google.inject.Inject;
-import com.google.inject.Injector;
-import com.google.inject.Provider;
-import com.google.inject.persist.Transactional;
-import org.apache.ambari.server.AmbariService;
-import org.apache.ambari.server.actionmanager.HostRoleStatus;
-import org.apache.ambari.server.configuration.Configuration;
-import org.apache.ambari.server.orm.dao.HostRoleCommandDAO;
-import org.apache.ambari.server.orm.entities.ClusterVersionEntity;
-import org.apache.ambari.server.orm.entities.HostRoleCommandEntity;
-import org.apache.ambari.server.orm.entities.UpgradeEntity;
-import org.apache.ambari.server.state.Cluster;
-import org.apache.ambari.server.state.Clusters;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -42,6 +25,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
+
+import org.apache.ambari.server.AmbariService;
+import org.apache.ambari.server.actionmanager.HostRoleStatus;
+import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.orm.dao.HostRoleCommandDAO;
+import org.apache.ambari.server.orm.entities.HostRoleCommandEntity;
+import org.apache.ambari.server.orm.entities.RepositoryVersionEntity;
+import org.apache.ambari.server.orm.entities.UpgradeEntity;
+import org.apache.ambari.server.state.Cluster;
+import org.apache.ambari.server.state.Clusters;
+import org.apache.ambari.server.state.stack.upgrade.Direction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.util.concurrent.AbstractScheduledService;
+import com.google.inject.Inject;
+import com.google.inject.Injector;
+import com.google.inject.Provider;
+import com.google.inject.persist.Transactional;
 
 /**
  * Monitors commands during Stack Upgrade that are in a HOLDING_* failed because they failed in order to retry them
@@ -90,10 +92,10 @@ public class RetryUpgradeActionService extends AbstractScheduledService {
 
 
   public RetryUpgradeActionService() {
-    this.m_fullDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+    m_fullDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
     TimeZone tz = TimeZone.getTimeZone("UTC");
-    this.m_deltaDateFormat = new SimpleDateFormat("HH:mm:ss");
-    this.m_deltaDateFormat.setTimeZone(tz);
+    m_deltaDateFormat = new SimpleDateFormat("HH:mm:ss");
+    m_deltaDateFormat.setTimeZone(tz);
   }
 
   /**
@@ -113,26 +115,26 @@ public class RetryUpgradeActionService extends AbstractScheduledService {
    */
   @Override
   protected void startUp() throws Exception {
-    this.MAX_TIMEOUT_MINS = m_configuration.getStackUpgradeAutoRetryTimeoutMins();
-    this.MAX_TIMEOUT_MS = MAX_TIMEOUT_MINS * 60000L;
+    MAX_TIMEOUT_MINS = m_configuration.getStackUpgradeAutoRetryTimeoutMins();
+    MAX_TIMEOUT_MS = MAX_TIMEOUT_MINS * 60000L;
 
-    if (this.MAX_TIMEOUT_MINS < 1) {
+    if (MAX_TIMEOUT_MINS < 1) {
       LOG.info("Will not start service {} used to auto-retry failed actions during " +
           "Stack Upgrade since since the property {} is either invalid/missing or set to {}",
-          this.getClass().getSimpleName(), Configuration.STACK_UPGRADE_AUTO_RETRY_TIMEOUT_MINS_KEY, MAX_TIMEOUT_MINS);
+          this.getClass().getSimpleName(), Configuration.STACK_UPGRADE_AUTO_RETRY_TIMEOUT_MINS.getKey(), MAX_TIMEOUT_MINS);
       stopAsync();
     }
 
     // During Stack Upgrade, some tasks don't make since to auto-retry since they are either
     // running on the server, should only be ran multiple times with human intervention,
     // or are not going to succeed on repeat attempts because they involve DB queries and not necessarily down hosts.
-    this.CUSTOM_COMMAND_NAMES_TO_IGNORE = m_configuration.getStackUpgradeAutoRetryCustomCommandNamesToIgnore();
-    this.COMMAND_DETAILS_TO_IGNORE = m_configuration.getStackUpgradeAutoRetryCommandDetailsToIgnore();
+    CUSTOM_COMMAND_NAMES_TO_IGNORE = m_configuration.getStackUpgradeAutoRetryCustomCommandNamesToIgnore();
+    COMMAND_DETAILS_TO_IGNORE = m_configuration.getStackUpgradeAutoRetryCommandDetailsToIgnore();
   }
 
   public void setMaxTimeout(int mins) {
-    this.MAX_TIMEOUT_MINS = mins;
-    this.MAX_TIMEOUT_MS = MAX_TIMEOUT_MINS * 60000L;
+    MAX_TIMEOUT_MINS = mins;
+    MAX_TIMEOUT_MS = MAX_TIMEOUT_MINS * 60000L;
   }
 
   /**
@@ -164,22 +166,21 @@ public class RetryUpgradeActionService extends AbstractScheduledService {
    * @return Request Id of active stack upgrade.
    */
   private Long getActiveUpgradeRequestId(Cluster cluster) {
-    ClusterVersionEntity currentVersion = cluster.getCurrentClusterVersion();
-
-    if (currentVersion == null) {
-      LOG.debug("No Cluster Version exists as CURRENT. Skip retrying failed tasks.");
-      return null;
-    }
 
     // May be null, and either upgrade or downgrade
-    UpgradeEntity currentUpgrade = cluster.getUpgradeEntity();
+    UpgradeEntity currentUpgrade = cluster.getUpgradeInProgress();
     if (currentUpgrade == null) {
-      LOG.debug("There is no active stack upgrade in progress. Skip retrying failed tasks.");
+      LOG.debug("There is no active upgrade in progress. Skip retrying failed tasks.");
       return null;
     }
-    LOG.debug("Found an active stack upgrade with id: {}, direction: {}, type: {}, from version: {}, to version: {}",
-        currentUpgrade.getId(), currentUpgrade.getDirection(), currentUpgrade.getUpgradeType(),
-        currentUpgrade.getFromVersion(), currentUpgrade.getToVersion());
+
+    Direction direction = currentUpgrade.getDirection();
+    RepositoryVersionEntity repositoryVersion = currentUpgrade.getRepositoryVersion();
+
+    LOG.debug(
+        "Found an active upgrade with id: {}, direction: {}, {} {}", currentUpgrade.getId(),
+        direction, currentUpgrade.getUpgradeType(), direction.getPreposition(),
+        repositoryVersion.getVersion());
 
     return currentUpgrade.getRequestId();
   }
@@ -189,7 +190,7 @@ public class RetryUpgradeActionService extends AbstractScheduledService {
    * @param requestId Request Id to search tasks for.
    */
   @Transactional
-  private void retryHoldingCommandsInRequest(Long requestId) {
+  void retryHoldingCommandsInRequest(Long requestId) {
     if (requestId == null) {
       return;
     }
@@ -198,24 +199,59 @@ public class RetryUpgradeActionService extends AbstractScheduledService {
     List<HostRoleCommandEntity> holdingCommands = m_hostRoleCommandDAO.findByRequestIdAndStatuses(requestId, HOLDING_STATUSES);
     if (holdingCommands.size() > 0) {
       for (HostRoleCommandEntity hrc : holdingCommands) {
-        LOG.debug("Comparing task id: {}, original start time: {}, now: {}",
-            hrc.getTaskId(), hrc.getOriginalStartTime(), now);
+        LOG.debug("Comparing taskId: {}, attempt count: {}, original start time: {}, now: {}",
+            hrc.getTaskId(), hrc.getAttemptCount(), hrc.getOriginalStartTime(), now);
 
         /*
+        Use-Case 1:
+        If the command has been sent to the host before because it was heartbeating, then it does have
+        an original start time, so we can attempt to retry on this host even if no longer heartbeating.
+        If the host does heartbeat again within the time interval, the command will actually be scheduled by the host.
+
+        Use-Case 2:
+        If the host is not heartbeating and the command is scheduled to be ran on it, then it means the following
+        is true,
+        - does not have original start time
+        - does not have start time
+        - attempt count is 0
+        - status will be HOLDING_TIMEDOUT
+        When the host does start heartbeating, we need to schedule this command by changing its state back to PENDING.
+
+        Notes:
         While testing, can update the original_start_time of records in host_role_command table to current epoch time.
         E.g. in postgres,
         SELECT CAST(EXTRACT(EPOCH FROM NOW()) AS BIGINT) * 1000;
         UPDATE host_role_command SET attempt_count = 1, status = 'HOLDING_FAILED', original_start_time = (CAST(EXTRACT(EPOCH FROM NOW()) AS BIGINT) * 1000) WHERE task_id IN (x, y, z);
-         */
-        if (canRetryCommand(hrc) && hrc.getOriginalStartTime() > 0 && hrc.getOriginalStartTime() < now) {
-          Long retryTimeWindow = hrc.getOriginalStartTime() + MAX_TIMEOUT_MS;
-          Long deltaMS = retryTimeWindow - now;
+        */
 
-          if (deltaMS > 0) {
-            String originalStartTimeString = this.m_fullDateFormat.format(new Date(hrc.getOriginalStartTime()));
-            String deltaString = this.m_deltaDateFormat.format(new Date(deltaMS));
-            LOG.info("Retrying task with id: {}, attempts: {}, original start time: {}, time til timeout: {}",
-                hrc.getTaskId(), hrc.getAttemptCount(), originalStartTimeString, deltaString);
+        if (canRetryCommand(hrc)) {
+
+          boolean allowRetry = false;
+          // Use-Case 1
+          if (hrc.getOriginalStartTime() != null && hrc.getOriginalStartTime() > 0 && hrc.getOriginalStartTime() < now) {
+            Long retryTimeWindow = hrc.getOriginalStartTime() + MAX_TIMEOUT_MS;
+            Long deltaMS = retryTimeWindow - now;
+
+            if (deltaMS > 0) {
+              String originalStartTimeString = m_fullDateFormat.format(new Date(hrc.getOriginalStartTime()));
+              String deltaString = m_deltaDateFormat.format(new Date(deltaMS));
+              LOG.info("Retrying task with id: {}, attempts: {}, original start time: {}, time til timeout: {}",
+                  hrc.getTaskId(), hrc.getAttemptCount(), originalStartTimeString, deltaString);
+              allowRetry = true;
+            }
+          }
+
+          // Use-Case 2
+          if ((hrc.getOriginalStartTime() == null || hrc.getOriginalStartTime() == -1L) &&
+              (hrc.getStartTime() == null || hrc.getStartTime() == -1L) &&
+              hrc.getAttemptCount() == 0){
+            LOG.info("Re-scheduling task with id: {} since it has 0 attempts, and null start_time and " +
+                    "original_start_time, which likely means the host was not heartbeating when the command was supposed to be scheduled.",
+                hrc.getTaskId());
+            allowRetry = true;
+          }
+
+          if (allowRetry) {
             retryHostRoleCommand(hrc);
           }
         }
@@ -233,14 +269,14 @@ public class RetryUpgradeActionService extends AbstractScheduledService {
       // Important not to retry some steps during RU/EU like "Finalize Upgrade Pre-Check", "Execute HDFS Finalize", and "Save Cluster State".
       // These elements are expected to be in lowercase already
       if (null != hrc.getCustomCommandName()) {
-        for (String s : this.CUSTOM_COMMAND_NAMES_TO_IGNORE) {
+        for (String s : CUSTOM_COMMAND_NAMES_TO_IGNORE) {
           if (hrc.getCustomCommandName().toLowerCase().contains(s)){
             return false;
           }
         }
       }
       if (null != hrc.getCommandDetail()) {
-        for (String s : this.COMMAND_DETAILS_TO_IGNORE) {
+        for (String s : COMMAND_DETAILS_TO_IGNORE) {
           if (hrc.getCommandDetail().toLowerCase().contains(s)) {
             return false;
           }
@@ -261,6 +297,7 @@ public class RetryUpgradeActionService extends AbstractScheduledService {
     hrc.setStatus(HostRoleStatus.PENDING);
     hrc.setStartTime(-1L);
     // Don't change the original start time.
+    hrc.setEndTime(-1L);
     hrc.setLastAttemptTime(-1L);
 
     // This will invalidate the cache, as expected.

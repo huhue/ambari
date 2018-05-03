@@ -20,231 +20,22 @@ limitations under the License.
 
 # simplejson is much faster comparing to Python 2.6 json module and has the same functions set.
 import ambari_simplejson as json
+from resource_management.core.exceptions import Fail
+from resource_management.core.logger import Logger
+from resource_management.libraries.functions.constants import Direction
+from resource_management.libraries.functions.version import format_stack_version
 
-_DEFAULT_STACK_FEATURES = {
-  "stack_features": [
-    {
-      "name": "snappy",
-      "description": "Snappy compressor/decompressor support",
-      "min_version": "2.0.0.0",
-      "max_version": "2.2.0.0"
-    },
-    {
-      "name": "lzo",
-      "description": "LZO libraries support",
-      "min_version": "2.2.1.0"
-    },
-    {
-      "name": "express_upgrade",
-      "description": "Express upgrade support",
-      "min_version": "2.1.0.0"
-    },
-    {
-      "name": "rolling_upgrade",
-      "description": "Rolling upgrade support",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "config_versioning",
-      "description": "Configurable versions support",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "datanode_non_root",
-      "description": "DataNode running as non-root support (AMBARI-7615)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "remove_ranger_hdfs_plugin_env",
-      "description": "HDFS removes Ranger env files (AMBARI-14299)",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "ranger",
-      "description": "Ranger Service support",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "ranger_tagsync_component",
-      "description": "Ranger Tagsync component support (AMBARI-14383)",
-      "min_version": "2.5.0.0"
-    },
-    {
-      "name": "phoenix",
-      "description": "Phoenix Service support",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "nfs",
-      "description": "NFS support",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "tez_for_spark",
-      "description": "Tez dependency for Spark",
-      "min_version": "2.2.0.0",
-      "max_version": "2.3.0.0"
-    },
-    {
-      "name": "timeline_state_store",
-      "description": "Yarn application timeline-service supports state store property (AMBARI-11442)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "copy_tarball_to_hdfs",
-      "description": "Copy tarball to HDFS support (AMBARI-12113)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "spark_16plus",
-      "description": "Spark 1.6+",
-      "min_version": "2.4.0.0"
-    },
-    {
-      "name": "spark_thriftserver",
-      "description": "Spark Thrift Server",
-      "min_version": "2.3.2.0"
-    },
-    {
-      "name": "storm_kerberos",
-      "description": "Storm Kerberos support (AMBARI-7570)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "storm_ams",
-      "description": "Storm AMS integration (AMBARI-10710)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "create_kafka_broker_id",
-      "description": "Ambari should create Kafka Broker Id (AMBARI-12678)",
-      "min_version": "2.2.0.0",
-      "max_version": "2.3.0.0"
-    },
-    {
-      "name": "kafka_listeners",
-      "description": "Kafka listeners (AMBARI-10984)",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "kafka_kerberos",
-      "description": "Kafka Kerberos support (AMBARI-10984)",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "pig_on_tez",
-      "description": "Pig on Tez support (AMBARI-7863)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "ranger_usersync_non_root",
-      "description": "Ranger Usersync as non-root user (AMBARI-10416)",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "ranger_audit_db_support",
-      "description": "Ranger Audit to DB support",
-      "min_version": "2.2.0.0",
-      "max_version": "2.5.0.0"
-    },
-    {
-      "name": "accumulo_kerberos_user_auth",
-      "description": "Accumulo Kerberos User Auth (AMBARI-10163)",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "knox_versioned_data_dir",
-      "description": "Use versioned data dir for Knox (AMBARI-13164)",
-      "min_version": "2.3.2.0"
-    },
-    {
-      "name": "knox_sso_topology",
-      "description": "Knox SSO Topology support (AMBARI-13975)",
-      "min_version": "2.3.8.0"
-    },
-    {
-      "name": "atlas_rolling_upgrade",
-      "description": "Rolling upgrade support for Atlas",
-      "min_version": "2.3.0.0"
-    },
-    {
-      "name": "oozie_admin_user",
-      "description": "Oozie install user as an Oozie admin user (AMBARI-7976)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "oozie_create_hive_tez_configs",
-      "description": "Oozie create configs for Ambari Hive and Tez deployments (AMBARI-8074)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "oozie_setup_shared_lib",
-      "description": "Oozie setup tools used to shared Oozie lib to HDFS (AMBARI-7240)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "oozie_host_kerberos",
-      "description": "Oozie in secured clusters uses _HOST in Kerberos principal (AMBARI-9775)",
-      "min_version": "2.0.0.0",
-      "max_version": "2.2.0.0"
-    },
-    {
-      "name": "hive_metastore_upgrade_schema",
-      "description": "Hive metastore upgrade schema support (AMBARI-11176)",
-      "min_version": "2.3.0.0"
-     },
-    {
-      "name": "hive_server_interactive",
-      "description": "Hive server interactive support (AMBARI-15573)",
-      "min_version": "2.5.0.0"
-     },
-    {
-      "name": "hive_webhcat_specific_configs",
-      "description": "Hive webhcat specific configurations support (AMBARI-12364)",
-      "min_version": "2.3.0.0"
-     },
-    {
-      "name": "hive_purge_table",
-      "description": "Hive purge table support (AMBARI-12260)",
-      "min_version": "2.3.0.0"
-     },
-    {
-      "name": "hive_server2_kerberized_env",
-      "description": "Hive server2 working on kerberized environment (AMBARI-13749)",
-      "min_version": "2.2.3.0",
-      "max_version": "2.2.5.0"
-     },
-    {
-      "name": "hive_env_heapsize",
-      "description": "Hive heapsize property defined in hive-env (AMBARI-12801)",
-      "min_version": "2.2.0.0"
-    },
-    {
-      "name": "ranger_kms_hsm_support",
-      "description": "Ranger KMS HSM support (AMBARI-15752)",
-      "min_version": "2.5.0.0"
-    },
-    {
-      "name": "ranger_log4j_support",
-      "description": "Ranger supporting log-4j properties (AMBARI-15681)",
-      "min_version": "2.5.0.0"
-    },
-    {
-      "name": "ranger_kerberos_support",
-      "description": "Ranger Kerberos support",
-      "min_version": "2.5.0.0"
-    },
-    {
-      "name": "ranger_usersync_password_jceks",
-      "description": "Saving Ranger Usersync credentials in jceks",
-      "min_version": "2.5.0.0"
-    }
-  ]
-}
+# executionCommand for STOP
+_ROLE_COMMAND_STOP = 'STOP'
+
+# executionCommand for a custom command (which could be STOP)
+_ROLE_COMMAND_CUSTOM = 'CUSTOM_COMMAND'
+
 
 def check_stack_feature(stack_feature, stack_version):
   """
   Given a stack_feature and a specific stack_version, it validates that the feature is supported by the stack_version.
+  IMPORTANT, notice that the mapping of feature to version comes from cluster-env if it exists there.
   :param stack_feature: Feature name to check if it is supported by the stack. For example: "rolling_upgrade"
   :param stack_version: Version of the stack
   :return: Will return True if successful, otherwise, False. 
@@ -252,25 +43,131 @@ def check_stack_feature(stack_feature, stack_version):
 
   from resource_management.libraries.functions.default import default
   from resource_management.libraries.functions.version import compare_versions
+
+  stack_name = default("/clusterLevelParams/stack_name", None)
+  if stack_name is None:
+    Logger.warning("Cannot find the stack name in the command. Stack features cannot be loaded")
+    return False
+
   stack_features_config = default("/configurations/cluster-env/stack_features", None)
-  data = _DEFAULT_STACK_FEATURES
 
   if not stack_version:
+    Logger.debug("Cannot determine if feature %s is supported since did not provide a stack version." % stack_feature)
     return False
 
   if stack_features_config:
     data = json.loads(stack_features_config)
-  
-  for feature in data["stack_features"]:
-    if feature["name"] == stack_feature:
-      if "min_version" in feature:
-        min_version = feature["min_version"]
-        if compare_versions(stack_version, min_version, format = True) < 0:
-          return False
-      if "max_version" in feature:
-        max_version = feature["max_version"]
-        if compare_versions(stack_version, max_version, format = True) >= 0:
-          return False
-      return True
+
+    if stack_name not in data:
+      Logger.warning("Cannot find stack features for the stack named {0}".format(stack_name))
+      return False
+
+    data = data[stack_name]
+
+    for feature in data["stack_features"]:
+      if feature["name"] == stack_feature:
+        if "min_version" in feature:
+          min_version = feature["min_version"]
+          if compare_versions(stack_version, min_version, format = True) < 0:
+            return False
+        if "max_version" in feature:
+          max_version = feature["max_version"]
+          if compare_versions(stack_version, max_version, format = True) >= 0:
+            return False
+        return True
+  else:
+    raise Fail("Stack features not defined by stack")
         
+  return False
+
+
+def get_stack_feature_version(config):
+  """
+  Uses the specified ConfigDictionary to determine which version to use for stack
+  feature checks.
+
+  Normally, the commandParams/version is the correct value to use as it represent the 4-digit
+  exact stack version/build being upgrade to or downgraded to. However, there are cases where the
+  commands being sent are to stop running services which are on a different stack version from the
+  version being upgraded/downgraded to. As a result, the configurations sent for these specific
+  stop commands do not match commandParams/version.
+  :param config:  a ConfigDictionary instance to extra the hostLevelParams
+                  and commandParams from.
+  :return: the version to use when checking stack features.
+  """
+  from resource_management.libraries.functions.default import default
+
+  if "clusterLevelParams" not in config or "commandParams" not in config:
+    raise Fail("Unable to determine the correct version since clusterLevelParams and commandParams were not present in the configuration dictionary")
+
+  # should always be there
+  stack_version = config['clusterLevelParams']['stack_version']
+
+  # something like 2.4.0.0-1234; represents the version for the command
+  # (or None if this is a cluster install and it hasn't been calculated yet)
+  # this is always guaranteed to be the correct version for the command, even in
+  # upgrade and downgrade scenarios
+  command_version = default("/commandParams/version", None)
+  command_stack = default("/commandParams/target_stack", None)
+
+  # UPGRADE or DOWNGRADE (or None)
+  upgrade_direction = default("/commandParams/upgrade_direction", None)
+
+  # start out with the value that's right 99% of the time
+  version_for_stack_feature_checks = command_version if command_version is not None else stack_version
+
+  # if this is not an upgrade, then we take the simple path
+  if upgrade_direction is None:
+    Logger.info(
+      "Stack Feature Version Info: Cluster Stack={0}, Command Stack={1}, Command Version={2} -> {3}".format(
+        stack_version, command_stack, command_version, version_for_stack_feature_checks))
+
+    return version_for_stack_feature_checks
+
+  # STOP commands are the trouble maker as they are intended to stop a service not on the
+  # version of the stack being upgrade/downgraded to
+  is_stop_command = _is_stop_command(config)
+  if not is_stop_command:
+    Logger.info(
+      "Stack Feature Version Info: Cluster Stack={0}, Command Stack={1}, Command Version={2}, Upgrade Direction={3} -> {4}".format(
+        stack_version, command_stack, command_version, upgrade_direction,
+        version_for_stack_feature_checks))
+
+    return version_for_stack_feature_checks
+
+  is_downgrade = upgrade_direction.lower() == Direction.DOWNGRADE.lower()
+  # guaranteed to have a STOP command now during an UPGRADE/DOWNGRADE, check direction
+  if is_downgrade:
+    from resource_management.libraries.functions import upgrade_summary
+    version_for_stack_feature_checks = upgrade_summary.get_source_version(default_version = version_for_stack_feature_checks)
+  else:
+    # UPGRADE
+      version_for_stack_feature_checks = command_version if command_version is not None else stack_version
+
+  Logger.info(
+    "Stack Feature Version Info: Cluster Stack={0}, Command Stack={1}, Command Version={2}, Upgrade Direction={3}, stop_command={4} -> {5}".format(
+      stack_version, command_stack, command_version, upgrade_direction,
+      is_stop_command, version_for_stack_feature_checks))
+
+  return version_for_stack_feature_checks
+
+
+def _is_stop_command(config):
+  """
+  Gets whether this is a STOP command
+  :param config:
+  :return:
+  """
+  from resource_management.libraries.functions.default import default
+
+  # STOP commands are the trouble maker as they are intended to stop a service not on the
+  # version of the stack being upgrade/downgraded to
+  role_command = config["roleCommand"]
+  if role_command == _ROLE_COMMAND_STOP:
+    return True
+
+  custom_command = default("/commandParams/custom_command", None)
+  if role_command == _ROLE_COMMAND_CUSTOM and custom_command == _ROLE_COMMAND_STOP:
+    return True
+
   return False

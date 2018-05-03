@@ -171,7 +171,7 @@ def copy_tarballs_to_hdfs(tarball_prefix, stack_select_component_name, component
     Logger.warning("Could not find file: %s" % str(component_tar_source_file))
     return 1
 
-  # Ubuntu returns: "stdin: is not a tty", as subprocess output.
+  # Ubuntu returns: "stdin: is not a tty", as subprocess32 output.
   tmpfile = tempfile.NamedTemporaryFile()
   out = None
   (stack_selector_name, stack_selector_path, stack_selector_package) = stack_tools.get_stack_tool(stack_tools.STACK_SELECTOR_NAME)
@@ -185,7 +185,7 @@ def copy_tarballs_to_hdfs(tarball_prefix, stack_select_component_name, component
                    (get_stack_version_cmd, str(code), str(out)))
     return 1
 
-  matches = re.findall(r"([\d\.]+\-\d+)", out)
+  matches = re.findall(r"([\d\.]+(?:-\d+)?)", out)
   stack_version = matches[0] if matches and len(matches) > 0 else None
 
   if not stack_version:

@@ -1,4 +1,4 @@
-/**
+/*
 * Licensed to the Apache Software Foundation (ASF) under one
 * or more contributor license agreements.  See the NOTICE file
 * distributed with this work for additional information
@@ -62,6 +62,14 @@ public interface Clusters {
       throws AmbariException;
 
   /**
+   * Gets the Cluster given the cluster id
+   * @param clusterId Id of the Cluster to retrieve
+   * @return  <code>Cluster</code> identified by the given id
+   */
+  Cluster getCluster(Long clusterId)
+    throws AmbariException;
+
+  /**
    * Get all clusters
    * @return <code>Map</code> of clusters with cluster name as key
    */
@@ -101,14 +109,13 @@ public interface Clusters {
   /**
    * Gets whether the specified cluster has a mapping for the specified host.
    *
-   * @param clusterName
-   *          the cluster (not {@code null}).
+   * @param clusterId the cluster ID
    * @param hostName
    *          the host (not {@code null}).
    * @return {@code true} if the host belongs to the cluster, {@code false}
    *         otherwise.
    */
-  boolean isHostMappedToCluster(String clusterName, String hostName);
+  boolean isHostMappedToCluster(long clusterId, String hostName);
 
   /**
    * Get a Host object managed by this server
@@ -149,7 +156,7 @@ public interface Clusters {
    * @param clusterName
    * @throws AmbariException
    */
-  void mapHostsToCluster(Set<String> hostnames, String clusterName)
+  void mapAndPublishHostsToCluster(Set<String> hostnames, String clusterName)
       throws AmbariException;
 
   /**
@@ -201,15 +208,6 @@ public interface Clusters {
       throws AmbariException;
 
   /**
-   * Sets the current stack version for the cluster
-   * @param clusterName The name of the cluster
-   * @param stackId The identifier for the stack
-   * @throws AmbariException
-   */
-  void setCurrentStackVersion(String clusterName, StackId stackId)
-      throws AmbariException;
-
-  /**
    * Update the host set for clusters and the host attributes associated with the hosts
    * @param hostsClusters
    * @param hostAttributes
@@ -231,7 +229,15 @@ public interface Clusters {
    * Removes a host.  Inverts {@link #addHost(String)}
    * @param hostname
    */
-  void deleteHost(String hostname)
+  void deleteHost(String hostname) throws AmbariException;
+
+  /**
+   * Publish event set of hosts were removed
+   * @param clusters
+   * @param hostNames
+   * @throws AmbariException
+   */
+  void publishHostsDeletion(Set<Cluster> clusters, Set<String> hostNames)
       throws AmbariException;
 
   /**
@@ -262,4 +268,21 @@ public interface Clusters {
    * @return the map of session attributes for the cluster; never null
    */
   Map<String, Object> getSessionAttributes(String name);
+
+  /**
+   * Returns the number of hosts that form the cluster identified by the given name.
+   * @param clusterName the name that identifies the cluster
+   * @return  number of hosts that form the cluster
+   */
+  int getClusterSize(String clusterName);
+
+  /**
+   * Invalidates the specified cluster by retrieving it from the database and
+   * refreshing all of the internal stateful collections.
+   *
+   * @param cluster
+   *          the cluster to invalidate and refresh (not {@code null}).
+   */
+  void invalidate(Cluster cluster);
+
 }

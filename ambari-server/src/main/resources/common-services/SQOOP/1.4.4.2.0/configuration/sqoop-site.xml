@@ -20,6 +20,7 @@
  */
 -->
 <configuration>
+  <!-- This property was valid in HDP 2.3 and 2.4, but removed in HDP 2.5 -->
   <property>
     <name>atlas.cluster.name</name>
     <value>{{cluster_name}}</value>
@@ -29,8 +30,20 @@
         <name>atlas.cluster.name</name>
       </property>
     </depends-on>
+    <on-ambari-upgrade add="true"/>
   </property>
   <property>
     <name>sqoop.job.data.publish.class</name>
+    <on-ambari-upgrade add="true"/>
+    <depends-on>
+      <property>
+        <type>sqoop-env</type>
+        <name>sqoop.atlas.hook</name>
+      </property>
+      <property>
+        <type>application-properties</type>
+        <name>atlas.rest.address</name>
+      </property>
+    </depends-on>
   </property>
 </configuration>

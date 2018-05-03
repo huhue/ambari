@@ -21,9 +21,82 @@ require('config');
 require('utils/configs_collection');
 require('utils/config');
 require('models/service/hdfs');
+var testHelpers = require('test/helpers');
 var setups = require('test/init_model_test');
 
-describe('App.config', function () {
+describe('App.config', function() {
+
+  describe('#getOriginalFileName', function() {
+    var tests = [
+      { input: 'someFileName.xml', output: 'someFileName.xml', m: 'do not add extra ".xml" '},
+      { input: 'someFileNamexml', output: 'someFileNamexml.xml' , m: 'add ".xml" '},
+      { input: 'alert_notification', output: 'alert_notification', m: 'do not add ".xml" to special file names' }
+    ];
+
+    tests.forEach(function(t) {
+        it(t.m, function() {
+          expect(App.config.getOriginalFileName(t.input)).to.equal(t.output);
+        });
+    });
+  });
+
+  describe('#getConfigTagFromFileName', function() {
+    var tests = [
+      { input: 'someFileName.xml', output: 'someFileName', m: 'remove ".xml"'},
+      { input: 'someFileNamexml', output: 'someFileNamexml' , m: 'leave as is'}
+    ];
+
+    tests.forEach(function(t) {
+      it(t.m, function() {
+        expect(App.config.getConfigTagFromFileName(t.input)).to.equal(t.output);
+      });
+    });
+  });
+
+  describe('#configId', function() {
+    beforeEach(function() {
+      sinon.stub(App.config, 'getConfigTagFromFileName', function (fName) {
+        return fName;
+      });
+    });
+    afterEach(function() {
+      App.config.getConfigTagFromFileName.restore();
+    });
+    it('generates config id', function() {
+      expect(App.config.configId('name', 'fName')).to.equal('name__fName');
+    });
+  });
+
+  describe('#getDefaultConfig', function() {
+    beforeEach(function () {
+      sinon.stub(App.configsCollection, 'getConfigByName', function (name, fileName) {
+        if (name === 'inCollection') {
+          return { name: name, filename: fileName, fromCollection: true };
+        }
+        return null;
+      });
+
+      sinon.stub(App.config, 'createDefaultConfig', function (name, fileName) {
+        return { name: name, filename: fileName, fromStack: false, generatedDefault: true }
+      });
+    });
+    afterEach(function () {
+      App.configsCollection.getConfigByName.restore();
+      App.config.createDefaultConfig.restore();
+    });
+
+    it('get return config from collection' , function () {
+      expect(App.config.getDefaultConfig('inCollection', 'f1')).to.eql({ name: 'inCollection', filename: 'f1', fromCollection: true })
+    });
+
+    it('get return config not from collection' , function () {
+      expect(App.config.getDefaultConfig('custom', 'f1')).to.eql({ name: 'custom', filename: 'f1', fromStack: false, generatedDefault: true })
+    });
+
+    it('get return extended with custom object' , function () {
+      expect(App.config.getDefaultConfig('inCollection', 'f1', { additionalProperty: true})).to.eql({ name: 'inCollection', filename: 'f1', fromCollection: true, additionalProperty: true })
+    });
+  });
 
   describe('#trimProperty',function() {
     var testMessage = 'displayType `{0}`, value `{1}`{3} should return `{2}`';
@@ -126,27 +199,7 @@ describe('App.config', function () {
     });
   });
 
-  describe('#preDefinedConfigFile', function() {
-    before(function() {
-      setups.setupStackVersion(this, 'BIGTOP-0.8');
-    });
-
-    it('bigtop site properties should be ok.', function() {
-      var bigtopSiteProperties = App.config.preDefinedConfigFile('BIGTOP', 'site_properties');
-      expect(bigtopSiteProperties).to.be.ok;
-    });
-
-    it('a non-existing file should not be ok.', function () {
-      var notExistingSiteProperty = App.config.preDefinedConfigFile('notExisting');
-      expect(notExistingSiteProperty).to.not.be.ok;
-    });
-
-    after(function() {
-      setups.restoreStackVersion(this);
-    });
-  });
-
-  describe('#preDefinedSiteProperties-bigtop', function () {
+  describe.skip('#preDefinedSiteProperties-bigtop', function () {
     before(function() {
       setups.setupStackVersion(this, 'BIGTOP-0.8');
     });
@@ -231,7 +284,7 @@ describe('App.config', function () {
       expect(Em.keys(miscCategory.get('configTypes'))).to.eql(['cluster-env', 'hadoop-env', 'oozie-env']);
     });
   });
-  
+
   describe('#isManagedMySQLForHiveAllowed', function () {
 
     var cases = [
@@ -256,6 +309,61 @@ describe('App.config', function () {
       });
     });
 
+  });
+
+  describe('#preDefinedSiteProperties', function () {
+    var allPreDefinedSiteProperties = [
+      { name: 'p1', serviceName: 's1' },
+      { name: 'p1', serviceName: 's2' },
+      { name: 'p1', serviceName: 'MISC' }
+    ];
+    beforeEach(function () {
+      sinon.stub(App.config, 'get', function (param) {
+        if (param === 'allPreDefinedSiteProperties') {
+          return allPreDefinedSiteProperties;
+        }
+        return Em.get(App.config, param);
+      });
+      sinon.stub(App.StackService, 'find').returns([{serviceName: 's1'}]);
+    });
+    afterEach(function () {
+      App.config.get.restore();
+      App.StackService.find.restore();
+    });
+
+    it('returns map with secure configs', function () {
+      expect(App.config.get('preDefinedSiteProperties')).to.eql([
+        { name: 'p1', serviceName: 's1' },
+        { name: 'p1', serviceName: 'MISC' }
+      ]);
+    })
+  });
+
+  describe('#preDefinedSitePropertiesMap', function () {
+    beforeEach(function () {
+      sinon.stub(App.config, 'get', function (param) {
+        if (param === 'preDefinedSiteProperties') {
+          return [
+            {name: 'sc1', filename: 'fn1', otherProperties: true},
+            {name: 'sc2', filename: 'fn2', otherProperties: true}
+          ];
+        }
+        return Em.get(App.config, param);
+      });
+      sinon.stub(App.config, 'configId', function (name, filename) {
+        return name+filename;
+      });
+    });
+    afterEach(function () {
+      App.config.get.restore();
+      App.config.configId.restore();
+    });
+    it('returns map with secure configs', function () {
+      expect(App.config.get('preDefinedSitePropertiesMap')).to.eql({
+        'sc1fn1': {name: 'sc1', filename: 'fn1', otherProperties: true},
+        'sc2fn2': {name: 'sc2', filename: 'fn2', otherProperties: true}
+      });
+    });
   });
 
   describe('#shouldSupportFinal', function () {
@@ -376,6 +484,136 @@ describe('App.config', function () {
       });
     });
 
+  });
+
+  describe('#getConfigTypesInfoFromService', function () {
+    it('get service config types info', function () {
+      var input = Em.Object.create({
+        configTypes: {
+          't1': {
+            'supports': {
+              'final': 'true'
+            }
+          },
+          't2': {
+            'supports': {
+              'adding_forbidden': 'true'
+            }
+          }
+        }
+      });
+      var configTypesInfo = {
+        items: ['t1', 't2'],
+        supportsFinal: ['t1'],
+        supportsAddingForbidden: ['t2']
+      };
+      expect(App.config.getConfigTypesInfoFromService(input)).to.eql(configTypesInfo);
+    });
+  });
+
+  describe('#addYarnCapacityScheduler', function () {
+    var input, res, configs, csConfig;
+    res = {
+      'value': 'n1=v1\nn2=v2\n',
+      'serviceName': 'YARN',
+      'savedValue': 'n1=sv1\nn2=sv2\n',
+      'recommendedValue': 'n1=rv1\nn2=rv2\n',
+      'isFinal': true,
+      'savedIsFinal': true,
+      'recommendedIsFinal': true,
+      'category': 'CapacityScheduler',
+      'displayName': 'Capacity Scheduler',
+      'description': 'Capacity Scheduler properties',
+      'displayType': 'capacityScheduler'
+    };
+    beforeEach(function () {
+      sinon.stub(App.config, 'getPropertiesFromTheme').returns([]);
+      input = [
+        Em.Object.create({
+          name: 'n1',
+          value: 'v1',
+          savedValue: 'sv1',
+          recommendedValue: 'rv1',
+          isFinal: true,
+          savedIsFinal: true,
+          recommendedIsFinal: true,
+          filename: 'capacity-scheduler.xml'
+        }),
+        Em.Object.create({
+          name: 'n2',
+          value: 'v2',
+          savedValue: 'sv2',
+          recommendedValue: 'rv2',
+          filename: 'capacity-scheduler.xml'
+        }),
+        Em.Object.create({
+          name: 'n3',
+          value: 'v3',
+          savedValue: 'sv3',
+          recommendedValue: 'sv2',
+          filename: 'not-capacity-scheduler.xml'
+        })
+      ];
+
+      configs = App.config.addYarnCapacityScheduler(input);
+      csConfig = configs.findProperty('category', 'CapacityScheduler');
+    });
+    afterEach(function () {
+      App.config.getPropertiesFromTheme.restore();
+    });
+
+    describe('check result config', function () {
+      Object.keys(res).forEach(function (k) {
+        it(k, function () {
+          expect(csConfig.get(k)).to.eql(res[k]);
+        });
+      });
+    });
+  });
+
+  describe('#textareaIntoFileConfigs', function () {
+    var res, cs;
+    beforeEach(function () {
+      res = [
+        Em.Object.create({
+          name: 'n1',
+          value: 'v1',
+          savedValue: 'v1',
+          serviceName: 'YARN',
+          filename: 'capacity-scheduler.xml',
+          isFinal: true,
+          group: null
+        }),
+        Em.Object.create({
+          name: 'n2',
+          value: 'v2',
+          savedValue: 'v2',
+          serviceName: 'YARN',
+          filename: 'capacity-scheduler.xml',
+          isFinal: true,
+          group: null
+        })
+      ];
+
+      cs = Em.Object.create({
+        'value': 'n1=v1\nn2=v2',
+        'serviceName': 'YARN',
+        'savedValue': 'n1=sv1\nn2=sv2',
+        'recommendedValue': 'n1=rv1\nn2=rv2',
+        'isFinal': true,
+        'savedIsFinal': true,
+        'recommendedIsFinal': true,
+        'name': 'capacity-scheduler',
+        'category': 'CapacityScheduler',
+        'displayName': 'Capacity Scheduler',
+        'description': 'Capacity Scheduler properties',
+        'displayType': 'capacityScheduler'
+      });
+    });
+
+    it('generate capacity scheduler', function () {
+      expect(App.config.textareaIntoFileConfigs([cs], 'capacity-scheduler.xml')).to.eql(res);
+    });
   });
 
   describe('#removeRangerConfigs', function () {
@@ -512,6 +750,80 @@ describe('App.config', function () {
       });
 
     });
+
+    describe('overrides with empty string values', function () {
+
+      beforeEach(function () {
+        configProperty.set('overrides', [
+          {
+            savedValue: null,
+            savedIsFinal: true
+          },
+          {
+            savedValue: '',
+            savedIsFinal: false
+          },
+          {
+            savedValue: '1',
+            savedIsFinal: false
+          }
+        ]);
+        App.config.createOverride(configProperty, null, group);
+      });
+
+      it('values', function () {
+        expect(configProperty.get('overrideValues')).to.eql(['', '1']);
+      });
+
+      it('isFinal', function () {
+        expect(configProperty.get('overrideIsFinalValues')).to.eql([false, false]);
+      });
+
+    });
+  });
+
+  describe('#createCustomGroupConfig', function() {
+    var override, configGroup, result;
+    beforeEach(function () {
+      sinon.stub(App.config, 'createDefaultConfig', function (name, filename) {
+        return { propertyName: name, filename: filename };
+      });
+      configGroup = Em.Object.create({ name: 'cfgGroup1'});
+      override = {
+        propertyName: 'p1',
+        filename: 'f1'
+      };
+      result = App.config.createCustomGroupConfig(override, configGroup);
+    });
+    afterEach(function () {
+      App.config.createDefaultConfig.restore();
+    });
+    describe('createsCustomOverride', function () {
+      var expected = {
+        propertyName: 'p1',
+        filename: 'f1',
+        isOriginalSCP: false,
+        overrides: null,
+        parentSCP: null
+      };
+      Object.keys(expected).forEach(function (k) {
+        it(k, function () {
+          expect(result.get(k)).to.be.eql(expected[k]);
+        });
+      });
+      it('config group is valid', function () {
+        expect(result.get('group')).to.be.eql(configGroup);
+      });
+    });
+
+    it('updates configGroup properties', function () {
+      expect(configGroup.get('properties').findProperty('propertyName', 'p1')).to.eql(result);
+    });
+
+    it('throws error when input is not objects', function () {
+      expect(App.config.createCustomGroupConfig.bind(App.config)).to.throw(App.ObjectTypeError);
+      expect(App.config.createCustomGroupConfig.bind(App.config, {}, {})).to.throw(App.EmberObjectTypeError);
+    });
   });
 
   describe('#getIsSecure', function() {
@@ -549,7 +861,7 @@ describe('App.config', function () {
     });
   });
 
-  describe('#formatValue', function() {
+  describe('#formatPropertyValue', function() {
     it('formatValue for componentHosts', function () {
       var serviceConfigProperty = Em.Object.create({'displayType': 'componentHosts', value: "['h1','h2']"});
       expect(App.config.formatPropertyValue(serviceConfigProperty)).to.eql(['h1','h2']);
@@ -638,10 +950,10 @@ describe('App.config', function () {
         m: 'use value from first object, check empty string'
       }
     ].forEach(function (t) {
-        it(t.m, function () {
-          expect(App.config.getPropertyIfExists(t.propertyName, t.defaultValue, t.firstObject, t.secondObject)).to.equal(t.res);
-        })
-      });
+      it(t.m, function () {
+        expect(App.config.getPropertyIfExists(t.propertyName, t.defaultValue, t.firstObject, t.secondObject)).to.equal(t.res);
+      })
+    });
   });
 
   describe('#createDefaultConfig', function() {
@@ -708,7 +1020,9 @@ describe('App.config', function () {
       dependentConfigPattern: null,
       options: null,
       radioName: null,
-      widgetType: null
+      widgetType: null,
+      errorMessage: '',
+      warnMessage: ''
     };
     it('create default config object', function () {
       expect(App.config.createDefaultConfig('pName', 'pFileName', true)).to.eql(res);
@@ -727,7 +1041,7 @@ describe('App.config', function () {
     });
   });
 
-  describe('#mergeStackConfigsWithUI', function() {
+  describe('#mergeStaticProperties', function() {
     beforeEach(function() {
       sinon.stub(App.config, 'getPropertyIfExists', function(key, value) {return 'res_' + value});
     });
@@ -776,6 +1090,7 @@ describe('App.config', function () {
           'hadoop.registry.zk.quorum': 'host1,host2'
         },
         propertyName: 'hadoop.registry.zk.quorum',
+        propertyType: 'yarn-site',
         hostsList: 'host1',
         e: 'host1'
       },
@@ -784,6 +1099,7 @@ describe('App.config', function () {
           'hadoop.registry.zk.quorum': 'host1:10,host2:10'
         },
         propertyName: 'hadoop.registry.zk.quorum',
+        propertyType: 'yarn-site',
         hostsList: 'host2:10,host1:10',
         e: 'host1:10,host2:10'
       },
@@ -792,6 +1108,7 @@ describe('App.config', function () {
           'hadoop.registry.zk.quorum': 'host1:10,host2:10,host3:10'
         },
         propertyName: 'hadoop.registry.zk.quorum',
+        propertyType: 'yarn-site',
         hostsList: 'host2:10,host1:10',
         e: 'host2:10,host1:10'
       },
@@ -800,6 +1117,7 @@ describe('App.config', function () {
           'hadoop.registry.zk.quorum': 'host1:10,host2:10,host3:10'
         },
         propertyName: 'hadoop.registry.zk.quorum',
+        propertyType: 'yarn-site',
         hostsList: 'host2:10,host1:10,host3:10,host4:11',
         e: 'host2:10,host1:10,host3:10,host4:11'
       },
@@ -808,58 +1126,159 @@ describe('App.config', function () {
           'hive.zookeeper.quorum': 'host1'
         },
         propertyName: 'some.new.property',
+        propertyType: 'hive-site',
         hostsList: 'host2,host1:10',
         e: 'host2,host1:10'
+      },
+      {
+        siteConfigs: {
+          'some.new.property': '[\'host1\',\'host2\']'
+        },
+        propertyName: 'some.new.property',
+        propertyType: 'property-type',
+        hostsList: '[\'host1\',\'host2\']',
+        isArray: true,
+        e: '[\'host1\',\'host2\']',
+        message: 'array-formatted property value with no changes'
+      },
+      {
+        siteConfigs: {
+          'some.new.property': '[\'host2\',\'host1\']'
+        },
+        propertyName: 'some.new.property',
+        propertyType: 'property-type',
+        hostsList: '[\'host1\',\'host2\']',
+        isArray: true,
+        e: '[\'host2\',\'host1\']',
+        message: 'array-formatted property value with different hosts order'
+      },
+      {
+        siteConfigs: {
+          'some.new.property': '[\'host1\',\'host2\']'
+        },
+        propertyName: 'some.new.property',
+        propertyType: 'property-type',
+        hostsList: '[\'host3\',\'host4\']',
+        isArray: true,
+        e: '[\'host3\',\'host4\']',
+        message: 'array-formatted property value with changes'
+      },
+      {
+        siteConfigs: {
+          'templeton.hive.properties': 'hive.metastore.local=false,hive.metastore.uris=thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true'
+        },
+        propertyName: 'templeton.hive.properties',
+        propertyType: 'webhcat-site',
+        hostsList: 'hive.metastore.local=false,hive.metastore.uris=thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        e: 'hive.metastore.local=false,hive.metastore.uris=thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        message: 'templeton.hive.properties, no changes'
+      },
+      {
+        siteConfigs: {
+          'templeton.hive.properties': 'hive.metastore.local=false,hive.metastore.uris=thrift://host2:9083\\,thrift://host1:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true'
+        },
+        propertyName: 'templeton.hive.properties',
+        propertyType: 'webhcat-site',
+        hostsList: 'hive.metastore.local=false,hive.metastore.uris=thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        e: 'hive.metastore.local=false,hive.metastore.uris=thrift://host2:9083\\,thrift://host1:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        message: 'templeton.hive.properties, different hosts order'
+      },
+      {
+        siteConfigs: {
+          'templeton.hive.properties': 'hive.metastore.local=false,hive.metastore.uris=thrift://host1:9082\\,thrift://host2:9082,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true'
+        },
+        propertyName: 'templeton.hive.properties',
+        propertyType: 'webhcat-site',
+        hostsList: 'hive.metastore.local=false,hive.metastore.uris=thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        e: 'hive.metastore.local=false,hive.metastore.uris=thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        message: 'templeton.hive.properties, different ports'
+      },
+      {
+        siteConfigs: {
+          'templeton.hive.properties': 'hive.metastore.local=false,hive.metastore.uris=thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true'
+        },
+        propertyName: 'templeton.hive.properties',
+        propertyType: 'webhcat-site',
+        hostsList: 'hive.metastore.local=false,hive.metastore.uris=thrift://host3:9083\\,thrift://host4:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        e: 'hive.metastore.local=false,hive.metastore.uris=thrift://host3:9083\\,thrift://host4:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        message: 'templeton.hive.properties, different hosts'
+      },
+      {
+        siteConfigs: {
+          'templeton.hive.properties': 'hive.metastore.local=false'
+        },
+        propertyName: 'templeton.hive.properties',
+        propertyType: 'hive-site',
+        hostsList: 'hive.metastore.local=true',
+        e: 'hive.metastore.local=true',
+        message: 'custom templeton.hive.properties'
       }
     ];
+
     tests.forEach(function(test) {
-      it('ZK located on {0}, current prop value is "{1}" "{2}" value should be "{3}"'.format(test.hostsList, ''+test.siteConfigs[test.propertyName], test.propertyName, test.e), function() {
-        var result = App.config.updateHostsListValue(test.siteConfigs, test.propertyName, test.hostsList);
-        expect(result).to.be.eql(test.e);
-        expect(test.siteConfigs[test.propertyName]).to.be.eql(test.e);
+      var message = test.message
+        || 'ZK located on {0}, current prop value is "{1}" "{2}" value should be "{3}"'
+          .format(test.hostsList, ''+test.siteConfigs[test.propertyName], test.propertyName, test.e);
+
+      describe(message, function () {
+        var result;
+
+        beforeEach(function () {
+          result = App.config.updateHostsListValue(test.siteConfigs, test.propertyType, test.propertyName, test.hostsList, test.isArray);
+        });
+
+        it('returned value', function() {
+          expect(result).to.be.eql(test.e);
+        });
+
+        it('value in configs object', function() {
+          expect(test.siteConfigs[test.propertyName]).to.be.eql(test.e);
+        });
       });
     });
   });
 
-  describe('#createHostNameProperty', function() {
-    it('create host property', function() {
+  describe('#createHostNameProperty', function () {
+    it('create host property', function () {
       expect(App.config.createHostNameProperty('service1', 'component1', ['host1'], Em.Object.create({
         isMultipleAllowed: false,
         displayName: 'display name'
       }))).to.eql({
-          "name": 'component1_host',
-          "displayName": 'display name host',
-          "value": ['host1'],
-          "recommendedValue": ['host1'],
-          "description": "The host that has been assigned to run display name",
-          "displayType": "componentHost",
-          "isOverridable": false,
-          "isRequiredByAgent": false,
-          "serviceName": 'service1',
-          "filename": "service1-site.xml",
-          "category": 'component1',
-          "index": 0
-        })
+            "id": 'component1_host__service1-site',
+            "name": 'component1_host',
+            "displayName": 'display name host',
+            "value": ['host1'],
+            "recommendedValue": ['host1'],
+            "description": "The host that has been assigned to run display name",
+            "displayType": "componentHost",
+            "isOverridable": false,
+            "isRequiredByAgent": false,
+            "serviceName": 'service1',
+            "filename": "service1-site.xml",
+            "category": 'component1',
+            "index": 0
+          })
     });
 
-    it('create hosts property', function() {
+    it('create hosts property', function () {
       expect(App.config.createHostNameProperty('service1', 'component1', ['host1'], Em.Object.create({
         isMultipleAllowed: true,
         displayName: 'display name'
       }))).to.eql({
-          "name": 'component1_hosts',
-          "displayName": 'display name host',
-          "value": ['host1'],
-          "recommendedValue": ['host1'],
-          "description": "The hosts that has been assigned to run display name",
-          "displayType": "componentHosts",
-          "isOverridable": false,
-          "isRequiredByAgent": false,
-          "serviceName": 'service1',
-          "filename": "service1-site.xml",
-          "category": 'component1',
-          "index": 0
-        })
+            "id": 'component1_hosts__service1-site',
+            "name": 'component1_hosts',
+            "displayName": 'display name host',
+            "value": ['host1'],
+            "recommendedValue": ['host1'],
+            "description": "The hosts that has been assigned to run display name",
+            "displayType": "componentHosts",
+            "isOverridable": false,
+            "isRequiredByAgent": false,
+            "serviceName": 'service1',
+            "filename": "service1-site.xml",
+            "category": 'component1',
+            "index": 0
+          })
     });
   });
 
@@ -915,4 +1334,370 @@ describe('App.config', function () {
     });
 
   });
+
+  describe('#parseDescriptor', function() {
+    var input = {
+      KerberosDescriptor: {
+        kerberos_descriptor: {
+          services: [
+            {
+              serviceName: 'serviceName',
+              components: [
+                { componentName: 'componentName2' },
+                { componentName: 'componentName2' }
+              ]
+            }
+          ]
+        }
+      }
+    };
+
+
+    beforeEach(function() {
+      sinon.stub(App.config, 'parseIdentities');
+      App.config.parseDescriptor(input);
+    });
+
+    afterEach(function() {
+      App.config.parseIdentities.restore();
+    });
+
+    it('`parseIdentities` called 3 times', function () {
+      expect(App.config.parseIdentities.calledThrice).to.be.true;
+    });
+
+    it('1st call', function () {
+      expect(App.config.parseIdentities.calledWith({
+        "serviceName": "serviceName",
+        "components": [{"componentName": "componentName2"}, {"componentName": "componentName2"}]
+      }, {})).to.be.true;
+    });
+
+    it('2nd call', function () {
+      expect(App.config.parseIdentities.calledWith({ componentName: 'componentName2' })).to.be.true;
+    });
+
+    it('3rd call', function () {
+      expect(App.config.parseIdentities.calledWith({ componentName: 'componentName2' })).to.be.true;
+    });
+  });
+
+  describe('#parseIdentities', function() {
+    var testObject = {
+      identities: [
+        {
+          name: "/spnego"
+        },
+        {
+          principal: {
+            configuration: "hbase-env/hbase_principal_name",
+            type: "user",
+            local_username: "${hbase-env/hbase_user}",
+            value: "${hbase-env/hbase_user}${principal_suffix}@${realm}"
+          },
+          name: "hbase",
+          keytab: {
+            owner: {
+              access: "r",
+              name: "${hbase-env/hbase_user}"
+            },
+            file: "${keytab_dir}/hbase.headless.keytab",
+            configuration: "hbase-env/hbase_user_keytab",
+            group: {
+              access: "r",
+              name: "${cluster-env/user_group}"
+            }
+          }
+        },
+        {
+          name: "/smokeuser"
+        }
+      ]
+    };
+    var result = {
+      "hbase_principal_name__hbase-env": true,
+      "hbase_user_keytab__hbase-env": true
+    };
+
+    it('generates map with identities', function() {
+      expect(App.config.parseIdentities(testObject, {})).to.eql(result);
+    });
+  });
+
+  describe('#kerberosIdentitiesDescription', function () {
+    it('update empty description', function() {
+      expect(App.config.kerberosIdentitiesDescription()).to.eql(Em.I18n.t('services.service.config.secure.additionalDescription'));
+    });
+
+    it('update description for identities (without dot)', function() {
+      expect(App.config.kerberosIdentitiesDescription('some text')).to.eql('some text. '
+        + Em.I18n.t('services.service.config.secure.additionalDescription'));
+    });
+
+    it('update description for identities (with dot)', function() {
+      expect(App.config.kerberosIdentitiesDescription('some text.')).to.eql('some text. '
+        + Em.I18n.t('services.service.config.secure.additionalDescription'));
+    });
+
+    it('update description for identities (with dot and spaces at the end)', function() {
+      expect(App.config.kerberosIdentitiesDescription('some text. ')).to.eql('some text. '
+        + Em.I18n.t('services.service.config.secure.additionalDescription'));
+    });
+  });
+
+  describe('#getTempletonHiveHosts', function () {
+    var testCases = [
+      {
+        value: 'hive.metastore.local=false,hive.metastore.uris=thrift://host0:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        result: ['thrift://host0:9083'],
+        message: 'one host'
+      },
+      {
+        value: 'hive.metastore.local=false,hive.metastore.uris=thrift://host0:9083\\,thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        result: ['thrift://host0:9083', 'thrift://host1:9083', 'thrift://host2:9083'],
+        message: 'several hosts'
+      },
+      {
+        value: 'thrift://host0:9083\\,thrift://host1:9083\\,thrift://host2:9083,hive.metastore.sasl.enabled=false,hive.metastore.execute.setugi=true',
+        result: ['thrift://host0:9083', 'thrift://host1:9083', 'thrift://host2:9083'],
+        message: 'no leading text'
+      },
+      {
+        value: 'hive.metastore.local=false,hive.metastore.uris=thrift://host0:9083\\,thrift://host1:9083\\,thrift://host2:9083',
+        result: ['thrift://host0:9083', 'thrift://host1:9083', 'thrift://host2:9083'],
+        message: 'no trailing text'
+      },
+      {
+        value: 'hive.metastore.local=false',
+        result: [],
+        message: 'no hosts list'
+      }
+    ];
+
+    testCases.forEach(function (test) {
+      it(test.message, function () {
+        expect(App.config.getTempletonHiveHosts(test.value)).to.eql(test.result);
+      });
+    });
+  });
+
+  describe('#isDirHeterogeneous', function () {
+    it ('retruns true for dfs.datanode.data.dir', function () {
+      expect(App.config.isDirHeterogeneous('dfs.datanode.data.dir')).to.be.true;
+    });
+    it ('retruns false not for dfs.datanode.data.dir', function () {
+      expect(App.config.isDirHeterogeneous('any')).to.be.false;
+    });
+  });
+
+  describe('#formatValue', function () {
+    it('parses float', function () {
+      expect(App.config.formatValue('0.400')).to.equal('0.4');
+    });
+    it('not parses float', function () {
+      expect(App.config.formatValue('0.40x')).to.equal('0.40x');
+    });
+  });
+
+  describe('#getStepConfigForProperty', function () {
+    var input = [Em.Object.create({ configTypes: ['f1'] }), Em.Object.create({ configTypes: ['f2'] })];
+    var output = input[0];
+    it('returns stepConfig for fileName', function () {
+      expect(App.config.getStepConfigForProperty(input, 'f1')).to.eql(output);
+    });
+  });
+
+  describe('#sortConfigs', function () {
+    var input = [{name: 'a', 'index': 2}, {name: 'b', 'index': 2}, {name: 'd', 'index': 1}];
+    var output = [{name: 'd', 'index': 1}, {name: 'a', 'index': 2}, {name: 'b', 'index': 2}];
+    it ('sort configs by index and name', function () {
+      expect(App.config.sortConfigs(input)).to.eql(output);
+    });
+  });
+
+  describe('#getViewClass', function () {});
+  describe('#getErrorValidator', function () {});
+  describe('#getWarningValidator', function () {});
+
+  describe('#createServiceConfig', function () {
+    var predefined = Em.Object.create({
+      serviceName: 'serviceName1',
+      displayName: 'displayName1',
+      configCategories: [{name: 'configCategories1'}]
+    });
+
+    var configs = [Em.Object.create({name: 'c1'})];
+    var configGroups = [Em.Object.create({name: 'cat1'})];
+
+    beforeEach(function () {
+      sinon.stub(App.config, 'get', function (param) {
+        if (param === 'preDefinedServiceConfigs') {
+          return [predefined];
+        }
+        return Em.get(App.config, param);
+      });
+    });
+
+    afterEach(function () {
+      App.config.get.restore();
+    });
+
+    describe('create service config object based on input', function () {
+      var res = {
+        serviceName: 'serviceName1',
+        displayName: 'displayName1',
+        configs: configs,
+        configGroups: configGroups,
+        initConfigsLength: 1,
+        dependentServiceNames: []
+      };
+      Object.keys(res).forEach(function (k) {
+        it(k, function () {
+          expect(App.config.createServiceConfig('serviceName1', configGroups, configs, 1).get(k)).to.eql(res[k]);
+        });
+      });
+      it('configCategories', function () {
+        expect(App.config.createServiceConfig('serviceName1', configGroups, configs, 1).get('configCategories').mapProperty('name')).to.eql(['configCategories1']);
+      });
+    });
+
+    describe('create default service config object', function () {
+      var res = {
+        serviceName: 'serviceName1',
+        displayName: 'displayName1',
+        configGroups: [],
+        initConfigsLength: 0,
+        dependentServiceNames: []
+      };
+      Object.keys(res).forEach(function (k) {
+        it(k, function() {
+          expect(App.config.createServiceConfig('serviceName1').get(k)).to.eql(res[k]);
+        });
+      });
+      it('configCategories', function () {
+        expect(App.config.createServiceConfig('serviceName1', configGroups, configs, 1).get('configCategories').mapProperty('name')).to.eql(['configCategories1']);
+      });
+    });
+  });
+
+  describe('#loadConfigsByTags', function () {
+    it("App.ajax.send should be called", function() {
+      App.config.loadConfigsByTags([
+        { siteName: 't1', tagName: 'tag1' },
+        { siteName: 't2', tagName: 'tag2' }
+      ]);
+      var args = testHelpers.findAjaxRequest('name', 'config.on_site');
+      expect(args[0]).exists;
+      expect(args[0].sender).to.be.eql(App.config);
+      expect(args[0].data).to.be.eql({
+        params : '(type=t1&tag=tag1)|(type=t2&tag=tag2)'
+      });
+    });
+  });
+
+  describe('#loadClusterConfigsFromStack', function () {
+    it("App.ajax.send should be called", function() {
+      App.config.loadClusterConfigsFromStack();
+      var args = testHelpers.findAjaxRequest('name', 'configs.stack_configs.load.cluster_configs');
+      expect(args[0]).exists;
+      expect(args[0].sender).to.be.eql(App.config);
+      expect(args[0].data).to.be.eql({
+        stackVersionUrl: App.get('stackVersionURL')
+      });
+    });
+  });
+
+  describe('#loadConfigsFromStack', function () {
+    it("App.ajax.send should be called with services", function() {
+      App.config.loadConfigsFromStack(['s1']);
+      var args = testHelpers.findAjaxRequest('name', 'configs.stack_configs.load.services');
+      expect(args[0]).exists;
+      expect(args[0].sender).to.be.eql(App.config);
+      expect(args[0].data).to.be.eql({
+        stackVersionUrl: App.get('stackVersionURL'),
+        serviceList: 's1'
+      });
+    });
+
+    it("App.ajax.send should be called all services", function() {
+      App.config.loadConfigsFromStack();
+      var args = testHelpers.findAjaxRequest('name', 'configs.stack_configs.load.all');
+      expect(args[0]).exists;
+      expect(args[0].sender).to.be.eql(App.config);
+      expect(args[0].data).to.be.eql({
+        stackVersionUrl: App.get('stackVersionURL'),
+        serviceList: ''
+      });
+    });
+  });
+
+  describe('#saveConfigsToModel', function () {
+    beforeEach(function () {
+      sinon.stub(App.stackConfigPropertiesMapper, 'map');
+    });
+    afterEach(function () {
+      App.stackConfigPropertiesMapper.map.restore();
+    });
+    it('runs mapper', function () {
+      App.config.saveConfigsToModel({configs: 'configs'});
+      expect(App.stackConfigPropertiesMapper.map.calledWith({configs: 'configs'})).to.be.true;
+    });
+  });
+
+  describe('#findConfigProperty', function () {
+    var stepConfigs = [
+      Em.Object.create({
+        configs: [
+          { name: 'p1', filename: 'f1'},
+          { name: 'p2', filename: 'f2'}
+        ]
+      }),
+      Em.Object.create({
+        configs: [
+          { name: 'p3', filename: 'f3'}
+        ]
+      })
+    ];
+
+    it('find property', function () {
+      expect(App.config.findConfigProperty(stepConfigs, 'p1', 'f1')).to.eql({ name: 'p1', filename: 'f1'});
+    });
+
+    it('do nothing because of whong params', function () {
+      expect(App.config.findConfigProperty(stepConfigs)).to.be.false;
+    });
+  });
+
+  describe('#getPropertiesFromTheme', function () {
+    beforeEach(function () {
+      sinon.stub(App.Tab , 'find').returns([
+        Em.Object.create({
+          serviceName: 'sName',
+          isAdvanced: true,
+          sections: [Em.Object.create({
+            subSections: [
+              Em.Object.create({ configProperties: [{name: 'p1'}] })
+            ]
+          })]
+        }),
+        Em.Object.create({
+          serviceName: 'sName',
+          isAdvanced: false,
+          sections: [Em.Object.create({
+            subSections: [
+              Em.Object.create({ configProperties: [{name: 'p2'}] }),
+              Em.Object.create({ configProperties: [{name: 'p3'}] })
+            ]
+          })]
+        })
+      ])
+    });
+
+    afterEach(function () {
+      App.Tab.find.restore();
+    });
+    it('gets theme properties', function () {
+      expect(App.config.getPropertiesFromTheme('sName')).to.eql([{name: 'p2'}, {name: 'p3'}])
+    })
+  })
 });

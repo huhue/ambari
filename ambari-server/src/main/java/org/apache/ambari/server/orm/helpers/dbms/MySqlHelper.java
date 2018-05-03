@@ -18,7 +18,12 @@
 
 package org.apache.ambari.server.orm.helpers.dbms;
 
+import java.io.IOException;
+import java.io.Writer;
+import java.util.List;
+
 import org.apache.ambari.server.orm.DBAccessor;
+import org.eclipse.persistence.exceptions.ValidationException;
 import org.eclipse.persistence.platform.database.DatabasePlatform;
 
 public class MySqlHelper extends GenericDbmsHelper {
@@ -75,4 +80,45 @@ public class MySqlHelper extends GenericDbmsHelper {
                                     .append("AND constraints.TABLE_NAME = \"").append(tableName).append("\"");
     return statement.toString();
   }
+
+  @Override
+  public Writer writeCreateTableStatement(Writer writer, String tableName,
+                                          List<DBAccessor.DBColumnInfo> columns,
+                                          List<String> primaryKeyColumns) {
+    Writer defaultWriter = super.writeCreateTableStatement(writer, tableName, columns, primaryKeyColumns);
+    try {
+      defaultWriter.write(" ENGINE=INNODB");
+    } catch (IOException e) {
+      throw ValidationException.fileError(e);
+    }
+    return defaultWriter;
+  }
+
+  /**
+   {@inheritDoc}
+   */
+  @Override
+  public String getCopyColumnToAnotherTableStatement(String sourceTable, String sourceColumnName,
+         String sourceIDColumnName, String targetTable, String targetColumnName, String targetIDColumnName) {
+
+    return String.format("UPDATE %1$s AS a INNER JOIN %2$s AS b ON a.%5$s = b.%6$s SET a.%3$s = b.%4$s",
+      targetTable, sourceTable, targetColumnName, sourceColumnName, targetIDColumnName, sourceIDColumnName);
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public String getCopyColumnToAnotherTableStatement(String sourceTable, String sourceColumnName,
+                                                     String sourceIDColumnName1, String sourceIDColumnName2,
+                                                     String sourceIDColumnName3,
+                                                     String targetTable, String targetColumnName,
+                                                     String targetIDColumnName1, String targetIDColumnName2,
+                                                     String targetIDColumnName3,
+                                                     String sourceConditionFieldName, String condition) {
+    return String.format("UPDATE %1$s AS a INNER JOIN %2$s AS b ON a.%5$s = b.%8$s AND a.%6$s = b.%9$s AND a.%7$s = b.%10$s AND b.%11$s = '%12$s' SET a.%3$s = b.%4$s",
+        targetTable, sourceTable, targetColumnName, sourceColumnName, targetIDColumnName1, targetIDColumnName2, targetIDColumnName3,
+        sourceIDColumnName1, sourceIDColumnName2, sourceIDColumnName3, sourceConditionFieldName, condition);
+  }
+
 }

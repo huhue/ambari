@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -68,6 +68,8 @@ public class HostRoleCommand {
   private String commandDetail;
   private String customCommandName;
   private ExecutionCommandWrapper executionCommandWrapper;
+  private boolean isBackgroundCommand = false;
+  private String opsDisplayName;
 
   @Inject
   private ExecutionCommandDAO executionCommandDAO;
@@ -168,17 +170,19 @@ public class HostRoleCommand {
     errorLog = hostRoleCommandEntity.getErrorLog();
     structuredOut = hostRoleCommandEntity.getStructuredOut() != null ? new String(hostRoleCommandEntity.getStructuredOut()) : "";
     exitCode = hostRoleCommandEntity.getExitcode();
-    startTime = hostRoleCommandEntity.getStartTime();
-    originalStartTime = hostRoleCommandEntity.getOriginalStartTime();
+    startTime = hostRoleCommandEntity.getStartTime() != null ? hostRoleCommandEntity.getStartTime() : -1L;
+    originalStartTime = hostRoleCommandEntity.getOriginalStartTime() != null ? hostRoleCommandEntity.getOriginalStartTime() : -1L;
     endTime = hostRoleCommandEntity.getEndTime() != null ? hostRoleCommandEntity.getEndTime() : -1L;
-    lastAttemptTime = hostRoleCommandEntity.getLastAttemptTime();
+    lastAttemptTime = hostRoleCommandEntity.getLastAttemptTime() != null ? hostRoleCommandEntity.getLastAttemptTime() : -1L;
     attemptCount = hostRoleCommandEntity.getAttemptCount();
     retryAllowed = hostRoleCommandEntity.isRetryAllowed();
     autoSkipFailure = hostRoleCommandEntity.isFailureAutoSkipped();
     roleCommand = hostRoleCommandEntity.getRoleCommand();
     event = new ServiceComponentHostEventWrapper(hostRoleCommandEntity.getEvent());
     commandDetail = hostRoleCommandEntity.getCommandDetail();
+    opsDisplayName = hostRoleCommandEntity.getOpsDisplayName();
     customCommandName = hostRoleCommandEntity.getCustomCommandName();
+    isBackgroundCommand = hostRoleCommandEntity.isBackgroundCommand();
   }
 
   //todo: why is this not symmetrical with the constructor which takes an entity
@@ -200,7 +204,9 @@ public class HostRoleCommand {
     hostRoleCommandEntity.setAutoSkipOnFailure(autoSkipFailure);
     hostRoleCommandEntity.setRoleCommand(roleCommand);
     hostRoleCommandEntity.setCommandDetail(commandDetail);
+    hostRoleCommandEntity.setOpsDisplayName(opsDisplayName);
     hostRoleCommandEntity.setCustomCommandName(customCommandName);
+    hostRoleCommandEntity.setBackgroundCommand(isBackgroundCommand);
 
     HostEntity hostEntity = hostDAO.findById(hostId);
     if (null != hostEntity) {
@@ -208,6 +214,22 @@ public class HostRoleCommand {
     }
 
     hostRoleCommandEntity.setEvent(event.getEventJson());
+
+    // set IDs if the wrapping object has them - they are most likely
+    // non-updatable in JPA since they are retrieved from a relationship,
+    // however the JPA cache may choose to not refresh the entity so they would
+    // end up being null if not set before persisting the command entity
+    if (requestId >= 0) {
+      hostRoleCommandEntity.setRequestId(requestId);
+    }
+
+    if (stageId >= 0) {
+      hostRoleCommandEntity.setStageId(stageId);
+    }
+
+    if (taskId >= 0) {
+      hostRoleCommandEntity.setTaskId(taskId);
+    }
 
     return hostRoleCommandEntity;
   }
@@ -275,6 +297,13 @@ public class HostRoleCommand {
     this.commandDetail = commandDetail;
   }
 
+  public String getOpsDisplayName() {
+    return opsDisplayName;
+  }
+
+  public void setOpsDisplayName(String opsDisplayName) {
+    this.opsDisplayName = opsDisplayName;
+  }
   public String getCustomCommandName() {
     return customCommandName;
   }
@@ -414,6 +443,39 @@ public class HostRoleCommand {
 
   public long getRequestId() {
     return requestId;
+  }
+
+  /**
+   * Gets whether this command runs in the background and does not block other
+   * commands.
+   *
+   * @return {@code true} if this command runs in the background, {@code false}
+   *         otherise.
+   */
+  public boolean isBackgroundCommand() {
+    return isBackgroundCommand;
+  }
+
+  /**
+   * Sets whether this command runs in the background and does not block other
+   * commands.
+   *
+   * @param isBackgroundCommand
+   *          {@code true} if this command runs in the background, {@code false}
+   *          otherise.
+   */
+  public void setBackgroundCommand(boolean isBackgroundCommand) {
+    this.isBackgroundCommand = isBackgroundCommand;
+  }
+
+  /**
+   * Gets whether commands which fail and are retryable are automatically
+   * skipped and marked with {@link HostRoleStatus#SKIPPED_FAILED}.
+   *
+   * @return
+   */
+  public boolean isFailureAutoSkipped() {
+    return autoSkipFailure;
   }
 
   @Override

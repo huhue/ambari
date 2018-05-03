@@ -15,9 +15,7 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 -->
-
 <configuration>
-
   <property>
     <name>rpc.client.timeout</name>
     <value>3600000</value>
@@ -30,8 +28,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>rpc.client.connect.tcpnodelay</name>
     <value>true</value>
@@ -42,8 +40,8 @@
     <value-attributes>
       <type>boolean</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>rpc.client.max.idle</name>
     <value>10000</value>
@@ -56,8 +54,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>rpc.client.ping.interval</name>
     <value>10000</value>
@@ -70,8 +68,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>rpc.client.connect.timeout</name>
     <value>600000</value>
@@ -84,8 +82,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>rpc.client.connect.retry</name>
     <value>10</value>
@@ -97,8 +95,8 @@
       <type>int</type>
       <minimum>0</minimum>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>rpc.client.read.timeout</name>
     <value>3600000</value>
@@ -111,8 +109,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>rpc.client.write.timeout</name>
     <value>3600000</value>
@@ -125,8 +123,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>rpc.client.socket.linger.timeout</name>
     <value>-1</value>
@@ -137,8 +135,8 @@
     <value-attributes>
       <type>int</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>dfs.client.read.shortcircuit</name>
     <value>true</value>
@@ -149,8 +147,8 @@
     <value-attributes>
       <type>boolean</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>dfs.default.replica</name>
     <value>3</value>
@@ -161,9 +159,9 @@
     <value-attributes>
       <type>int</type>
       <minimum>0</minimum>
-  	</value-attributes>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>dfs.prefetchsize</name>
     <value>10</value>
@@ -175,8 +173,8 @@
       <type>int</type>
       <minimum>0</minimum>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>dfs.client.failover.max.attempts</name>
     <value>15</value>
@@ -187,9 +185,9 @@
     <value-attributes>
       <type>int</type>
       <minimum>0</minimum>
-  	</value-attributes>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>dfs.default.blocksize</name>
     <value>134217728</value>
@@ -197,13 +195,13 @@
       The default block size in bytes.
       The default value is 134217728 (128 MB).
     </description>
-  	<value-attributes>
+    <value-attributes>
       <type>int</type>
       <minimum>0</minimum>
       <unit>bytes</unit>
-  	</value-attributes>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>dfs.client.log.severity</name>
     <value>INFO</value>
@@ -235,8 +233,8 @@
       </entries>
       <selection-cardinality>1</selection-cardinality>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>input.connect.timeout</name>
     <value>600000</value>
@@ -249,8 +247,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>input.read.timeout</name>
     <value>3600000</value>
@@ -263,8 +261,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>input.write.timeout</name>
     <value>3600000</value>
@@ -277,8 +275,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>input.localread.default.buffersize</name>
     <value>2097152</value>
@@ -291,9 +289,9 @@
       <type>int</type>
       <minimum>0</minimum>
       <unit>bytes</unit>
-  	</value-attributes>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>input.localread.blockinfo.cachesize</name>
     <value>1000</value>
@@ -305,9 +303,9 @@
       <type>int</type>
       <minimum>0</minimum>
       <unit>bytes</unit>
-  	</value-attributes>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>input.read.getblockinfo.retry</name>
     <value>3</value>
@@ -319,8 +317,8 @@
       <type>int</type>
       <minimum>0</minimum>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.replace-datanode-on-failure</name>
     <value>true</value>
@@ -332,8 +330,8 @@
     <value-attributes>
       <type>boolean</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.default.chunksize</name>
     <value>512</value>
@@ -345,9 +343,9 @@
       <type>int</type>
       <minimum>0</minimum>
       <unit>bytes</unit>
-  	</value-attributes>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.default.packetsize</name>
     <value>65536</value>
@@ -359,9 +357,9 @@
       <type>int</type>
       <minimum>0</minimum>
       <unit>bytes</unit>
-  	</value-attributes>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.default.write.retry</name>
     <value>10</value>
@@ -373,8 +371,8 @@
       <type>int</type>
       <minimum>0</minimum>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.connect.timeout</name>
     <value>600000</value>
@@ -387,8 +385,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.read.timeout</name>
     <value>3600000</value>
@@ -401,8 +399,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.write.timeout</name>
     <value>3600000</value>
@@ -415,8 +413,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.packetpool.size</name>
     <value>1024</value>
@@ -428,9 +426,9 @@
       <type>int</type>
       <minimum>0</minimum>
       <unit>bytes</unit>
-  	</value-attributes>
+    </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>output.close.timeout</name>
     <value>900000</value>
@@ -443,8 +441,8 @@
       <minimum>0</minimum>
       <unit>milliseconds</unit>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>dfs.domain.socket.path</name>
     <value>/var/lib/hadoop-hdfs/dn_socket</value>
@@ -455,8 +453,8 @@
     <value-attributes>
       <type>directory</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
   <property>
     <name>dfs.client.use.legacy.blockreader.local</name>
     <value>false</value>
@@ -468,6 +466,6 @@
     <value-attributes>
       <type>boolean</type>
     </value-attributes>
+    <on-ambari-upgrade add="true"/>
   </property>
-
 </configuration>

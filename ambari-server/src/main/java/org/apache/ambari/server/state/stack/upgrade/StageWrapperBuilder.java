@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -27,6 +27,7 @@ import org.apache.ambari.server.serveraction.upgrades.AutoSkipFailedSummaryActio
 import org.apache.ambari.server.stack.HostsType;
 import org.apache.ambari.server.state.UpgradeContext;
 import org.apache.ambari.server.state.stack.UpgradePack.ProcessingComponent;
+import org.apache.commons.collections.CollectionUtils;
 
 /**
  * Defines how to build stages for an Upgrade or Downgrade.
@@ -37,6 +38,11 @@ public abstract class StageWrapperBuilder {
    * The message for the task which checks for skipped failures.
    */
   private static final String AUTO_SKIPPED_TASK_SUMMARY = "Pauses the upgrade if there were failed steps that were automatically skipped.";
+
+  /**
+   * The message to show when the upgrade is paused due to auto-skipped failures
+   */
+  private static final String AUTO_SKIPPED_MESSAGE = "There are failures that were automatically skipped.  Review the failures before continuing.";
 
   /**
    * The upgrade/downgrade grouping that the builder is for.
@@ -128,7 +134,7 @@ public abstract class StageWrapperBuilder {
   protected List<StageWrapper> afterBuild(UpgradeContext upgradeContext,
       List<StageWrapper> stageWrappers) {
 
-    if (stageWrappers.isEmpty()) {
+    if (CollectionUtils.isEmpty(stageWrappers)) {
       return stageWrappers;
     }
 
@@ -145,9 +151,10 @@ public abstract class StageWrapperBuilder {
       ServerActionTask skippedFailedCheck = new ServerActionTask();
       skippedFailedCheck.implClass = AutoSkipFailedSummaryAction.class.getName();
       skippedFailedCheck.summary = AUTO_SKIPPED_TASK_SUMMARY;
+      skippedFailedCheck.messages.add(AUTO_SKIPPED_MESSAGE);
 
       TaskWrapper skippedFailedTaskWrapper = new TaskWrapper(null, null,
-          Collections.<String> emptySet(), skippedFailedCheck);
+          Collections.emptySet(), skippedFailedCheck);
 
       StageWrapper skippedFailedStageWrapper = new StageWrapper(
           StageWrapper.Type.SERVER_SIDE_ACTION, "Verifying Skipped Failures",
@@ -196,7 +203,7 @@ public abstract class StageWrapperBuilder {
    *   <li>When performing a downgrade, but no downgrade tasks exist, reuse the upgrade tasks</li>
    * </ul>
    * @param context     the upgrade context
-   * @param preTasks    {@code true} if loading pre-upgrade or pre-downgrade
+   * @param preTasks    {@code true} if loading pre-(upgrade|downgrade) or {@code false for post-(upgrade|downgrade)
    * @param pc          the processing component holding task definitions
    * @return A collection, potentially empty, of the tasks to run, which may contain either
    * pre or post tasks if they exist, and the order depends on whether it's an upgrade or downgrade.
@@ -213,18 +220,24 @@ public abstract class StageWrapperBuilder {
     if (forUpgrade) {
       interim = preTasks ? pc.preTasks : pc.postTasks;
     } else {
-      interim = preTasks ?
-        (null == pc.preDowngradeTasks ? pc.preTasks : pc.preDowngradeTasks) :
-        (null == pc.postDowngradeTasks ? pc.postTasks : pc.postDowngradeTasks);
+      interim = preTasks ? pc.preDowngradeTasks : pc.postDowngradeTasks;
     }
 
-    if (null == interim || interim.isEmpty()) {
+    if (CollectionUtils.isEmpty(interim)) {
       return Collections.emptyList();
     }
 
     List<Task> tasks = new ArrayList<>();
     for (Task t : interim) {
-      if (context.isScoped(t.scope)) {
+      boolean taskPassesScoping = context.isScoped(t.scope);
+      boolean taskPassesCondition = true;
+
+      // tasks can have conditions on them, so check to make sure the condition is satisfied
+      if (null != t.condition && !t.condition.isSatisfied(context)) {
+        taskPassesCondition = false;
+      }
+
+      if (taskPassesScoping && taskPassesCondition) {
         tasks.add(t);
       }
     }

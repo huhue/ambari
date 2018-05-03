@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -34,21 +34,24 @@ import java.lang.reflect.Type;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
-
 import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.Role;
 import org.apache.ambari.server.RoleCommand;
 import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.controller.AmbariManagementHelper;
 import org.apache.ambari.server.metadata.ActionMetadata;
+import org.apache.ambari.server.orm.dao.ExtensionDAO;
+import org.apache.ambari.server.orm.dao.ExtensionLinkDAO;
 import org.apache.ambari.server.orm.dao.MetainfoDAO;
 import org.apache.ambari.server.orm.dao.StackDAO;
+import org.apache.ambari.server.orm.entities.ExtensionEntity;
+import org.apache.ambari.server.orm.entities.ExtensionLinkEntity;
 import org.apache.ambari.server.state.ClientConfigFileDefinition;
 import org.apache.ambari.server.state.CommandScriptDefinition;
 import org.apache.ambari.server.state.ComponentInfo;
@@ -56,14 +59,18 @@ import org.apache.ambari.server.state.PropertyInfo;
 import org.apache.ambari.server.state.ServiceInfo;
 import org.apache.ambari.server.state.ServiceOsSpecific;
 import org.apache.ambari.server.state.StackInfo;
+import org.apache.ambari.server.state.stack.ConfigUpgradePack;
 import org.apache.ambari.server.state.stack.MetricDefinition;
 import org.apache.ambari.server.state.stack.OsFamily;
-import org.apache.ambari.server.state.stack.StackRoleCommandOrder;
+import org.apache.ambari.server.state.stack.UpgradePack;
 import org.apache.commons.lang.StringUtils;
+import org.easymock.EasyMock;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.springframework.util.Assert;
+
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
 /**
  * StackManager unit tests.
@@ -75,6 +82,8 @@ public class StackManagerTest {
   private static ActionMetadata actionMetadata;
   private static OsFamily osFamily;
   private static StackDAO stackDao;
+  private static ExtensionDAO extensionDao;
+  private static ExtensionLinkDAO linkDao;
 
   @BeforeClass
   public static void initStack() throws Exception{
@@ -90,18 +99,31 @@ public class StackManagerTest {
     // todo: dao , actionMetaData expectations
     metaInfoDao = createNiceMock(MetainfoDAO.class);
     stackDao = createNiceMock(StackDAO.class);
+    extensionDao = createNiceMock(ExtensionDAO.class);
+    linkDao = createNiceMock(ExtensionLinkDAO.class);
     actionMetadata = createNiceMock(ActionMetadata.class);
     Configuration config = createNiceMock(Configuration.class);
+    ExtensionEntity extensionEntity = createNiceMock(ExtensionEntity.class);
 
     expect(config.getSharedResourcesDirPath()).andReturn(
         ClassLoader.getSystemClassLoader().getResource("").getPath()).anyTimes();
 
-    replay(config, metaInfoDao, stackDao, actionMetadata);
+    expect(
+        extensionDao.find(EasyMock.anyObject(String.class),
+            EasyMock.anyObject(String.class))).andReturn(extensionEntity).atLeastOnce();
+
+    List<ExtensionLinkEntity> list = Collections.emptyList();
+    expect(
+        linkDao.findByStack(EasyMock.anyObject(String.class),
+            EasyMock.anyObject(String.class))).andReturn(list).atLeastOnce();
+
+    replay(config, metaInfoDao, stackDao, extensionDao, linkDao, actionMetadata);
 
     osFamily = new OsFamily(config);
+    AmbariManagementHelper helper = new AmbariManagementHelper(stackDao, extensionDao, linkDao);
 
-    StackManager stackManager = new StackManager(new File(stackRoot), null,
-        osFamily, metaInfoDao, actionMetadata, stackDao);
+    StackManager stackManager = new StackManager(new File(stackRoot), null, null, osFamily, false,
+        metaInfoDao, actionMetadata, stackDao, extensionDao, linkDao, helper);
 
     verify(config, metaInfoDao, stackDao, actionMetadata);
 
@@ -111,13 +133,13 @@ public class StackManagerTest {
   @Test
   public void testGetsStacks() throws Exception {
     Collection<StackInfo> stacks = stackManager.getStacks();
-    assertEquals(19, stacks.size());
+    assertEquals(21, stacks.size());
   }
 
   @Test
   public void testGetStacksByName() {
     Collection<StackInfo> stacks = stackManager.getStacks("HDP");
-    assertEquals(15, stacks.size());
+    assertEquals(17, stacks.size());
 
     stacks = stackManager.getStacks("OTHER");
     assertEquals(2, stacks.size());
@@ -125,14 +147,50 @@ public class StackManagerTest {
 
   @Test
   public void testHCFSServiceType() {
-    
+
     StackInfo stack = stackManager.getStack("HDP", "2.2.0.ECS");
     ServiceInfo service = stack.getService("ECS");
     assertEquals(service.getServiceType(),"HCFS");
-    
+
     service = stack.getService("HDFS");
     assertNull(service);
-  }  
+  }
+
+  @Test
+  public void testServiceRemoved() {
+    StackInfo stack = stackManager.getStack("HDP", "2.0.8");
+    ServiceInfo service = stack.getService("SPARK");
+    assertNull(service);
+    service = stack.getService("SPARK2");
+    assertNull(service);
+    List<String> removedServices = stack.getRemovedServices();
+    assertEquals(removedServices.size(), 2);
+
+    HashSet<String> expectedServices = new HashSet<>();
+    expectedServices.add("SPARK");
+    expectedServices.add("SPARK2");
+
+    for (String s : removedServices) {
+      assertTrue(expectedServices.remove(s));
+    }
+    assertTrue(expectedServices.isEmpty());
+
+  }
+
+  @Test
+  public void testSerivcesWithNoConfigs(){
+    StackInfo stack = stackManager.getStack("HDP", "2.0.8");
+    List<String> servicesWithNoConfigs = stack.getServicesWithNoConfigs();
+    //Via inheritance, Hive should have config types
+    //Via inheritance, SystemML should still have no config types
+    assertTrue((servicesWithNoConfigs.contains("SYSTEMML")));
+    assertFalse((servicesWithNoConfigs.contains("HIVE")));
+
+    stack = stackManager.getStack("HDP", "2.0.7");
+    //Directly from the stack, SystemML should have no config types
+    servicesWithNoConfigs = stack.getServicesWithNoConfigs();
+    assertTrue((servicesWithNoConfigs.contains("SYSTEMML")));
+  }
 
   @Test
   public void testGetStack() {
@@ -145,7 +203,7 @@ public class StackManagerTest {
     Collection<ServiceInfo> services = stack.getServices();
     assertEquals(3, services.size());
 
-    Map<String, ServiceInfo> serviceMap = new HashMap<String, ServiceInfo>();
+    Map<String, ServiceInfo> serviceMap = new HashMap<>();
     for (ServiceInfo service : services) {
       serviceMap.put(service.getName(), service);
     }
@@ -154,7 +212,7 @@ public class StackManagerTest {
     List<ComponentInfo> components = hdfsService.getComponents();
     assertEquals(6, components.size());
     List<PropertyInfo> properties = hdfsService.getProperties();
-    assertEquals(62, properties.size());
+    assertEquals(64, properties.size());
 
     // test a couple of the properties for filename
     boolean hdfsPropFound = false;
@@ -220,9 +278,19 @@ public class StackManagerTest {
     assertEquals("2.1.1", stack.getVersion());
     Collection<ServiceInfo> services = stack.getServices();
 
+    ServiceInfo si = stack.getService("SPARK");
+    assertNull(si);
+
+    si = stack.getService("SPARK2");
+    assertNull(si);
+
+    si = stack.getService("SPARK3");
+    assertNotNull(si);
+
     //should include all stacks in hierarchy
-    assertEquals(16, services.size());
-    HashSet<String> expectedServices = new HashSet<String>();
+    assertEquals(18, services.size());
+
+    HashSet<String> expectedServices = new HashSet<>();
     expectedServices.add("GANGLIA");
     expectedServices.add("HBASE");
     expectedServices.add("HCATALOG");
@@ -239,6 +307,8 @@ public class StackManagerTest {
     expectedServices.add("FAKENAGIOS");
     expectedServices.add("TEZ");
     expectedServices.add("AMBARI_METRICS");
+    expectedServices.add("SPARK3");
+    expectedServices.add("SYSTEMML");
 
     ServiceInfo pigService = null;
     for (ServiceInfo service : services) {
@@ -273,7 +343,7 @@ public class StackManagerTest {
     assertEquals("1.0", stack.getVersion());
     Collection<ServiceInfo> services = stack.getServices();
 
-    assertEquals(3, services.size());
+    assertEquals(4, services.size());
 
     // hdfs service
     assertEquals(6, stack.getService("HDFS").getComponents().size());
@@ -332,7 +402,7 @@ public class StackManagerTest {
     // compare components
     List<ComponentInfo> stormServiceComponents = stormService.getComponents();
     List<ComponentInfo> baseStormServiceComponents = baseStormService.getComponents();
-    assertEquals(new HashSet<ComponentInfo>(stormServiceComponents), new HashSet<ComponentInfo>(baseStormServiceComponents));
+    assertEquals(new HashSet<>(stormServiceComponents), new HashSet<>(baseStormServiceComponents));
     // values from base service
     assertEquals(baseStormService.isDeleted(), stormService.isDeleted());
     //todo: specify alerts file in stack
@@ -361,7 +431,7 @@ public class StackManagerTest {
     StackInfo baseStack = stackManager.getStack("OTHER", "1.0");
     StackInfo stack = stackManager.getStack("OTHER", "2.0");
 
-    assertEquals(4, stack.getServices().size());
+    assertEquals(5, stack.getServices().size());
 
     ServiceInfo service = stack.getService("SQOOP2");
     ServiceInfo baseSqoopService = baseStack.getService("SQOOP2");
@@ -427,10 +497,23 @@ public class StackManagerTest {
   }
 
   @Test
+  public void testPackageInheritance() throws Exception{
+    StackInfo stack = stackManager.getStack("HDP", "2.0.7");
+    assertNotNull(stack.getService("HBASE"));
+    ServiceInfo hbase = stack.getService("HBASE");
+    assertNotNull("Package dir is " + hbase.getServicePackageFolder(), hbase.getServicePackageFolder());
+
+    stack = stackManager.getStack("HDP", "2.0.8");
+    assertNotNull(stack.getService("HBASE"));
+    hbase = stack.getService("HBASE");
+    assertNotNull("Package dir is " + hbase.getServicePackageFolder(), hbase.getServicePackageFolder());
+  }
+
+  @Test
   public void testMonitoringServicePropertyInheritance() throws Exception{
     StackInfo stack = stackManager.getStack("HDP", "2.0.8");
     Collection<ServiceInfo> allServices = stack.getServices();
-    assertEquals(13, allServices.size());
+    assertEquals(15, allServices.size());
 
     boolean monitoringServiceFound = false;
 
@@ -451,8 +534,8 @@ public class StackManagerTest {
     StackInfo stack = stackManager.getStack("HDP", "2.0.6");
     Collection<ServiceInfo> allServices = stack.getServices();
 
-    assertEquals(11, allServices.size());
-    HashSet<String> expectedServices = new HashSet<String>();
+    assertEquals(12, allServices.size());
+    HashSet<String> expectedServices = new HashSet<>();
     expectedServices.add("GANGLIA");
     expectedServices.add("HBASE");
     expectedServices.add("HCATALOG");
@@ -461,6 +544,7 @@ public class StackManagerTest {
     expectedServices.add("MAPREDUCE2");
     expectedServices.add("OOZIE");
     expectedServices.add("PIG");
+    expectedServices.add("SPARK");
     expectedServices.add("ZOOKEEPER");
     expectedServices.add("FLUME");
     expectedServices.add("YARN");
@@ -624,6 +708,9 @@ public class StackManagerTest {
     ArrayList<String> hbaseMasterStartValues = (ArrayList<String>) generalDeps.get("HBASE_MASTER-START");
     assertTrue(hbaseMasterStartValues.get(0).equals("ZOOKEEPER_SERVER-START"));
 
+    ServiceInfo service = stack.getService("PIG");
+    assertNotNull("PIG's roll command order is null", service.getRoleCommandOrder());
+
     assertTrue(optionalNoGlusterfs.containsKey("NAMENODE-STOP"));
     ArrayList<String> nameNodeStopValues = (ArrayList<String>) optionalNoGlusterfs.get("NAMENODE-STOP");
     assertTrue(nameNodeStopValues.contains("JOBTRACKER-STOP"));
@@ -633,14 +720,30 @@ public class StackManagerTest {
     ArrayList<String> customMasterStartValues = (ArrayList<String>) generalDeps.get("CUSTOM_MASTER-START");
     assertTrue(customMasterStartValues.contains("ZOOKEEPER_SERVER-START"));
     assertTrue(customMasterStartValues.contains("NAMENODE-START"));
+
   }
 
+  /**
+   * Tests that {@link UpgradePack} and {@link ConfigUpgradePack} instances are correctly initialized
+   * post-unmarshalling.
+   *
+   * @throws Exception
+   */
   @Test
-  public void testInheritKerberosDescriptor() throws Exception {
-    StackInfo stack = stackManager.getStack("HDP", "2.1.1");
-    String stacksFolder = ClassLoader.getSystemClassLoader().getResource("stacks").getPath();
-    assertEquals(new File(stacksFolder, "HDP/2.0.8/kerberos.json").getAbsolutePath(),
-        stack.getKerberosDescriptorFileLocation());
+  public void testUpgradePacksInitializedAfterUnmarshalling() throws Exception {
+    StackInfo stack = stackManager.getStack("HDP", "2.2.0");
+    Map<String, UpgradePack> upgradePacks = stack.getUpgradePacks();
+    for (UpgradePack upgradePack : upgradePacks.values()) {
+      assertNotNull(upgradePack);
+      assertNotNull(upgradePack.getTasks());
+      assertTrue(upgradePack.getTasks().size() > 0);
+
+      // reference equality (make sure it's the same list)
+      assertTrue(upgradePack.getTasks() == upgradePack.getTasks());
+    }
+    ConfigUpgradePack configUpgradePack = stack.getConfigUpgradePack();
+    assertNotNull(configUpgradePack);
+    assertNotNull(configUpgradePack.services);
   }
 
   @Test
@@ -653,21 +756,43 @@ public class StackManagerTest {
 
     File stackRoot = new File(resourcesDirectory, "stacks");
     File commonServices = new File(resourcesDirectory, "common-services");
+    File extensions = null;
+
+    try {
+         URL extensionsURL = ClassLoader.getSystemClassLoader().getResource("extensions");
+      if (extensionsURL != null) {
+        extensions = new File(extensionsURL.getPath().replace("test-classes","classes"));
+      }
+    }
+    catch (Exception e) {}
 
     MetainfoDAO metaInfoDao = createNiceMock(MetainfoDAO.class);
     StackDAO stackDao = createNiceMock(StackDAO.class);
+    ExtensionDAO extensionDao = createNiceMock(ExtensionDAO.class);
+    ExtensionLinkDAO linkDao = createNiceMock(ExtensionLinkDAO.class);
     ActionMetadata actionMetadata = createNiceMock(ActionMetadata.class);
     Configuration config = createNiceMock(Configuration.class);
+    ExtensionEntity extensionEntity = createNiceMock(ExtensionEntity.class);
 
     expect(config.getSharedResourcesDirPath()).andReturn(
             ClassLoader.getSystemClassLoader().getResource("").getPath()).anyTimes();
 
-    replay(config, metaInfoDao, stackDao, actionMetadata);
+    expect(
+        extensionDao.find(EasyMock.anyObject(String.class),
+            EasyMock.anyObject(String.class))).andReturn(extensionEntity).atLeastOnce();
+
+    List<ExtensionLinkEntity> list = Collections.emptyList();
+    expect(
+        linkDao.findByStack(EasyMock.anyObject(String.class),
+            EasyMock.anyObject(String.class))).andReturn(list).atLeastOnce();
+
+    replay(config, metaInfoDao, stackDao, extensionDao, linkDao, actionMetadata);
 
     OsFamily osFamily = new OsFamily(config);
+    AmbariManagementHelper helper = new AmbariManagementHelper(stackDao, extensionDao, linkDao);
 
-    StackManager stackManager = new StackManager(stackRoot, commonServices,
-            osFamily, metaInfoDao, actionMetadata, stackDao);
+    StackManager stackManager = new StackManager(stackRoot, commonServices, extensions,
+            osFamily, false, metaInfoDao, actionMetadata, stackDao, extensionDao, linkDao, helper);
 
     for (StackInfo stackInfo : stackManager.getStacks()) {
       for (ServiceInfo serviceInfo : stackInfo.getServices()) {
@@ -697,20 +822,43 @@ public class StackManagerTest {
 
     File stackRoot = new File(resourcesDirectory, "stacks");
     File commonServices = new File(resourcesDirectory, "common-services");
+    File extensions = null;
+
+    try {
+      URL extensionsURL = ClassLoader.getSystemClassLoader().getResource("extensions");
+      if (extensionsURL != null) {
+        extensions = new File(extensionsURL.getPath().replace("test-classes","classes"));
+      }
+    }
+    catch (Exception e) {}
 
     MetainfoDAO metaInfoDao = createNiceMock(MetainfoDAO.class);
     StackDAO stackDao = createNiceMock(StackDAO.class);
+    ExtensionDAO extensionDao = createNiceMock(ExtensionDAO.class);
+    ExtensionLinkDAO linkDao = createNiceMock(ExtensionLinkDAO.class);
     ActionMetadata actionMetadata = createNiceMock(ActionMetadata.class);
     Configuration config = createNiceMock(Configuration.class);
+    ExtensionEntity extensionEntity = createNiceMock(ExtensionEntity.class);
 
     expect(config.getSharedResourcesDirPath()).andReturn(
       ClassLoader.getSystemClassLoader().getResource("").getPath()).anyTimes();
 
-    replay(config, metaInfoDao, stackDao, actionMetadata);
+    expect(
+        extensionDao.find(EasyMock.anyObject(String.class),
+            EasyMock.anyObject(String.class))).andReturn(extensionEntity).atLeastOnce();
+
+    List<ExtensionLinkEntity> list = Collections.emptyList();
+    expect(
+        linkDao.findByStack(EasyMock.anyObject(String.class),
+            EasyMock.anyObject(String.class))).andReturn(list).atLeastOnce();
+
+    replay(config, metaInfoDao, stackDao, extensionDao, linkDao, actionMetadata);
 
     OsFamily osFamily = new OsFamily(config);
+    AmbariManagementHelper helper = new AmbariManagementHelper(stackDao, extensionDao, linkDao);
 
-    StackManager stackManager = new StackManager(stackRoot, commonServices, osFamily, metaInfoDao, actionMetadata, stackDao);
+    StackManager stackManager = new StackManager(stackRoot, commonServices, extensions, osFamily,
+        false, metaInfoDao, actionMetadata, stackDao, extensionDao, linkDao, helper);
 
     String rangerUserSyncRoleCommand = Role.RANGER_USERSYNC + "-" + RoleCommand.START;
     String rangerAdminRoleCommand = Role.RANGER_ADMIN + "-" + RoleCommand.START;
@@ -786,12 +934,12 @@ public class StackManagerTest {
     ArrayList<String> rangerKmsBlockers = (ArrayList<String>)generalDeps.get(kmsRoleCommand);
 
     assertTrue(kmsRoleCommand + " should be dependent of " + rangerAdminRoleCommand, rangerKmsBlockers.contains(rangerAdminRoleCommand));
+    assertTrue(kmsRoleCommand + " should be dependent of " + nameNodeRoleCommand, rangerKmsBlockers.contains(nameNodeRoleCommand));
 
     // Ranger User Sync
     ArrayList<String> rangerUserSyncBlockers = (ArrayList<String>)generalDeps.get(rangerUserSyncRoleCommand);
 
     assertTrue(rangerUserSyncRoleCommand + " should be dependent of " + rangerAdminRoleCommand, rangerUserSyncBlockers.contains(rangerAdminRoleCommand));
-    assertTrue(rangerUserSyncRoleCommand + " should be dependent of " + kmsRoleCommand, rangerUserSyncBlockers.contains(kmsRoleCommand));
   }
   //todo: component override assertions
 
@@ -804,24 +952,47 @@ public class StackManagerTest {
 
     File stackRoot = new File(resourcesDirectory, "stacks");
     File commonServices = new File(resourcesDirectory, "common-services");
+    File extensions = null;
+
+    try {
+         URL extensionsURL = ClassLoader.getSystemClassLoader().getResource("extensions");
+      if (extensionsURL != null) {
+        extensions = new File(extensionsURL.getPath().replace("test-classes","classes"));
+      }
+    }
+    catch (Exception e) {}
 
     MetainfoDAO metaInfoDao = createNiceMock(MetainfoDAO.class);
     StackDAO stackDao = createNiceMock(StackDAO.class);
+    ExtensionDAO extensionDao = createNiceMock(ExtensionDAO.class);
+    ExtensionLinkDAO linkDao = createNiceMock(ExtensionLinkDAO.class);
     ActionMetadata actionMetadata = createNiceMock(ActionMetadata.class);
     Configuration config = createNiceMock(Configuration.class);
+    ExtensionEntity extensionEntity = createNiceMock(ExtensionEntity.class);
 
     expect(config.getSharedResourcesDirPath()).andReturn(
       ClassLoader.getSystemClassLoader().getResource("").getPath()).anyTimes();
 
-    replay(config, metaInfoDao, stackDao, actionMetadata);
+    expect(
+        extensionDao.find(EasyMock.anyObject(String.class),
+            EasyMock.anyObject(String.class))).andReturn(extensionEntity).atLeastOnce();
+
+    List<ExtensionLinkEntity> list = Collections.emptyList();
+    expect(
+        linkDao.findByStack(EasyMock.anyObject(String.class),
+            EasyMock.anyObject(String.class))).andReturn(list).atLeastOnce();
+
+    replay(config, metaInfoDao, stackDao, extensionDao, linkDao, actionMetadata);
 
     OsFamily osFamily = new OsFamily(config);
+    AmbariManagementHelper helper = new AmbariManagementHelper(stackDao, extensionDao, linkDao);
 
-    StackManager stackManager = new StackManager(stackRoot, commonServices, osFamily, metaInfoDao, actionMetadata, stackDao);
+    StackManager stackManager = new StackManager(stackRoot, commonServices, extensions, osFamily,
+        false, metaInfoDao, actionMetadata, stackDao, extensionDao, linkDao, helper);
 
     String zookeeperServerRoleCommand = Role.ZOOKEEPER_SERVER + "-" + RoleCommand.START;
     String logsearchServerRoleCommand = Role.LOGSEARCH_SERVER + "-" + RoleCommand.START;
-    String logsearchSolrRoleCommand = Role.LOGSEARCH_SOLR + "-" + RoleCommand.START;
+    String infraSolrRoleCommand = Role.INFRA_SOLR + "-" + RoleCommand.START;
     String logsearchLogfeederRoleCommand = Role.LOGSEARCH_LOGFEEDER + "-" + RoleCommand.START;
 
     StackInfo hdp = stackManager.getStack("HDP", "2.3");
@@ -844,16 +1015,28 @@ public class StackManagerTest {
 
     // verify logsearch rco
     // LogSearch Solr
-    ArrayList<String> logsearchSolrBlockers = (ArrayList<String>) generalDeps.get(logsearchSolrRoleCommand);
-    assertTrue(logsearchSolrRoleCommand + " should be dependent of " + zookeeperServerRoleCommand, logsearchSolrBlockers.contains(zookeeperServerRoleCommand));
+    ArrayList<String> logsearchSolrBlockers = (ArrayList<String>) generalDeps.get(infraSolrRoleCommand);
+    assertTrue(infraSolrRoleCommand + " should be dependent of " + zookeeperServerRoleCommand, logsearchSolrBlockers.contains(zookeeperServerRoleCommand));
 
     // LogSearch Server
     ArrayList<String> logsearchServerBlockers = (ArrayList<String>) generalDeps.get(logsearchServerRoleCommand);
-    assertTrue(logsearchServerRoleCommand + " should be dependent of " + logsearchSolrRoleCommand, logsearchServerBlockers.contains(logsearchSolrRoleCommand));
+    assertTrue(logsearchServerRoleCommand + " should be dependent of " + infraSolrRoleCommand, logsearchServerBlockers.contains(infraSolrRoleCommand));
 
     // LogSearch LogFeeder
     ArrayList<String> logsearchLogfeederBlockers = (ArrayList<String>) generalDeps.get(logsearchLogfeederRoleCommand);
-    assertTrue(logsearchLogfeederRoleCommand + " should be dependent of " + logsearchSolrRoleCommand, logsearchLogfeederBlockers.contains(logsearchSolrRoleCommand));
+    assertTrue(logsearchLogfeederRoleCommand + " should be dependent of " + infraSolrRoleCommand, logsearchLogfeederBlockers.contains(infraSolrRoleCommand));
     assertTrue(logsearchLogfeederRoleCommand + " should be dependent of " + logsearchServerRoleCommand, logsearchLogfeederBlockers.contains(logsearchServerRoleCommand));
+  }
+
+  @Test
+  public void testVersionDefinitionStackRepoUpdateLinkExists(){
+    // Get the base sqoop service
+    StackInfo stack = stackManager.getStack("HDP", "2.1.1");
+    String latestUri = stack.getRepositoryXml().getLatestURI();
+    assertTrue(latestUri != null);
+
+    stack = stackManager.getStack("HDP", "2.0.8");
+    latestUri = stack.getRepositoryXml().getLatestURI();
+    assertTrue(latestUri == null);
   }
 }

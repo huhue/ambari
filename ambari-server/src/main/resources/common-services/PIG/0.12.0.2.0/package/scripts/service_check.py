@@ -45,6 +45,13 @@ class PigServiceCheckLinux(PigServiceCheck):
     input_file = format('/user/{smokeuser}/passwd')
     output_dir = format('/user/{smokeuser}/pigsmoke.out')
 
+    params.HdfsResource(format("/user/{smokeuser}"),
+                        type="directory",
+                        action="create_on_execute",
+                        owner=params.smokeuser,
+                        mode=params.smoke_hdfs_user_mode,
+                        )
+
     params.HdfsResource(output_dir,
                         type="directory",
                         action="delete_on_execute",
@@ -103,7 +110,7 @@ class PigServiceCheckLinux(PigServiceCheck):
       resource_created = copy_to_hdfs(
         "tez", params.user_group,
         params.hdfs_user,
-        host_sys_prepped=params.host_sys_prepped)
+        skip=params.sysprep_skip_copy_tarballs_hdfs)
       if resource_created:
         params.HdfsResource(None, action="execute")
 

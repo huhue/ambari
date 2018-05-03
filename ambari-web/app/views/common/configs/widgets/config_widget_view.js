@@ -30,6 +30,11 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
   config: null,
 
   /**
+   * @type {App.ConfigProperty}
+   */
+  copyFromConfig: null,
+
+  /**
    * Determines if user hover on widget-view
    * @type {boolean}
    */
@@ -137,7 +142,7 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
 
     tagName: 'i',
 
-    classNames: ['icon-warning-sign'],
+    classNames: ['glyphicon glyphicon-warning-sign'],
 
     classNameBindings: ['issueIconClass'],
 
@@ -186,7 +191,7 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
         ERROR: {
           iconClass: '',
           message: this.get('issuedConfig.errorMessage'),
-          configLabelClass: 'text-error'
+          configLabelClass: 'text-danger'
         },
         WARN: {
           iconClass: 'warning',
@@ -320,7 +325,7 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
    */
   showFinalConfig: function () {
     var config = this.get('config');
-    return config.get('isFinal') || (!config.get('isNotEditable') && this.get('isHover'));
+    return config.get('isFinal') || !config.get('isNotEditable') && this.get('isHover');
   }.property('config.isFinal', 'config.isNotEditable', 'isHover'),
 
   /**
@@ -372,11 +377,16 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
   willInsertElement: function() {
     var configConditions = this.get('config.configConditions');
     var configAction = this.get('config.configAction');
+    var isCopy =  this.get('config.copy');
+    if (!Em.empty(isCopy)) {
+      this.bindConfigValue();
+    }
+
     if (configConditions && configConditions.length) {
       this.configValueObserverForAttributes();
 
       //Add Observer to configCondition that depends on another config value
-      var isConditionConfigDependent =  configConditions.filterProperty('resource', 'config').length;
+      var isConditionConfigDependent = configConditions.filterProperty('resource', 'config').length;
       if (isConditionConfigDependent) {
         this.addObserver('config.value', this, this.configValueObserverForAttributes);
       }
@@ -397,6 +407,9 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
     if (this.get('config.configAction')) {
       this.removeObserver('config.value', this, this.configValueObserverForAction);
     }
+    if (this.get('copyFromConfig')) {
+      this.removeObserver('copyFromConfig.value', this, this.configValueObserverForCopy);
+    }
   },
 
   configValueObserverForAttributes: function() {
@@ -405,7 +418,7 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
     var serviceConfigs = this.get('controller.stepConfigs').findProperty('serviceName',serviceName).get('configs');
     var isConditionTrue;
     configConditions.forEach(function(configCondition){
-      var ifStatement =  configCondition.get("if");
+      var ifStatement = configCondition.get("if");
       if (configCondition.get("resource") === 'config') {
         isConditionTrue = App.configTheme.calculateConfigCondition(ifStatement, serviceConfigs);
         if (configCondition.get("type") === 'subsection' || configCondition.get("type") === 'subsectionTab') {
@@ -434,7 +447,7 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
    * @method {configValueObserverForAction}
    */
   configValueObserverForAction: function() {
-    var assignMasterOnStep7Controller =  App.router.get('assignMasterOnStep7Controller');
+    var assignMasterOnStep7Controller = App.router.get('assignMasterOnStep7Controller');
     var configAction = this.get('config.configAction');
     var serviceName = this.get('config.serviceName');
     var serviceConfigs = this.get('controller.stepConfigs').findProperty('serviceName', serviceName).get('configs');
@@ -443,19 +456,19 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
     var hostComponent = {
       componentName:configAction.get('componentName'),
       isClient: '',
-      hostName: '',
+      hostNames: [],
       action: ''
     };
 
-    var hostComponentObj = App.HostComponent.find().findProperty('componentName', hostComponent.componentName);
+    var hostComponentRecords = App.HostComponent.find().filterProperty('componentName', hostComponent.componentName);
     var stackComponentObj = App.StackServiceComponent.find(configAction.get('componentName'));
 
     if (stackComponentObj) {
       hostComponent.isClient = stackComponentObj.get('isClient');
     }
 
-    if (hostComponentObj) {
-      hostComponent.hostName = hostComponentObj.get('hostName');
+    if (hostComponentRecords.length) {
+      hostComponent.hostNames = hostComponentRecords.mapProperty('hostName');
     }
 
     var isConditionTrue = App.configTheme.calculateConfigCondition(configAction.get("if"), serviceConfigs);
@@ -469,6 +482,9 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
           this.set('controller.saveInProgress', true);
           assignMasterOnStep7Controller.execute(this, 'ADD', hostComponent);
         } else {
+          if(hostComponent.componentName === "HIVE_SERVER_INTERACTIVE") {
+            assignMasterOnStep7Controller.execute(this, 'ADD', hostComponent);
+          }
           assignMasterOnStep7Controller.clearComponentsToBeDeleted(hostComponent.componentName);
         }
         break;
@@ -476,6 +492,31 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
         assignMasterOnStep7Controller.execute(this, 'DELETE', hostComponent);
         break;
     }
+  },
+
+  bindConfigValue: function() {
+    var serviceName = this.get('config.serviceName');
+    var fileName =  this.get('config.copy').split('/')[0] + '.xml';
+    var configName = this.get('config.copy').split('/')[1];
+
+    var serviceConfigs = this.get('controller.stepConfigs').findProperty('serviceName', serviceName).get('configs');
+    var config = serviceConfigs.filterProperty('filename',fileName).findProperty('name', configName);
+    this.addObserver('copyFromConfig.value', this, this.configValueObserverForCopy);
+    this.set('copyFromConfig',config);
+  },
+
+  configValueObserverForCopy: function() {
+    var copyFromConfig = this.get('copyFromConfig');
+    var displayName = copyFromConfig.get('displayName');
+    var value = copyFromConfig.get('value');
+    var description = copyFromConfig.get('description');
+    var config = this.get('config');
+    config.setProperties({
+      value:value,
+      initialValue:value,
+      displayName:displayName,
+      description:description
+    });
   },
 
 
@@ -491,15 +532,20 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
     var serviceConfigs = this.get('controller.stepConfigs').findProperty('serviceName',serviceName).get('configs');
     var action = isConditionTrue ? configCondition.get("then") : configCondition.get("else");
     var valueAttributes = action.property_value_attributes;
+    this.set('controller.isChangingConfigAttributes', true);
     for (var key in valueAttributes) {
       if (valueAttributes.hasOwnProperty(key)) {
         var valueAttribute = App.StackConfigValAttributesMap[key] || key;
         var conditionalConfig = serviceConfigs.filterProperty('filename',conditionalConfigFileName).findProperty('name', conditionalConfigName);
         if (conditionalConfig) {
+          if (key === 'visible') {
+            conditionalConfig.set('hiddenBySection', !valueAttributes[key]);
+          }
           conditionalConfig.set(valueAttribute, valueAttributes[key]);
         }
       }
     }
+    this.set('controller.isChangingConfigAttributes', false);
   },
 
   /**
@@ -512,15 +558,16 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
     var action = isConditionTrue ? subsectionCondition.get("then") : subsectionCondition.get("else");
     if (subsectionCondition.get('id')) {
       var valueAttributes = action.property_value_attributes;
-      if (valueAttributes && !Em.none(valueAttributes['visible'])) {
+      if (valueAttributes && !Em.none(valueAttributes.visible)) {
         var themeResource;
         if (subsectionCondition.get('type') === 'subsection') {
           themeResource = App.SubSection.find().findProperty('name', subsectionConditionName);
         } else if (subsectionCondition.get('type') === 'subsectionTab') {
           themeResource = App.SubSectionTab.find().findProperty('name', subsectionConditionName);
         }
-        themeResource.set('isHiddenByConfig', !valueAttributes['visible']);
-        themeResource.get('configs').setEach('hiddenBySection', !valueAttributes['visible']);
+        themeResource.set('isHiddenByConfig', !valueAttributes.visible);
+        themeResource.get('configs').setEach('hiddenBySection', !valueAttributes.visible);
+        themeResource.get('configs').setEach('hiddenBySubSection', !valueAttributes.visible);
       }
     }
   },
@@ -584,7 +631,7 @@ App.ConfigWidgetView = Em.View.extend(App.SupportsDependentConfigs, App.WidgetPo
    * @returns {boolean}
    */
   isValueCompatibleWithWidget: function() {
-    return (this.get('isOverrideEqualityError') && !this.get('config.isValid')) || this.get('config.isValid') || !this.get('supportSwitchToTextBox');
+    return this.get('isOverrideEqualityError') && !this.get('config.isValid') || this.get('config.isValid') || !this.get('supportSwitchToTextBox');
   },
 
   /**

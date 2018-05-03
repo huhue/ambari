@@ -44,8 +44,90 @@ App.WizardRoute = Em.Route.extend({
   gotoStep10: Em.Router.transitionTo('step10'),
 
   isRoutable: function() {
-    return (typeof this.get('route') === 'string' && App.router.get('loggedIn'));
+    return typeof this.get('route') === 'string' && App.router.get('loggedIn');
   }.property('App.router.loggedIn')
+
+});
+
+/**
+ * This route executes "back" and "next" handler on the next run-loop
+ * Reason: It's done like this, because in general transitions have highest priority in the Ember run-loop
+ * So, CP's and observers for <code>App.router.backBtnClickInProgress</code> and <code>App.router.nextBtnClickInProgress</code>
+ * will be triggered after "back" or "next" are complete and not before them.
+ * It's more important for "back", because usually it doesn't do any requests that may cause a little delay for run loops
+ * <code>Em.run.next</code> is used to avoid this
+ *
+ * Example:
+ * <pre>
+ *   App.Step2Route = App.StepRoute.extend({
+ *
+ *    route: '/step2',
+ *
+ *    connectOutlets: function (router, context) {
+ *      // some code
+ *    },
+ *
+ *    nextTransition: function (router) {
+ *      router.transitionTo('step3');
+ *    },
+ *
+ *    backTransition: function (router) {
+ *      router.transitionTo('step1');
+ *    }
+ *
+ *   });
+ * </pre>
+ * In this case both <code>transitionTo</code> will be executed in the next run loop after loop where "next" or "back" were called
+ * <b>IMPORTANT!</b> Flags <code>App.router.backBtnClickInProgress</code> and <code>App.router.nextBtnClickInProgress</code> are set to <code>true</code>
+ * in the "back" and "next". Be sure to set them <code>false</code> when needed
+ *
+ * @type {Em.Route}
+ */
+App.StepRoute = Em.Route.extend({
+
+  /**
+   * @type {Function}
+   */
+  backTransition: Em.K,
+
+  /**
+   * @type {Function}
+   */
+  nextTransition: Em.K,
+
+  /**
+   * Default "Back"-action
+   * Execute <code>backTransition</code> once
+   *
+   * @param {Em.Router} router
+   */
+  back: function (router) {
+    if (App.get('router.btnClickInProgress')) {
+      return;
+    }
+    App.set('router.backBtnClickInProgress', true);
+    var self = this;
+    Em.run.next(function () {
+      Em.tryInvoke(self, 'backTransition', [router]);
+    })
+  },
+
+  /**
+   * Default "Next"-action
+   * Execute <code>nextTransition</code> once
+   *
+   * @param {Em.Router} router
+   */
+  next: function (router) {
+    if (App.get('router.btnClickInProgress')) {
+      return;
+    }
+    App.set('router.nextBtnClickInProgress', true);
+    var self = this;
+    Em.run.next(function () {
+      Em.tryInvoke(self, 'nextTransition', [router]);
+    })
+  }
 
 });
 
@@ -54,8 +136,33 @@ App.Router = Em.Router.extend({
   enableLogging: true,
   isFwdNavigation: true,
   backBtnForHigherStep: false,
-  transitionInProgress: false,
+
+  /**
+   * Checks if Back button is clicked
+   * Set to default value on the <code>App.WizardController.connectOutlet</code>
+   *
+   * @type {boolean}
+   * @default false
+   */
+  backBtnClickInProgress: false,
+
+  /**
+   * Checks if Next button is clicked
+   * Set to default value on the <code>App.WizardController.connectOutlet</code>
+   *
+   * @type {boolean}
+   * @default false
+   */
   nextBtnClickInProgress: false,
+
+  /**
+   * Checks if Next or Back button is clicked
+   * Used in the <code>App.StepRoute</code>-instances to avoid "next"/"back" double-clicks
+   *
+   * @type {boolean}
+   * @default false
+   */
+  btnClickInProgress: Em.computed.or('backBtnClickInProgress', 'nextBtnClickInProgress'),
 
   /**
    * Path for local login page. This page will be always accessible without
@@ -90,9 +197,9 @@ App.Router = Em.Router.extend({
     var matches = step.match(/\d+$/);
     var newStep;
     if (matches) {
-      newStep = parseInt(matches[0]);
+      newStep = parseInt(matches[0], 10);
     }
-    var previousStep = parseInt(this.getInstallerCurrentStep());
+    var previousStep = parseInt(this.getInstallerCurrentStep(), 10);
     this.set('isFwdNavigation', newStep >= previousStep);
   },
 
@@ -149,17 +256,36 @@ App.Router = Em.Router.extend({
 
   displayLoginName: Em.computed.truncate('loginName', 10, 10),
 
+  /**
+   * @type {$.ajax|null}
+   */
+  clusterDataRequest: null,
+
+  /**
+   * If request was already sent on login then use saved clusterDataRequest and don't make second call
+   * @returns {$.ajax}
+   */
+  getClusterDataRequest: function() {
+    var clusterDataRequest = this.get('clusterDataRequest');
+    if (clusterDataRequest) {
+      this.set('clusterDataRequest', null);
+      return clusterDataRequest;
+    } else {
+      return App.ajax.send({
+        name: 'router.login.clusters',
+        sender: this,
+        success: 'onAuthenticationSuccess',
+        error: 'onAuthenticationError'
+      });
+    }
+  },
+
   getAuthenticated: function () {
     var dfd = $.Deferred();
     var self = this;
     var auth = App.db.getAuthenticated();
-    App.ajax.send({
-      name: 'router.login.clusters',
-      sender: this,
-      success: 'onAuthenticationSuccess',
-      error: 'onAuthenticationError'
-    }).complete(function (xhr) {
-      if (xhr.isResolved()) {
+    this.getClusterDataRequest().complete(function (xhr) {
+      if (xhr.state() === 'resolved') {
         // if server knows the user and user authenticated by UI
         if (auth) {
           dfd.resolve(self.get('loggedIn'));
@@ -313,7 +439,6 @@ App.Router = Em.Router.extend({
 
   loginSuccessCallback: function(data, opt, params) {
     var self = this;
-    App.router.set('loginController.isSubmitDisabled', false);
     App.usersMapper.map({"items": [data]});
     this.setUserLoggedIn(data.Users.user_name);
     var requestData = {
@@ -372,7 +497,8 @@ App.Router = Em.Router.extend({
 
     if(text && status){
       return App.ModalPopup.show({
-        classNames: ['sixty-percent-width-modal'],
+        classNames: ['common-modal-wrapper'],
+        modalDialogClasses: ['modal-lg'],
         header: Em.I18n.t('login.message.title'),
         bodyClass: Ember.View.extend({
           template: Ember.Handlebars.compile(text)
@@ -399,10 +525,9 @@ App.Router = Em.Router.extend({
           this.hide();
         }
       });
-    }else{
-      this.setClusterData(data, opt, params);
-      return false;
     }
+    this.setClusterData(data, opt, params);
+    return false;
   },
 
   /**
@@ -429,12 +554,12 @@ App.Router = Em.Router.extend({
       this.loginGetClustersSuccessCallback(self.get('clusterData'), {}, requestData);
     }
     else {
-      App.ajax.send({
+      this.set('clusterDataRequest', App.ajax.send({
         name: 'router.login.clusters',
         sender: self,
         data: requestData,
         success: 'loginGetClustersSuccessCallback'
-      });
+      }));
     }
   },
 
@@ -478,8 +603,10 @@ App.Router = Em.Router.extend({
         router.transitionToAdminView();
       }
     }
+    // set cluster name and security type
+    App.router.get('clusterController').reloadSuccessCallback(clustersData);
     App.set('isPermissionDataLoaded', true);
-    App.router.get('userSettingsController').dataLoading();
+    App.router.get('loginController').postLogin(true, true);
   },
 
   /**
@@ -524,8 +651,8 @@ App.Router = Em.Router.extend({
           }
         }),
         sortedMappedVersions = mappedVersions.sort(),
-        latestVersion = sortedMappedVersions[sortedMappedVersions.length-1];
-      window.location.replace('/views/ADMIN_VIEW/' + latestVersion + '/INSTANCE/#/');
+        latestVersion = sortedMappedVersions[sortedMappedVersions.length-1].replace(/[^\d.-]/g, '');
+      window.location.replace(App.appURLRoot +  'views/ADMIN_VIEW/' + latestVersion + '/INSTANCE/#/');
     }
   },
 
@@ -548,13 +675,13 @@ App.Router = Em.Router.extend({
             var clusterStatusOnServer = App.clusterStatus.get('value');
             if (clusterStatusOnServer) {
               var wizardControllerRoutes = require('data/controller_route');
-              var wizardControllerRoute =  wizardControllerRoutes.findProperty('wizardControllerName', clusterStatusOnServer.wizardControllerName);
+              var wizardControllerRoute = wizardControllerRoutes.findProperty('wizardControllerName', clusterStatusOnServer.wizardControllerName);
               if (wizardControllerRoute && !App.router.get('wizardWatcherController').get('isNonWizardUser')) {
                 route = wizardControllerRoute.route;
               }
             }
-            if (wizardControllerRoute && wizardControllerRoute.wizardControllerName === 'mainAdminStackAndUpgradeController')  {
-              var clusterController =   App.router.get('clusterController');
+            if (wizardControllerRoute && wizardControllerRoute.wizardControllerName === 'mainAdminStackAndUpgradeController') {
+              var clusterController = App.router.get('clusterController');
               clusterController.loadClusterName().done(function(){
                 clusterController.restoreUpgradeState().done(function(){
                   callback(route);
@@ -597,7 +724,8 @@ App.Router = Em.Router.extend({
         name: 'router.logoff',
         sender: this,
         success: 'logOffSuccessCallback',
-        error: 'logOffErrorCallback'
+        error: 'logOffErrorCallback',
+        beforeSend: 'logOffBeforeSend'
       }).complete(function() {
         self.logoffRedirect(context);
       });
@@ -615,16 +743,21 @@ App.Router = Em.Router.extend({
 
   },
 
+  logOffBeforeSend: function(opt, xhr) {
+    xhr.setRequestHeader('Authorization', '');
+  },
+
   /**
    * Redirect function on sign off request.
    *
    * @param {$.Event} [context=undefined] - triggered event context
    */
   logoffRedirect: function(context) {
+    this.transitionTo('login', context);
     if (App.router.get('clusterController.isLoaded')) {
-      window.location.reload();
-    } else {
-      this.transitionTo('login', context);
+      Em.run.next(function() {
+        window.location.reload();
+      });
     }
   },
 
@@ -693,8 +826,9 @@ App.Router = Em.Router.extend({
   initAuth: function(){
     if (App.db) {
       var auth = App.db.getAuth();
-      if(auth)
+      if(auth) {
         App.set('auth', auth);
+      }
     }
   },
 
@@ -837,22 +971,24 @@ App.Router = Em.Router.extend({
     experimental: Em.Route.extend({
       route: '/experimental',
       enter: function (router, context) {
-        if (App.isAuthorized('CLUSTER.UPGRADE_DOWNGRADE_STACK')) {
-          Em.run.next(function () {
-            if (router.get('clusterInstallCompleted')) {
-              router.transitionTo("main.dashboard.widgets");
-            } else {
-              router.route("installer");
-            }
-          });
-        } else if (!App.isAuthorized('CLUSTER.UPGRADE_DOWNGRADE_STACK')) {
-          Em.run.next(function () {
-            router.transitionTo("main.views.index");
-          });
+        if (!App.isAuthorized('AMBARI.MANAGE_SETTINGS')) {
+          if (App.isAuthorized('CLUSTER.UPGRADE_DOWNGRADE_STACK')) {
+            Em.run.next(function () {
+              if (router.get('clusterInstallCompleted')) {
+                router.transitionTo("main.dashboard.widgets");
+              } else {
+                router.transitionTo("main.views.index");
+              }
+            });
+          } else {
+            Em.run.next(function () {
+              router.transitionTo("main.views.index");
+            });
+          }
         }
       },
       connectOutlets: function (router, context) {
-        if (App.isAuthorized('CLUSTER.UPGRADE_DOWNGRADE_STACK')) {
+        if (App.isAuthorized('AMBARI.MANAGE_SETTINGS')) {
           App.router.get('experimentalController').loadSupports().complete(function () {
             $('title').text(Em.I18n.t('app.name.subtitle.experimental'));
             router.get('applicationController').connectOutlet('experimental');

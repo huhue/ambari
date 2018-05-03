@@ -18,7 +18,10 @@ limitations under the License.
 
 """
 
-from resource_management import *
+from resource_management.libraries.script.script import Script
+from resource_management.core.resources.system import Execute, File
+from resource_management.libraries.functions.format import format
+from resource_management.core.source import StaticFile
 import sys
 import os
 from ambari_commons import OSConst
@@ -65,7 +68,7 @@ class KnoxServiceCheckDefault(KnoxServiceCheck):
     validateKnoxFileName = "validateKnoxStatus.py"
     validateKnoxFilePath = format("{tmp_dir}/{validateKnoxFileName}")
     python_executable = sys.executable
-    validateStatusCmd = format("{python_executable} {validateKnoxFilePath} -p {knox_host_port} -n {knox_host_name}")
+    validateStatusCmd = format("source /var/lib/ambari-agent/ambari-env.sh ; {python_executable} {validateKnoxFilePath} -p {knox_host_port} -n {knox_host_name}")
     if params.security_enabled:
       kinit_cmd = format("{kinit_path_local} -kt {smoke_user_keytab} {smokeuser_principal};")
       smoke_cmd = format("{kinit_cmd} {validateStatusCmd}")

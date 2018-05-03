@@ -38,9 +38,6 @@ class StormRestApi(Script):
   In HDP 2.2, it was removed since the functionality was moved to Storm UI Server.
   """
 
-  def get_component_name(self):
-    return "storm-client"
-
   def install(self, env):
     self.install_packages(env)
     self.configure(env)
@@ -76,6 +73,10 @@ class StormRestApi(Script):
   def get_user(self):
     import params
     return params.storm_user
+
+  def get_pid_files(self):
+    import status_params
+    return [status_params.pid_rest_api]
   
 if __name__ == "__main__":
   StormRestApi().execute()

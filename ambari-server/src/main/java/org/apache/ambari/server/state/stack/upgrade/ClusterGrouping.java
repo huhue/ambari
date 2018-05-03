@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,13 +19,15 @@ package org.apache.ambari.server.state.stack.upgrade;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
 
+import javax.xml.bind.Unmarshaller;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlAttribute;
@@ -33,6 +35,7 @@ import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.bind.annotation.XmlType;
 
+import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.stack.HostsType;
 import org.apache.ambari.server.state.Cluster;
 import org.apache.ambari.server.state.Host;
@@ -40,10 +43,10 @@ import org.apache.ambari.server.state.MaintenanceState;
 import org.apache.ambari.server.state.UpgradeContext;
 import org.apache.ambari.server.state.stack.UpgradePack.ProcessingComponent;
 import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
+import com.google.common.base.Objects;
 
 /**
  * Used to represent cluster-based operations.
@@ -52,6 +55,10 @@ import com.google.gson.JsonPrimitive;
 @XmlAccessorType(XmlAccessType.FIELD)
 @XmlType(name="cluster")
 public class ClusterGrouping extends Grouping {
+  /**
+   * Logger.
+   */
+  private static final Logger LOG = LoggerFactory.getLogger(ClusterGrouping.class);
 
   /**
    * Stages against a Service and Component, or the Server, that doesn't need a Processing Component.
@@ -64,6 +71,10 @@ public class ClusterGrouping extends Grouping {
     return new ClusterBuilder(this);
   }
 
+  @Override
+  protected boolean serviceCheckAfterProcessing() {
+    return false;
+  }
 
   /**
    * Represents a single-stage execution that happens as part of a cluster-wide
@@ -100,6 +111,35 @@ public class ClusterGrouping extends Grouping {
 
     @XmlElement(name="scope")
     public UpgradeScope scope = UpgradeScope.ANY;
+
+    /**
+     * A condition element with can prevent this stage from being scheduled in
+     * the upgrade.
+     */
+    @XmlElement(name = "condition")
+    public Condition condition;
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String toString() {
+      return Objects.toStringHelper(this).add("id", id).add("title",
+          title).omitNullValues().toString();
+    }
+
+    /**
+     * If a task is found that is configure, set its associated service.  This is used
+     * if the configuration type cannot be isolated by service.
+     */
+    void afterUnmarshal(Unmarshaller unmarshaller, Object parent) {
+      if (task.getType().equals(Task.Type.CONFIGURE) && StringUtils.isNotEmpty(service)) {
+        ((ConfigureTask) task).associatedService = service;
+      } else if (task.getType().equals(Task.Type.CREATE_AND_CONFIGURE) && StringUtils.isNotEmpty(service)) {
+        ((CreateAndConfigureTask) task).associatedService = service;
+      }
+    }
+
 
   }
 
@@ -138,6 +178,31 @@ public class ClusterGrouping extends Grouping {
         for (ExecuteStage execution : executionStages) {
           if (null != execution.intendedDirection
               && execution.intendedDirection != upgradeContext.getDirection()) {
+            continue;
+          }
+
+          // if there is a condition on the group, evaluate it and skip scheduling
+          // of this group if the condition has not been satisfied
+          if (null != execution.condition && !execution.condition.isSatisfied(upgradeContext)) {
+            LOG.info("Skipping {} while building upgrade orchestration due to {}", execution,
+                execution.condition);
+
+            continue;
+          }
+
+          // only schedule this stage if its service is part of the upgrade
+          if (StringUtils.isNotBlank(execution.service)) {
+            if (!upgradeContext.isServiceSupported(execution.service)) {
+              continue;
+            }
+          }
+
+          // tasks can have their own condition, so check that too
+          if (null != execution.task.condition
+              && !execution.task.condition.isSatisfied(upgradeContext)) {
+            LOG.info("Skipping {} while building upgrade orchestration due to {}", execution,
+                execution.task.condition);
+
             continue;
           }
 
@@ -184,15 +249,13 @@ public class ClusterGrouping extends Grouping {
 
     Set<String> realHosts = Collections.emptySet();
 
-    if (null != service && !service.isEmpty() &&
-        null != component && !component.isEmpty()) {
-
+    if (StringUtils.isNotEmpty(service) && StringUtils.isNotEmpty(component)) {
       HostsType hosts = ctx.getResolver().getMasterAndHosts(service, component);
 
-      if (null == hosts || hosts.hosts.isEmpty()) {
+      if (null == hosts || hosts.getHosts().isEmpty()) {
         return null;
       } else {
-        realHosts = new LinkedHashSet<String>(hosts.hosts);
+        realHosts = new LinkedHashSet<>(hosts.getHosts());
       }
     }
 
@@ -205,7 +268,7 @@ public class ClusterGrouping extends Grouping {
       return new StageWrapper(
           StageWrapper.Type.SERVER_SIDE_ACTION,
           execution.title,
-          new TaskWrapper(null, null, Collections.<String>emptySet(), task));
+          new TaskWrapper(null, null, Collections.emptySet(), task));
     }
   }
 
@@ -232,24 +295,25 @@ public class ClusterGrouping extends Grouping {
         return null;
       }
 
+      // !!! FUTURE: check for component
 
       HostsType hosts = ctx.getResolver().getMasterAndHosts(service, component);
 
       if (hosts != null) {
 
-        Set<String> realHosts = new LinkedHashSet<String>(hosts.hosts);
-        if (ExecuteHostType.MASTER == et.hosts && null != hosts.master) {
-          realHosts = Collections.singleton(hosts.master);
+        Set<String> realHosts = new LinkedHashSet<>(hosts.getHosts());
+        if (ExecuteHostType.MASTER == et.hosts && hosts.hasMasters()) {
+          realHosts = hosts.getMasters();
         }
 
         // Pick a random host.
-        if (ExecuteHostType.ANY == et.hosts && !hosts.hosts.isEmpty()) {
-          realHosts = Collections.singleton(hosts.hosts.iterator().next());
+        if (ExecuteHostType.ANY == et.hosts && !hosts.getHosts().isEmpty()) {
+          realHosts = Collections.singleton(hosts.getHosts().iterator().next());
         }
 
         // Pick the first host sorted alphabetically (case insensitive)
-        if (ExecuteHostType.FIRST == et.hosts && !hosts.hosts.isEmpty()) {
-          List<String> sortedHosts = new ArrayList<>(hosts.hosts);
+        if (ExecuteHostType.FIRST == et.hosts && !hosts.getHighAvailabilityHosts().isEmpty()) {
+          List<String> sortedHosts = new ArrayList<>(hosts.getHosts());
           Collections.sort(sortedHosts, String.CASE_INSENSITIVE_ORDER);
           realHosts = Collections.singleton(sortedHosts.get(0));
         }
@@ -260,7 +324,7 @@ public class ClusterGrouping extends Grouping {
         }
 
         return new StageWrapper(
-            StageWrapper.Type.RU_TASKS,
+            StageWrapper.Type.UPGRADE_TASKS,
             execution.title,
             new TaskWrapper(service, component, realHosts, et));
       }
@@ -268,7 +332,7 @@ public class ClusterGrouping extends Grouping {
       // no service and no component will distributed the task to all healthy
       // hosts not in maintenance mode
       Cluster cluster = ctx.getCluster();
-      Set<String> hostNames = new HashSet<String>();
+      Set<String> hostNames = new HashSet<>();
       for (Host host : ctx.getCluster().getHosts()) {
         MaintenanceState maintenanceState = host.getMaintenanceState(cluster.getClusterId());
         if (maintenanceState == MaintenanceState.OFF) {
@@ -277,7 +341,7 @@ public class ClusterGrouping extends Grouping {
       }
 
       return new StageWrapper(
-          StageWrapper.Type.RU_TASKS,
+          StageWrapper.Type.UPGRADE_TASKS,
           execution.title,
           new TaskWrapper(service, component, hostNames, et));
     }
@@ -285,28 +349,70 @@ public class ClusterGrouping extends Grouping {
   }
 
   /**
-   * Populates the manual task, mt, with information about the list of hosts.
-   * @param mt Manual Task
-   * @param hostToComponents Map from host name to list of components
+   * Attempts to merge the given cluster groupings.  This merges the execute stages
+   * in an order specific manner.
    */
-  private void fillHostDetails(ManualTask mt, Map<String, List<String>> hostToComponents) {
-    JsonArray arr = new JsonArray();
-    for (Entry<String, List<String>> entry : hostToComponents.entrySet()) {
-      JsonObject hostObj = new JsonObject();
-      hostObj.addProperty("host", entry.getKey());
-
-      JsonArray componentArr = new JsonArray();
-      for (String comp : entry.getValue()) {
-        componentArr.add(new JsonPrimitive(comp));
-      }
-      hostObj.add("components", componentArr);
-
-      arr.add(hostObj);
+  @Override
+  public void merge(Iterator<Grouping> iterator) throws AmbariException {
+    if (executionStages == null) {
+      executionStages = new ArrayList<>();
     }
+    Map<String, List<ExecuteStage>> skippedStages = new HashMap<>();
+    while (iterator.hasNext()) {
+      Grouping next = iterator.next();
+      if (!(next instanceof ClusterGrouping)) {
+        throw new AmbariException("Invalid group type " + next.getClass().getSimpleName() + " expected cluster group");
+      }
+      ClusterGrouping clusterGroup = (ClusterGrouping) next;
 
-    JsonObject obj = new JsonObject();
-    obj.add("unhealthy", arr);
+      boolean added = addGroupingStages(clusterGroup.executionStages, clusterGroup.addAfterGroupEntry);
+      if (added) {
+        addSkippedStages(skippedStages, clusterGroup.executionStages);
+      }
+      else {
+        // store these services until later
+        if (skippedStages.containsKey(next.addAfterGroupEntry)) {
+          List<ExecuteStage> tmp = skippedStages.get(clusterGroup.addAfterGroupEntry);
+          tmp.addAll(clusterGroup.executionStages);
+        }
+        else {
+          skippedStages.put(clusterGroup.addAfterGroupEntry, clusterGroup.executionStages);
+        }
+      }
+    }
+  }
 
-    mt.structuredOut = obj.toString();
+  /**
+   * Adds the given stages if the stage they are supposed to come after has been added.
+   */
+  private boolean addGroupingStages(List<ExecuteStage> stagesToAdd, String after) {
+    if (after == null) {
+      executionStages.addAll(stagesToAdd);
+      return true;
+    }
+    else {
+      // Check the current stages, if the "after" stage is there then add these
+      for (int index = executionStages.size() - 1; index >= 0; index--) {
+        ExecuteStage stage = executionStages.get(index);
+        if ((stage.service != null && stage.service.equals(after)) || stage.title.equals(after)) {
+          executionStages.addAll(index + 1, stagesToAdd);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Adds the skipped stages if the stage they are supposed to come after has been added.
+   */
+  private void addSkippedStages(Map<String, List<ExecuteStage>> skippedStages, List<ExecuteStage> stagesJustAdded) {
+    for (ExecuteStage stage : stagesJustAdded) {
+      if (skippedStages.containsKey(stage.service)) {
+        List<ExecuteStage> stagesToAdd = skippedStages.remove(stage.service);
+        addGroupingStages(stagesToAdd, stage.service);
+        addSkippedStages(skippedStages, stagesToAdd);
+      }
+    }
   }
 }

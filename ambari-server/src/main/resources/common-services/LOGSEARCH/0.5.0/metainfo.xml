@@ -21,9 +21,16 @@
     <service>
       <name>LOGSEARCH</name>
       <displayName>Log Search</displayName>
-      <comment>Log aggregation, analysis, and visualization for Ambari managed services</comment>
+      <comment>Log aggregation, analysis, and visualization for Ambari managed services. This service is &lt;b&gt;Technical Preview&lt;/b&gt;.</comment>
       <version>0.5.0</version>
-
+      <selection>TECH_PREVIEW</selection>
+      
+      <credential-store>
+        <supported>true</supported>
+        <enabled>true</enabled>
+        <required>true</required>
+      </credential-store>
+      
       <components>
 
         <component>
@@ -31,11 +38,12 @@
           <timelineAppid>logsearch</timelineAppid>
           <displayName>Log Search Server</displayName>
           <category>MASTER</category>
-          <cardinality>1</cardinality>
+          <cardinality>0-1</cardinality>
           <versionAdvertised>false</versionAdvertised>
           <commandScript>
             <script>scripts/logsearch.py</script>
             <scriptType>PYTHON</scriptType>
+            <timeout>1800</timeout>
           </commandScript>
           <logs>
             <log>
@@ -48,63 +56,22 @@
           </logs>
           <dependencies>
             <dependency>
-              <name>LOGSEARCH/LOGSEARCH_SOLR_CLIENT</name>
+              <name>AMBARI_INFRA_SOLR/INFRA_SOLR_CLIENT</name>
               <scope>host</scope>
               <auto-deploy>
                 <enabled>true</enabled>
               </auto-deploy>
             </dependency>
-
-            <dependency>
-              <name>ZOOKEEPER/ZOOKEEPER_SERVER</name>
-              <scope>cluster</scope>
-              <auto-deploy>
-                <enabled>true</enabled>
-              </auto-deploy>
-            </dependency>
-
           </dependencies>
           <configuration-dependencies>
+            <config-type>infra-solr-env</config-type>
             <config-type>logsearch-properties</config-type>
             <config-type>logsearch-env</config-type>
+            <config-type>logsearch-common-env</config-type>
             <config-type>logsearch-log4j</config-type>
             <config-type>logsearch-admin-json</config-type>
-          </configuration-dependencies>
-        </component>
-
-        <component>
-          <name>LOGSEARCH_SOLR</name>
-          <timelineAppid>logsearch-solr</timelineAppid>
-          <displayName>Log Search Solr Instance</displayName>
-          <category>MASTER</category>
-          <cardinality>1+</cardinality>
-          <versionAdvertised>false</versionAdvertised>
-          <commandScript>
-            <script>scripts/logsearch_solr.py</script>
-            <scriptType>PYTHON</scriptType>
-          </commandScript>
-          <dependencies>
-            <dependency>
-              <name>LOGSEARCH/LOGSEARCH_SOLR_CLIENT</name>
-              <scope>host</scope>
-              <auto-deploy>
-                <enabled>true</enabled>
-              </auto-deploy>
-            </dependency>
-
-            <dependency>
-              <name>ZOOKEEPER/ZOOKEEPER_SERVER</name>
-              <scope>cluster</scope>
-              <auto-deploy>
-                <enabled>true</enabled>
-              </auto-deploy>
-            </dependency>
-
-          </dependencies>
-          <configuration-dependencies>
-            <config-type>logsearch-solr-env</config-type>
-            <config-type>logsearch-solr-xml</config-type>
-            <config-type>logsearch-solr-log4j</config-type>
+            <config-type>logsearch-service_logs-solrconfig.xml</config-type>
+            <config-type>logsearch-audit_logs-solrconfig.xml</config-type>
           </configuration-dependencies>
         </component>
 
@@ -126,55 +93,24 @@
             </log>
           </logs>
 
-          <dependencies>
-
-            <dependency>
-              <name>ZOOKEEPER/ZOOKEEPER_SERVER</name>
-              <scope>cluster</scope>
-              <auto-deploy>
-                <enabled>true</enabled>
-              </auto-deploy>
-            </dependency>
-
-          </dependencies>
-
           <configuration-dependencies>
+            <config-type>infra-solr-env</config-type>
+            <config-type>logsearch-common-env</config-type>
             <config-type>logfeeder-properties</config-type>
             <config-type>logfeeder-env</config-type>
+            <config-type>logfeeder-grok</config-type>
             <config-type>logfeeder-log4j</config-type>
+            <config-type>logfeeder-system_log-env</config-type>
+            <config-type>logfeeder-output-config</config-type>
           </configuration-dependencies>
-        </component>
-
-        <component>
-          <name>LOGSEARCH_SOLR_CLIENT</name>
-          <displayName>Log Search Solr Client</displayName>
-          <category>CLIENT</category>
-          <cardinality>0+</cardinality>
-          <versionAdvertised>false</versionAdvertised>
-          <commandScript>
-            <script>scripts/logsearch_solr_client.py</script>
-            <scriptType>PYTHON</scriptType>
-          </commandScript>
-          <configFiles>
-            <configFile>
-              <type>env</type>
-              <fileName>log4j.properties</fileName>
-              <dictionaryName>logsearch-solr-client-log4j</dictionaryName>
-            </configFile>
-          </configFiles>
         </component>
 
       </components>
 
       <osSpecifics>
         <osSpecific>
-          <osFamily>redhat7,amazon2015,redhat6,suse11,suse12</osFamily>
+          <osFamily>redhat7,amazonlinux2,redhat6,suse11,suse12</osFamily>
           <packages>
-            <package>
-              <name>ambari-logsearch-solr-client</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_logsearch_solr_client</condition>
-            </package>
             <package>
               <name>ambari-logsearch-logfeeder</name>
               <skipUpgrade>true</skipUpgrade>
@@ -185,20 +121,14 @@
               <condition>should_install_logsearch_portal</condition>
             </package>
             <package>
-              <name>ambari-logsearch-solr</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_logsearch_solr</condition>
+              <name>ambari-infra-solr-client</name>
+              <condition>should_install_infra_solr_client</condition>
             </package>
           </packages>
         </osSpecific>
         <osSpecific>
-          <osFamily>debian7,ubuntu12,ubuntu14</osFamily>
+          <osFamily>debian7,debian9,ubuntu12,ubuntu14,ubuntu16</osFamily>
           <packages>
-            <package>
-              <name>ambari-logsearch-solr-client</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_logsearch_solr_client</condition>
-            </package>
             <package>
               <name>ambari-logsearch-logfeeder</name>
               <skipUpgrade>true</skipUpgrade>
@@ -209,17 +139,21 @@
               <condition>should_install_logsearch_portal</condition>
             </package>
             <package>
-              <name>ambari-logsearch-solr</name>
-              <skipUpgrade>true</skipUpgrade>
-              <condition>should_install_logsearch_solr</condition>
+              <name>ambari-infra-solr-client</name>
+              <condition>should_install_infra_solr_client</condition>
             </package>
           </packages>
         </osSpecific>
       </osSpecifics>
 
-      <requiredServices>
-        <service>ZOOKEEPER</service>
-      </requiredServices>
+      <commandScript>
+        <script>scripts/service_check.py</script>
+        <scriptType>PYTHON</scriptType>
+        <timeout>300</timeout>
+      </commandScript>
+
+      <configuration-dependencies>
+      </configuration-dependencies>
 
       <quickLinksConfigurations>
         <quickLinksConfiguration>
@@ -231,6 +165,14 @@
       <themes>
         <theme>
           <fileName>theme.json</fileName>
+          <default>true</default>
+        </theme>
+        <theme>
+          <fileName>credentials.json</fileName>
+          <default>true</default>
+        </theme>
+        <theme>
+          <fileName>directories.json</fileName>
           <default>true</default>
         </theme>
       </themes>

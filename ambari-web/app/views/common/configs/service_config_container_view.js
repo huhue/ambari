@@ -26,6 +26,12 @@ App.ServiceConfigContainerView = Em.ContainerView.extend({
 
   lazyLoading: null,
 
+  didInsertElement: function () {
+    if (this.get('controller.isInstallWizard')) {
+      this.selectedServiceObserver();
+    }
+  },
+
   pushView: function () {
     if (this.get('controller.selectedService')) {
       var self = this;
@@ -38,9 +44,12 @@ App.ServiceConfigContainerView = Em.ContainerView.extend({
           filterBinding: controllerRoute + '.filter',
           columnsBinding: controllerRoute + '.filterColumns',
           selectedServiceBinding: controllerRoute + '.selectedService',
+          actionsStacked: function () {
+            return this.get('controller.isInstallWizard') && this.get('supportsConfigLayout');
+          }.property('controller.isInstallWizard', 'supportsConfigLayout'),
           serviceConfigsByCategoryView: Em.ContainerView.create(),
           willDestroyElement: function () {
-            $('.loading').append(Em.I18n.t('app.loadingPlaceholder'));
+            $('.loading').append(Em.I18n.t('common.loading.eclipses'));
           },
           didInsertElement: function () {
             $('.loading').empty();
@@ -96,7 +105,15 @@ App.ServiceConfigContainerView = Em.ContainerView.extend({
     }
     //terminate lazy loading when switch service
     if (this.get('lazyLoading')) lazyLoading.terminate(this.get('lazyLoading'));
-    this.pushView();
-  }.observes('controller.selectedService')
+    this.pushViewAfterRecommendation();
+  }.observes('controller.selectedService'),
+
+  pushViewAfterRecommendation: function() {
+    if (this.get('controller.isRecommendedLoaded')) {
+      this.pushView();
+    } else {
+      Em.run.later(this.pushViewAfterRecommendation.bind(this), 300);
+    }
+  }
 
 });

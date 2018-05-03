@@ -18,14 +18,20 @@
 
 package org.apache.ambari.server.topology;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.Calendar;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 
 /**
  * Callable service implementation for executing tasks asynchronously.
@@ -34,7 +40,7 @@ import java.util.concurrent.TimeUnit;
  *
  * @param <T> the type returned by the task to be executed
  */
-public class AsyncCallableService<T> implements Callable<Boolean> {
+public class AsyncCallableService<T> implements Callable<T> {
 
   private static final Logger LOG = LoggerFactory.getLogger(AsyncCallableService.class);
 
@@ -43,82 +49,89 @@ public class AsyncCallableService<T> implements Callable<Boolean> {
 
   // the task to be executed
   private final Callable<T> task;
+  private final String taskName;
 
   // the total time the allowed for the task to be executed (retries will be happen within this timeframe in
   // milliseconds)
   private final long timeout;
 
   // the delay between two consecutive execution trials in milliseconds
-  private final long delay;
+  private final long retryDelay;
+  private final Consumer<Throwable> onError;
 
+  public AsyncCallableService(Callable<T> task, long timeout, long retryDelay, String taskName, Consumer<Throwable> onError) {
+    this(task, timeout, retryDelay, taskName, Executors.newScheduledThreadPool(1), onError);
+  }
 
-  private Boolean serviceResult = Boolean.FALSE;
+  public AsyncCallableService(Callable<T> task, long timeout, long retryDelay, String taskName, ScheduledExecutorService executorService, Consumer<Throwable> onError) {
+    Preconditions.checkArgument(retryDelay > 0, "retryDelay should be positive");
 
-  public AsyncCallableService(Callable<T> task, long timeout, long delay,
-                              ScheduledExecutorService executorService) {
     this.task = task;
     this.executorService = executorService;
     this.timeout = timeout;
-    this.delay = delay;
+    this.retryDelay = retryDelay;
+    this.taskName = taskName;
+    this.onError = onError;
   }
 
   @Override
-  public Boolean call() {
+  public T call() throws Exception {
+    long startTime = System.currentTimeMillis();
+    long timeLeft = timeout;
+    Future<T> future = executorService.submit(task);
+    LOG.info("Task {} execution started at {}", taskName, startTime);
 
-    long startTimeInMillis = Calendar.getInstance().getTimeInMillis();
-    LOG.info("Task execution started at: {}", startTimeInMillis);
-
-    // task execution started on a new thread
-    Future future = executorService.submit(task);
-
-    while (!taskCompleted(future)) {
-      if (!timeoutExceeded(startTimeInMillis)) {
-        LOG.debug("Retrying task execution in [ {} ] milliseconds.", delay);
-        future = executorService.schedule(task, delay, TimeUnit.MILLISECONDS);
-      } else {
-        LOG.debug("Timout exceeded, cancelling task ... ");
-        // making sure the task gets cancelled!
-        if (!future.isDone()) {
-          boolean cancelled = future.cancel(true);
-          LOG.debug("Task cancelled: {}", cancelled);
-        } else {
-          LOG.debug("Task already done.");
+    Throwable lastError = null;
+    while (true) {
+      try {
+        LOG.debug("Task {} waiting for result at most {} ms", taskName, timeLeft);
+        T taskResult = future.get(timeLeft, TimeUnit.MILLISECONDS);
+        LOG.info("Task {} successfully completed with result: {}", taskName, taskResult);
+        return taskResult;
+      } catch (TimeoutException e) {
+        LOG.debug("Task {} timeout", taskName);
+        if (lastError == null) {
+          lastError = e;
         }
-        LOG.info("Timeout exceeded, task execution won't be retried!");
-        // exit the "retry" loop!
-        break;
+        timeLeft = 0;
+      } catch (ExecutionException e) {
+        Throwable cause = Throwables.getRootCause(e);
+        if (!(cause instanceof RetryTaskSilently)) {
+          LOG.info(String.format("Task %s exception during execution", taskName), cause);
+        }
+        lastError = cause;
+        timeLeft = timeout - (System.currentTimeMillis() - startTime) - retryDelay;
       }
+
+      if (timeLeft <= 0) {
+        attemptToCancel(future);
+        LOG.warn("Task {} timeout exceeded, no more retries", taskName);
+        onError.accept(lastError);
+        return null;
+      }
+
+      LOG.debug("Task {} retrying execution in {} milliseconds", taskName, retryDelay);
+      future = executorService.schedule(task, retryDelay, TimeUnit.MILLISECONDS);
     }
-
-    LOG.info("Exiting Async task execution with the result: [ {} ]", serviceResult);
-    return serviceResult;
   }
 
-  private boolean taskCompleted(Future<T> future) {
-    boolean completed = false;
-    try {
-      LOG.debug("Retrieving task execution result ...");
-      // should receive task execution result within the configured timeout interval
-      // exceptions thrown from the task are propagated here
-      T taskResult = future.get(timeout, TimeUnit.MILLISECONDS);
-
-      // task failures are expected to be reportesd as exceptions
-      LOG.debug("Task successfully executed: {}", taskResult);
-      setServiceResult(Boolean.TRUE);
-      completed = true;
-    } catch (Exception e) {
-      // Future.isDone always true here!
-      LOG.info("Exception during task execution: ", e);
+  private void attemptToCancel(Future<?> future) {
+    LOG.debug("Task {} timeout exceeded, cancelling", taskName);
+    if (!future.isDone() && future.cancel(true)) {
+      LOG.debug("Task {} cancelled", taskName);
+    } else {
+      LOG.debug("Task {} already done", taskName);
     }
-    return completed;
   }
 
-  private boolean timeoutExceeded(long startTimeInMillis) {
-    return timeout < Calendar.getInstance().getTimeInMillis() - startTimeInMillis;
-  }
-
-  private void setServiceResult(Boolean serviceResult) {
-    this.serviceResult = serviceResult;
+  public static class RetryTaskSilently extends RuntimeException {
+    // marker, throw if the task needs to be retried
+    public RetryTaskSilently() {
+      super();
+    }
+    public RetryTaskSilently(String message) {
+      super(message);
+    }
   }
 
 }

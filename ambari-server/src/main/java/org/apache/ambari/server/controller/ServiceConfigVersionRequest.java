@@ -18,6 +18,10 @@
 
 package org.apache.ambari.server.controller;
 
+import org.apache.ambari.server.controller.internal.ServiceConfigVersionResourceProvider;
+
+import io.swagger.annotations.ApiModelProperty;
+
 public class ServiceConfigVersionRequest {
   private String clusterName;
   private String serviceName;
@@ -31,15 +35,17 @@ public class ServiceConfigVersionRequest {
   public ServiceConfigVersionRequest() {
   }
 
-  public ServiceConfigVersionRequest(String clusterName, String serviceName, Long version, Long createTime, Long applyTime, String userName) {
+  public ServiceConfigVersionRequest(String clusterName, String serviceName, Long version, Long createTime, Long applyTime, String userName, Boolean isCurrent) {
     this.clusterName = clusterName;
     this.serviceName = serviceName;
     this.version = version;
     this.createTime = createTime;
     this.applyTime = applyTime;
     this.userName = userName;
+    this.isCurrent = isCurrent;
   }
 
+  @ApiModelProperty(name = ServiceConfigVersionResourceProvider.SERVICE_NAME_PROPERTY_ID)
   public String getServiceName() {
     return serviceName;
   }
@@ -48,6 +54,7 @@ public class ServiceConfigVersionRequest {
     this.serviceName = serviceName;
   }
 
+  @ApiModelProperty(name = ServiceConfigVersionResourceProvider.SERVICE_CONFIG_VERSION_PROPERTY_ID)
   public Long getVersion() {
     return version;
   }
@@ -56,6 +63,7 @@ public class ServiceConfigVersionRequest {
     this.version = version;
   }
 
+  @ApiModelProperty(name = ServiceConfigVersionResourceProvider.CREATE_TIME_PROPERTY_ID)
   public Long getCreateTime() {
     return createTime;
   }
@@ -64,6 +72,7 @@ public class ServiceConfigVersionRequest {
     this.createTime = createTime;
   }
 
+  @ApiModelProperty(name = ServiceConfigVersionResourceProvider.APPLIED_TIME_PROPERTY_ID)
   public Long getApplyTime() {
     return applyTime;
   }
@@ -72,6 +81,7 @@ public class ServiceConfigVersionRequest {
     this.applyTime = applyTime;
   }
 
+  @ApiModelProperty(name = ServiceConfigVersionResourceProvider.USER_PROPERTY_ID)
   public String getUserName() {
     return userName;
   }
@@ -80,6 +90,7 @@ public class ServiceConfigVersionRequest {
     this.userName = userName;
   }
 
+  @ApiModelProperty(name = ServiceConfigVersionResourceProvider.CLUSTER_NAME_PROPERTY_ID)
   public String getClusterName() {
     return clusterName;
   }
@@ -88,6 +99,7 @@ public class ServiceConfigVersionRequest {
     this.clusterName = clusterName;
   }
 
+  @ApiModelProperty(name = ServiceConfigVersionResourceProvider.SERVICE_CONFIG_VERSION_NOTE_PROPERTY_ID)
   public String getNote() {
     return note;
   }
@@ -96,6 +108,7 @@ public class ServiceConfigVersionRequest {
     this.note = note;
   }
 
+  @ApiModelProperty(name = ServiceConfigVersionResourceProvider.IS_CURRENT_PROPERTY_ID)
   public Boolean getIsCurrent() {
     return isCurrent;
   }

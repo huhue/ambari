@@ -60,17 +60,54 @@ import org.apache.commons.lang.ArrayUtils;
     , initialValue = 1
 )
 @NamedQueries({
-    @NamedQuery(name = "HostRoleCommandEntity.findCountByCommandStatuses", query = "SELECT COUNT(command.taskId) FROM HostRoleCommandEntity command WHERE command.status IN :statuses"),
-    @NamedQuery(name = "HostRoleCommandEntity.findByRequestIdAndStatuses", query="SELECT task FROM HostRoleCommandEntity task WHERE task.requestId=:requestId AND task.status IN :statuses ORDER BY task.taskId ASC"),
-    @NamedQuery(name = "HostRoleCommandEntity.findTasksByStatusesOrderByIdDesc", query = "SELECT task FROM HostRoleCommandEntity task WHERE task.requestId = :requestId AND task.status IN :statuses ORDER BY task.taskId DESC"),
-    @NamedQuery(name = "HostRoleCommandEntity.findNumTasksAlreadyRanInStage", query = "SELECT COUNT(task.taskId) FROM HostRoleCommandEntity task WHERE task.requestId = :requestId AND task.taskId > :taskId AND task.stageId > :stageId AND task.status NOT IN :statuses"),
-    @NamedQuery(name = "HostRoleCommandEntity.findByCommandStatuses", query = "SELECT command FROM HostRoleCommandEntity command WHERE command.status IN :statuses ORDER BY command.requestId, command.stageId"),
-    @NamedQuery(name = "HostRoleCommandEntity.findByHostId", query = "SELECT command FROM HostRoleCommandEntity command WHERE command.hostId=:hostId"),
-    @NamedQuery(name = "HostRoleCommandEntity.findByHostRole", query = "SELECT command FROM HostRoleCommandEntity command WHERE command.hostEntity.hostName=:hostName AND command.requestId=:requestId AND command.stageId=:stageId AND command.role=:role ORDER BY command.taskId"),
-    @NamedQuery(name = "HostRoleCommandEntity.findByHostRoleNullHost", query = "SELECT command FROM HostRoleCommandEntity command WHERE command.hostEntity IS NULL AND command.requestId=:requestId AND command.stageId=:stageId AND command.role=:role"),
-    @NamedQuery(name = "HostRoleCommandEntity.findByStatusBetweenStages", query = "SELECT command FROM HostRoleCommandEntity command WHERE command.requestId = :requestId AND command.stageId >= :minStageId AND command.stageId <= :maxStageId AND command.status = :status"),
-    @NamedQuery(name = "HostRoleCommandEntity.updateAutoSkipExcludeRoleCommand", query = "UPDATE HostRoleCommandEntity command SET command.autoSkipOnFailure = :autoSkipOnFailure WHERE command.requestId = :requestId AND command.roleCommand <> :roleCommand"),
-    @NamedQuery(name = "HostRoleCommandEntity.updateAutoSkipForRoleCommand", query = "UPDATE HostRoleCommandEntity command SET command.autoSkipOnFailure = :autoSkipOnFailure WHERE command.requestId = :requestId AND command.roleCommand = :roleCommand")
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findTaskIdsByRequestStageIds",
+        query = "SELECT command.taskId FROM HostRoleCommandEntity command WHERE command.stageId = :stageId AND command.requestId = :requestId"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findCountByCommandStatuses",
+        query = "SELECT COUNT(command.taskId) FROM HostRoleCommandEntity command WHERE command.status IN :statuses"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findByRequestIdAndStatuses",
+        query = "SELECT task FROM HostRoleCommandEntity task WHERE task.requestId=:requestId AND task.status IN :statuses ORDER BY task.taskId ASC"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findTasksByStatusesOrderByIdDesc",
+        query = "SELECT task FROM HostRoleCommandEntity task WHERE task.requestId = :requestId AND task.status IN :statuses ORDER BY task.taskId DESC"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findNumTasksAlreadyRanInStage",
+        query = "SELECT COUNT(task.taskId) FROM HostRoleCommandEntity task WHERE task.requestId = :requestId AND task.taskId > :taskId AND task.stageId > :stageId AND task.status NOT IN :statuses"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findByCommandStatuses",
+        query = "SELECT command FROM HostRoleCommandEntity command WHERE command.status IN :statuses ORDER BY command.requestId, command.stageId"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findByHostId",
+        query = "SELECT command FROM HostRoleCommandEntity command WHERE command.hostId=:hostId"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findByHostRole",
+        query = "SELECT command FROM HostRoleCommandEntity command WHERE command.hostEntity.hostName=:hostName AND command.requestId=:requestId AND command.stageId=:stageId AND command.role=:role ORDER BY command.taskId"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findByHostRoleNullHost",
+        query = "SELECT command FROM HostRoleCommandEntity command WHERE command.hostEntity IS NULL AND command.requestId=:requestId AND command.stageId=:stageId AND command.role=:role"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findByStatusBetweenStages",
+        query = "SELECT command FROM HostRoleCommandEntity command WHERE command.requestId = :requestId AND command.stageId >= :minStageId AND command.stageId <= :maxStageId AND command.status = :status"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.updateAutoSkipExcludeRoleCommand",
+        query = "UPDATE HostRoleCommandEntity command SET command.autoSkipOnFailure = :autoSkipOnFailure WHERE command.requestId = :requestId AND command.roleCommand <> :roleCommand"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.updateAutoSkipForRoleCommand",
+        query = "UPDATE HostRoleCommandEntity command SET command.autoSkipOnFailure = :autoSkipOnFailure WHERE command.requestId = :requestId AND command.roleCommand = :roleCommand"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.removeByTaskIds",
+        query = "DELETE FROM HostRoleCommandEntity command WHERE command.taskId IN :taskIds"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findHostsByCommandStatus",
+        query = "SELECT DISTINCT(host.hostName) FROM HostRoleCommandEntity command, HostEntity host WHERE (command.requestId >= :iLowestRequestIdInProgress AND command.requestId <= :iHighestRequestIdInProgress) AND command.status IN :statuses AND command.hostId = host.hostId AND host.hostName IS NOT NULL"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.getBlockingHostsForRequest",
+        query = "SELECT DISTINCT(host.hostName) FROM HostRoleCommandEntity command, HostEntity host WHERE command.requestId >= :lowerRequestIdInclusive AND command.requestId < :upperRequestIdExclusive AND command.status IN :statuses AND command.isBackgroundCommand=0 AND command.hostId = host.hostId AND host.hostName IS NOT NULL"),
+    @NamedQuery(
+        name = "HostRoleCommandEntity.findLatestServiceChecksByRole",
+        query = "SELECT NEW org.apache.ambari.server.orm.dao.HostRoleCommandDAO.LastServiceCheckDTO(command.role, MAX(command.endTime)) FROM HostRoleCommandEntity command WHERE command.roleCommand = :roleCommand AND command.endTime > 0 AND command.stage.clusterId = :clusterId GROUP BY command.role ORDER BY command.role ASC")
 })
 public class HostRoleCommandEntity {
 
@@ -105,9 +142,9 @@ public class HostRoleCommandEntity {
   @Basic
   private Integer exitcode = 0;
 
-  @Column(name = "status")
+  @Column(name = "status", nullable = false)
   @Enumerated(EnumType.STRING)
-  private HostRoleStatus status;
+  private HostRoleStatus status = HostRoleStatus.PENDING;
 
   @Column(name = "std_error")
   @Lob
@@ -176,6 +213,11 @@ public class HostRoleCommandEntity {
   @Basic
   private String commandDetail;
 
+  // An optional property that can be used for setting the displayName for operations window
+  @Column(name = "ops_display_name")
+  @Basic
+  private String opsDisplayName;
+
   // When command type id CUSTOM_COMMAND and CUSTOM_ACTION this is the name
   @Column(name = "custom_command_name")
   @Basic
@@ -194,6 +236,10 @@ public class HostRoleCommandEntity {
 
   @OneToOne(mappedBy = "hostRoleCommandEntity", cascade = CascadeType.REMOVE)
   private TopologyLogicalTaskEntity topologyLogicalTaskEntity;
+
+  @Basic
+  @Column(name = "is_background", nullable = false)
+  private short isBackgroundCommand = 0;
 
   public Long getTaskId() {
     return taskId;
@@ -369,6 +415,16 @@ public class HostRoleCommandEntity {
     this.customCommandName = customCommandName;
   }
 
+  public String getOpsDisplayName() {
+    return opsDisplayName;
+  }
+
+  public void setOpsDisplayName(String opsDisplayName) {
+    this.opsDisplayName = opsDisplayName;
+  }
+
+  
+
   /**
    * Determine whether this task should hold for retry when an error occurs.
    *
@@ -405,6 +461,26 @@ public class HostRoleCommandEntity {
    */
   public void setAutoSkipOnFailure(boolean skipFailures) {
     autoSkipOnFailure = skipFailures ? 1 : 0;
+  }
+
+  /**
+   * Sets whether this is a command is a background command and will not block
+   * other commands.
+   *
+   * @param runInBackground
+   *          {@code true} if this is a background command, {@code false}
+   *          otherwise.
+   */
+  public void setBackgroundCommand(boolean runInBackground) {
+    isBackgroundCommand = (short) (runInBackground ? 1 : 0);
+  }
+
+  /**
+   * Gets whether this command runs in the background and will not block other
+   * commands.
+   */
+  public boolean isBackgroundCommand() {
+    return isBackgroundCommand == 0 ? false : true;
   }
 
   @Override
@@ -511,8 +587,27 @@ public class HostRoleCommandEntity {
     return stage;
   }
 
+  /**
+   * Sets the associated {@link StageEntity} for this command. If the
+   * {@link StageEntity} has been persisted, then this will also set the
+   * commands stage and request ID fields.
+   *
+   * @param stage
+   */
   public void setStage(StageEntity stage) {
     this.stage = stage;
+
+    // ensure that the IDs are also set since they may not be retrieved from JPA
+    // when this entity is cached
+    if (null != stage) {
+      if (null == stageId) {
+        stageId = stage.getStageId();
+      }
+
+      if (null == requestId) {
+        requestId = stage.getRequestId();
+      }
+    }
   }
 
   public HostEntity getHostEntity() {

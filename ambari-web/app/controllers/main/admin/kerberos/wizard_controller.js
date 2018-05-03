@@ -23,6 +23,15 @@ App.KerberosWizardController = App.WizardController.extend(App.InstallComponent,
 
   exceptionsOnSkipClient: [{'KDC': 'realm'}, {'KDC': 'kdc_type'}, {'Advanced kerberos-env': 'executable_search_paths'}],
 
+  exceptionsForNonAdOption: [
+    {"Advanced kerberos-env": "password_length"},
+    {"Advanced kerberos-env": "password_min_digits"},
+    {"Advanced kerberos-env": "password_min_lowercase_letters"},
+    {"Advanced kerberos-env": "password_min_punctuation"},
+    {"Advanced kerberos-env": "password_min_uppercase_letters"},
+    {"Advanced kerberos-env": "password_min_whitespace"}
+  ],
+
   name: 'kerberosWizardController',
 
   totalSteps: 8,
@@ -111,6 +120,21 @@ App.KerberosWizardController = App.WizardController.extend(App.InstallComponent,
     return configs;
   },
 
+  dataLoading: function() {
+    var dfd = $.Deferred();
+    this.connectOutlet('loading');
+    if (App.router.get('clusterController.isLoaded') && App.router.get('clusterController.isComponentsStateLoaded')) {
+      dfd.resolve();
+    } else {
+      var interval = setInterval(function () {
+        if (App.router.get('clusterController.isLoaded') && App.router.get('clusterController.isComponentsStateLoaded')) {
+          dfd.resolve();
+          clearInterval(interval);
+        }
+      }, 50);
+    }
+    return dfd.promise();
+  },
   /**
    * save status of the cluster.
    * @param clusterStatus object with status,requestId fields.
@@ -140,33 +164,23 @@ App.KerberosWizardController = App.WizardController.extend(App.InstallComponent,
   },
 
   /**
-   * Load serviceConfigProperties to model
-   */
-  loadServiceConfigProperties: function () {
-    var serviceConfigProperties = this.getDBProperty('serviceConfigProperties');
-    this.set('content.serviceConfigProperties', serviceConfigProperties);
-  },
-
-  loadKerberosDescriptorConfigs: function () {
-    var kerberosDescriptorConfigs = this.getDBProperty('kerberosDescriptorConfigs');
-    this.set('kerberosDescriptorConfigs', kerberosDescriptorConfigs);
-  },
-
-  /**
    * Override the visibility of a list of form items with a new value
    *
    * @param {Array} itemsArray
    * @param {boolean} newValue
    * @param {Array} exceptions
    */
-  overrideVisibility: function (itemsArray, newValue, exceptions) {
+  overrideVisibility: function (itemsArray, newValue, exceptions, inverse) {
     newValue = newValue || false;
 
     for (var i = 0, len = itemsArray.length; i < len; i += 1) {
       if (!App.isEmptyObject(itemsArray[i])) {
         var isException = exceptions.filterProperty(itemsArray[i].category, itemsArray[i].name);
-        if (!isException.length) {
+        if (!isException.length && !inverse) {
           itemsArray[i].isVisible = newValue;
+        }
+        if (isException.length && inverse) {
+            itemsArray[i].isVisible = newValue;
         }
       }
     }
@@ -174,15 +188,6 @@ App.KerberosWizardController = App.WizardController.extend(App.InstallComponent,
 
   loadKerberosOption: function () {
     this.set('content.kerberosOption', this.getDBProperty('kerberosOption'));
-  },
-
-  /**
-   * @method saveKerberosDescriptorConfigs
-   * @param {App.ServiceConfigProperty[]} kerberosDescriptorConfigs
-   */
-  saveKerberosDescriptorConfigs: function (kerberosDescriptorConfigs) {
-    this.setDBProperty('kerberosDescriptorConfigs', kerberosDescriptorConfigs);
-    this.set('kerberosDescriptorConfigs', kerberosDescriptorConfigs);
   },
 
   createKerberosResources: function (callback) {
@@ -287,15 +292,22 @@ App.KerberosWizardController = App.WizardController.extend(App.InstallComponent,
     ],
     '2': [
       {
-        type: 'sync',
+        type: 'async',
         callback: function () {
-          var self = this;
-          this.loadServiceConfigProperties();
-          if (!this.get('stackConfigsLoaded')) {
-            App.config.loadConfigsFromStack(['KERBEROS']).complete(function() {
+          const self = this;
+          const dfd = $.Deferred();
+
+          if (!self.get('stackConfigsLoaded')) {
+            App.config.loadConfigsFromStack(['KERBEROS']).always(function() {
+              self.loadServiceConfigProperties();
               self.set('stackConfigsLoaded', true);
-            }, this);
+              dfd.resolve();
+            });
+          } else {
+            this.loadServiceConfigProperties();
+            dfd.resolve();
           }
+          return dfd.promise();
         }
       }
     ],
@@ -352,7 +364,7 @@ App.KerberosWizardController = App.WizardController.extend(App.InstallComponent,
     var primaryText = Em.I18n.t('common.exitAnyway');
     var msg = isCritical ? Em.I18n.t('admin.kerberos.wizard.exit.critical.msg')
       : Em.I18n.t('admin.kerberos.wizard.exit.warning.msg');
-    return App.showConfirmationPopup(primary, msg, null, null, primaryText, isCritical);
+    return App.showConfirmationPopup(primary, msg, null, null, primaryText, isCritical ? 'danger' : 'success');
   },
 
   /**

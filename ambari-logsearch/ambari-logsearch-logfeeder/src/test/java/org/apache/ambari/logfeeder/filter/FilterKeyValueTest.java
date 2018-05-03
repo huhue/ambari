@@ -18,11 +18,13 @@
 
 package org.apache.ambari.logfeeder.filter;
 
-import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.ambari.logfeeder.OutputMgr;
-import org.apache.ambari.logfeeder.input.InputMarker;
+import org.apache.ambari.logfeeder.conf.LogFeederProps;
+import org.apache.ambari.logfeeder.input.InputFileMarker;
+import org.apache.ambari.logfeeder.plugin.manager.OutputManager;
+import org.apache.ambari.logsearch.config.api.model.inputconfig.FilterKeyValueDescriptor;
+import org.apache.ambari.logsearch.config.zookeeper.model.inputconfig.impl.FilterKeyValueDescriptorImpl;
 import org.apache.log4j.Logger;
 import org.easymock.Capture;
 import org.easymock.CaptureType;
@@ -38,36 +40,35 @@ public class FilterKeyValueTest {
   private static final Logger LOG = Logger.getLogger(FilterKeyValueTest.class);
 
   private FilterKeyValue filterKeyValue;
-  private OutputMgr mockOutputMgr;
+  private OutputManager mockOutputManager;
   private Capture<Map<String, Object>> capture;
 
-  public void init(Map<String, Object> config) throws Exception {
-    mockOutputMgr = EasyMock.strictMock(OutputMgr.class);
+  public void init(FilterKeyValueDescriptor filterKeyValueDescriptor) throws Exception {
+    mockOutputManager = EasyMock.strictMock(OutputManager.class);
     capture = EasyMock.newCapture(CaptureType.LAST);
 
     filterKeyValue = new FilterKeyValue();
-    filterKeyValue.loadConfig(config);
-    filterKeyValue.setOutputMgr(mockOutputMgr);
-    filterKeyValue.init();
+    filterKeyValue.loadConfig(filterKeyValueDescriptor);
+    filterKeyValue.setOutputManager(mockOutputManager);
+    filterKeyValue.init(new LogFeederProps());
   }
 
   @Test
   public void testFilterKeyValue_extraction() throws Exception {
     LOG.info("testFilterKeyValue_extraction()");
 
-    Map<String, Object> config = new HashMap<String, Object>();
-    config.put("source_field", "keyValueField");
-    config.put("field_split", "&");
-    // using default value split:
-    init(config);
+    FilterKeyValueDescriptorImpl filterKeyValueDescriptor = new FilterKeyValueDescriptorImpl();
+    filterKeyValueDescriptor.setSourceField("keyValueField");
+    filterKeyValueDescriptor.setFieldSplit("&");
+    init(filterKeyValueDescriptor);
 
-    mockOutputMgr.write(EasyMock.capture(capture), EasyMock.anyObject(InputMarker.class));
+    mockOutputManager.write(EasyMock.capture(capture), EasyMock.anyObject(InputFileMarker.class));
     EasyMock.expectLastCall();
-    EasyMock.replay(mockOutputMgr);
+    EasyMock.replay(mockOutputManager);
 
-    filterKeyValue.apply("{ keyValueField: 'name1=value1&name2=value2' }", new InputMarker());
+    filterKeyValue.apply("{ keyValueField: 'name1=value1&name2=value2' }", new InputFileMarker(null, null, 0));
 
-    EasyMock.verify(mockOutputMgr);
+    EasyMock.verify(mockOutputManager);
     Map<String, Object> jsonParams = capture.getValue();
 
     assertEquals("Original missing!", "name1=value1&name2=value2", jsonParams.remove("keyValueField"));
@@ -77,21 +78,45 @@ public class FilterKeyValueTest {
   }
 
   @Test
+  public void testFilterKeyValue_extractionWithBorders() throws Exception {
+    LOG.info("testFilterKeyValue_extractionWithBorders()");
+
+    FilterKeyValueDescriptorImpl filterKeyValueDescriptor = new FilterKeyValueDescriptorImpl();
+    filterKeyValueDescriptor.setSourceField("keyValueField");
+    filterKeyValueDescriptor.setFieldSplit("&");
+    filterKeyValueDescriptor.setValueBorders("()");
+    init(filterKeyValueDescriptor);
+
+    mockOutputManager.write(EasyMock.capture(capture), EasyMock.anyObject(InputFileMarker.class));
+    EasyMock.expectLastCall();
+    EasyMock.replay(mockOutputManager);
+
+    filterKeyValue.apply("{ keyValueField: 'name1(value1)&name2(value2)' }", new InputFileMarker(null, null, 0));
+
+    EasyMock.verify(mockOutputManager);
+    Map<String, Object> jsonParams = capture.getValue();
+
+    assertEquals("Original missing!", "name1(value1)&name2(value2)", jsonParams.remove("keyValueField"));
+    assertEquals("Incorrect extraction: name1", "value1", jsonParams.remove("name1"));
+    assertEquals("Incorrect extraction: name2", "value2", jsonParams.remove("name2"));
+    assertTrue("jsonParams are not empty!", jsonParams.isEmpty());
+  }
+
+  @Test
   public void testFilterKeyValue_missingSourceField() throws Exception {
     LOG.info("testFilterKeyValue_missingSourceField()");
 
-    Map<String, Object> config = new HashMap<String, Object>();
-    config.put("field_split", "&");
-    // using default value split: =
-    init(config);
+    FilterKeyValueDescriptorImpl filterKeyValueDescriptor = new FilterKeyValueDescriptorImpl();
+    filterKeyValueDescriptor.setFieldSplit("&");
+    init(filterKeyValueDescriptor);
 
-    mockOutputMgr.write(EasyMock.capture(capture), EasyMock.anyObject(InputMarker.class));
+    mockOutputManager.write(EasyMock.capture(capture), EasyMock.anyObject(InputFileMarker.class));
     EasyMock.expectLastCall().anyTimes();
-    EasyMock.replay(mockOutputMgr);
+    EasyMock.replay(mockOutputManager);
 
-    filterKeyValue.apply("{ keyValueField: 'name1=value1&name2=value2' }", new InputMarker());
+    filterKeyValue.apply("{ keyValueField: 'name1=value1&name2=value2' }", new InputFileMarker(null, null, 0));
 
-    EasyMock.verify(mockOutputMgr);
+    EasyMock.verify(mockOutputManager);
     assertFalse("Something was captured!", capture.hasCaptured());
   }
 
@@ -99,19 +124,19 @@ public class FilterKeyValueTest {
   public void testFilterKeyValue_noSourceFieldPresent() throws Exception {
     LOG.info("testFilterKeyValue_noSourceFieldPresent()");
 
-    Map<String, Object> config = new HashMap<String, Object>();
-    config.put("source_field", "keyValueField");
-    config.put("field_split", "&");
-    init(config);
+    FilterKeyValueDescriptorImpl filterKeyValueDescriptor = new FilterKeyValueDescriptorImpl();
+    filterKeyValueDescriptor.setSourceField("keyValueField");
+    filterKeyValueDescriptor.setFieldSplit("&");
+    init(filterKeyValueDescriptor);
 
     // using default value split: =
-    mockOutputMgr.write(EasyMock.capture(capture), EasyMock.anyObject(InputMarker.class));
+    mockOutputManager.write(EasyMock.capture(capture), EasyMock.anyObject(InputFileMarker.class));
     EasyMock.expectLastCall().anyTimes();
-    EasyMock.replay(mockOutputMgr);
+    EasyMock.replay(mockOutputManager);
 
-    filterKeyValue.apply("{ otherField: 'name1=value1&name2=value2' }", new InputMarker());
+    filterKeyValue.apply("{ otherField: 'name1=value1&name2=value2' }", new InputFileMarker(null, null, 0));
 
-    EasyMock.verify(mockOutputMgr);
+    EasyMock.verify(mockOutputManager);
     Map<String, Object> jsonParams = capture.getValue();
 
     assertEquals("Original missing!", "name1=value1&name2=value2", jsonParams.remove("otherField"));

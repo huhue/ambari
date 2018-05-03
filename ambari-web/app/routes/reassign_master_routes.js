@@ -26,16 +26,25 @@ module.exports = App.WizardRoute.extend({
     reassignMasterController.resetOnClose(reassignMasterController, 'main.index');
   },
 
+  breadcrumbs: {
+    labelBindingPath: 'App.router.reassignMasterController.content.reassign.display_name',
+    labelPostFormat(label) {
+      let msg = Em.I18n.t('services.reassign.header');
+      return label ? `${msg} (${label})` : msg;
+    }
+  },
+
   enter: function (router) {
     var context = this;
     var reassignMasterController = router.get('reassignMasterController');
 
     reassignMasterController.dataLoading().done(function () {
-      if (App.router.get('mainHostController.hostsCountMap.TOTAL') > 1) {
+      if (App.get('allHostNames.length') > 1) {
         Em.run.next(function () {
           App.router.get('updateController').set('isWorking', false);
           var popup = App.ModalPopup.show({
-            classNames: ['full-width-modal'],
+            classNames: ['wizard-modal-wrapper'],
+            modalDialogClasses: ['modal-xlg'],
             header: Em.I18n.t('services.reassign.header'),
             bodyClass: App.ReassignMasterView.extend({
               controller: reassignMasterController
@@ -57,8 +66,8 @@ module.exports = App.WizardRoute.extend({
                 var step4Controller = router.get('reassignMasterWizardStep4Controller');
                 var testDBTaskId = step4Controller.get('tasks').filterProperty('command', 'testDBConnection').get('firstObject.id');
 
-                if(currStep !== "7" 
-                   && testDBTaskId 
+                if(currStep !== "7"
+                   && testDBTaskId
                    && reassignMasterController.get('content.tasksStatuses').get(testDBTaskId) === "FAILED")
                 {
                   App.showConfirmationPopup(function () {
@@ -169,16 +178,22 @@ module.exports = App.WizardRoute.extend({
   step3: Em.Route.extend({
     route: '/step3',
     connectOutlets: function (router) {
-      var controller = router.get('reassignMasterController');
+      var controller = router.get('reassignMasterController'),
+        stepController = router.get('reassignMasterWizardStep3Controller');
       controller.setCurrentStep('3');
       controller.dataLoading().done(function () {
         controller.loadAllPriorSteps();
+        stepController.set('wizardController', controller);
         controller.connectOutlet('reassignMasterWizardStep3', controller.get('content'));
       })
     },
     back: Em.Router.transitionTo('step2'),
     next: function (router) {
-      var controller = router.get('reassignMasterController');
+      var controller = router.get('reassignMasterController'),
+        stepController = router.get('reassignMasterWizardStep3Controller'),
+        configs = stepController.get('configs'),
+        attributes = stepController.get('configsAttributes'),
+        secureConfigs = stepController.get('secureConfigs');
       App.db.setReassignTasksStatuses(undefined);
       App.db.setReassignTasksRequestIds(undefined);
       App.clusterStatus.setClusterStatus({
@@ -188,7 +203,14 @@ module.exports = App.WizardRoute.extend({
         localdb: App.db.data
       });
       controller.saveReassignComponentsInMM(controller.getReassignComponentsInMM());
+      stepController.updateServiceConfigs();
+      controller.saveConfigs(configs, attributes);
+      controller.saveSecureConfigs(secureConfigs);
       router.transitionTo('step4');
+    },
+
+    exit: function (router) {
+      router.get('reassignMasterWizardStep3Controller').clearStep();
     },
 
     unroutePath: function () {
@@ -199,11 +221,13 @@ module.exports = App.WizardRoute.extend({
   step4: Em.Route.extend({
     route: '/step4',
     connectOutlets: function (router) {
-      var controller = router.get('reassignMasterController');
+      var controller = router.get('reassignMasterController'),
+        stepController = router.get('reassignMasterWizardStep4Controller');
       controller.setCurrentStep('4');
       controller.setLowerStepsDisable(4);
       router.get('mainController').isLoading.call(router.get('clusterController'), 'isServiceContentFullyLoaded').done(function () {
         controller.loadAllPriorSteps();
+        stepController.set('wizardController', controller);
         controller.connectOutlet('reassignMasterWizardStep4', controller.get('content'));
       });
     },
@@ -224,19 +248,7 @@ module.exports = App.WizardRoute.extend({
       var controller = router.get('reassignMasterController');
       var reassignMasterWizardStep4 = router.get('reassignMasterWizardStep4Controller');
       if (!reassignMasterWizardStep4.get('isSubmitDisabled')) {
-        controller.finish();
-        controller.get('popup').hide();
-        App.clusterStatus.setClusterStatus({
-          clusterName: router.get('reassignMasterController.content.cluster.name'),
-          clusterState: 'DEFAULT',
-          localdb: App.db.data
-        }, {alwaysCallback: function () {
-          controller.get('popup').hide();
-          router.transitionTo('main.index');
-          Em.run.next(function() {
-            location.reload();
-          });
-        }});
+        controller.resetOnClose(controller, 'main.index');
       }
     },
 
@@ -289,22 +301,21 @@ module.exports = App.WizardRoute.extend({
 
     next: function (router) {
       var controller = router.get('reassignMasterController');
-      var reassignMasterWizardStep6 = router.get('reassignMasterWizardStep6Controller');
-      if (!reassignMasterWizardStep6.get('isSubmitDisabled')) {
-        controller.finish();
-        controller.get('popup').hide();
-        App.clusterStatus.setClusterStatus({
-          clusterName: router.get('reassignMasterController.content.cluster.name'),
-          clusterState: 'DEFAULT',
-          localdb: App.db.data
-        }, {alwaysCallback: function () {
+      controller.finish();
+      controller.get('popup').hide();
+      App.clusterStatus.setClusterStatus({
+        clusterName: router.get('reassignMasterController.content.cluster.name'),
+        clusterState: 'DEFAULT',
+        localdb: App.db.data
+      }, {
+        alwaysCallback: function () {
           controller.get('popup').hide();
           router.transitionTo('main.index');
-          Em.run.next(function() {
+          Em.run.next(function () {
             location.reload();
           });
-        }});
-      }
+        }
+      });
     },
 
     unroutePath: function () {
@@ -315,43 +326,25 @@ module.exports = App.WizardRoute.extend({
   step7: Em.Route.extend({
     route: '/step7',
     connectOutlets: function (router) {
-      var controller = router.get('reassignMasterController');
+      var controller = router.get('reassignMasterController'),
+        stepController = router.get('reassignMasterWizardStep7Controller');
       controller.setCurrentStep('7');
       controller.setLowerStepsDisable(7);
       controller.dataLoading().done(function () {
         controller.loadAllPriorSteps();
+        stepController.set('wizardController', controller);
         controller.connectOutlet('reassignMasterWizardStep7', controller.get('content'));
       });
     },
 
     next: function (router) {
       var controller = router.get('reassignMasterController');
-      var reassignMasterWizardStep7 = router.get('reassignMasterWizardStep7Controller');
-      if (!reassignMasterWizardStep7.get('isSubmitDisabled')) {
-        controller.finish();
-        controller.get('popup').hide();
-        App.clusterStatus.setClusterStatus({
-          clusterName: router.get('reassignMasterController.content.cluster.name'),
-          clusterState: 'DEFAULT',
-          localdb: App.db.data
-        }, {
-          alwaysCallback: function () {
-            controller.get('popup').hide();
-            router.transitionTo('main.index');
-            Em.run.next(function() {
-              location.reload();
-            });
-          }
-        });
-      }
+      controller.resetOnClose(controller, 'main.index');
     },
 
     complete: function (router) {
       var controller = router.get('reassignMasterController');
-      var reassignMasterWizardStep7 = router.get('reassignMasterWizardStep7Controller');
-      if (!reassignMasterWizardStep7.get('isSubmitDisabled')) {
-        controller.resetOnClose(controller, 'main.index');
-      }
+      controller.resetOnClose(controller, 'main.index');
     },
 
     unroutePath: function () {

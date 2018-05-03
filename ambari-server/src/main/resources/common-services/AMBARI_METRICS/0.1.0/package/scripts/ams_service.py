@@ -55,15 +55,14 @@ def ams_service(name, action):
         hbase_service('master', action=action)
         hbase_service('regionserver', action=action)
       cmd = format("{cmd} --distributed")
+    else:
+      # make sure no residual region server process is running in embedded mode
+      if action == 'stop':
+        hbase_service('regionserver', action=action)
 
     if action == 'start':
       Execute(format("{sudo} rm -rf {hbase_tmp_dir}/*.tmp")
       )
-
-      if not params.is_hbase_distributed and os.path.exists(format("{zookeeper_data_dir}")):
-        Directory(params.zookeeper_data_dir,
-                  action='delete'
-        )
 
       if not params.is_hbase_distributed:
         File(format("{ams_collector_conf_dir}/core-site.xml"),

@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -21,6 +21,7 @@ package org.apache.ambari.server.api.services.stackadvisor;
 import java.io.File;
 import java.io.IOException;
 
+import org.apache.ambari.server.AmbariException;
 import org.apache.ambari.server.api.services.AmbariMetaInfo;
 import org.apache.ambari.server.api.services.stackadvisor.StackAdvisorRequest.StackAdvisorRequestType;
 import org.apache.ambari.server.api.services.stackadvisor.commands.ComponentLayoutRecommendationCommand;
@@ -28,20 +29,31 @@ import org.apache.ambari.server.api.services.stackadvisor.commands.ComponentLayo
 import org.apache.ambari.server.api.services.stackadvisor.commands.ConfigurationDependenciesRecommendationCommand;
 import org.apache.ambari.server.api.services.stackadvisor.commands.ConfigurationRecommendationCommand;
 import org.apache.ambari.server.api.services.stackadvisor.commands.ConfigurationValidationCommand;
+import org.apache.ambari.server.api.services.stackadvisor.commands.SingleSignOnConfigurationRecommendationCommand;
 import org.apache.ambari.server.api.services.stackadvisor.commands.StackAdvisorCommand;
 import org.apache.ambari.server.api.services.stackadvisor.recommendations.RecommendationResponse;
 import org.apache.ambari.server.api.services.stackadvisor.validations.ValidationResponse;
 import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.controller.internal.AmbariServerConfigurationHandler;
+import org.apache.ambari.server.state.ServiceInfo;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
+
 @Singleton
 public class StackAdvisorHelper {
 
+  protected static Log LOG = LogFactory.getLog(StackAdvisorHelper.class);
+
   private File recommendationsDir;
-  private String stackAdvisorScript;
+  private String recommendationsArtifactsLifetime;
+  private int recommendationsArtifactsRolloverMax;
+  public static String pythonStackAdvisorScript;
   private final AmbariMetaInfo metaInfo;
+  private final AmbariServerConfigurationHandler ambariServerConfigurationHandler;
 
   /* Monotonically increasing requestid */
   private int requestId = 0;
@@ -49,11 +61,15 @@ public class StackAdvisorHelper {
 
   @Inject
   public StackAdvisorHelper(Configuration conf, StackAdvisorRunner saRunner,
-                            AmbariMetaInfo metaInfo) throws IOException {
+                            AmbariMetaInfo metaInfo, AmbariServerConfigurationHandler ambariServerConfigurationHandler) throws IOException {
     this.recommendationsDir = conf.getRecommendationsDir();
-    this.stackAdvisorScript = conf.getStackAdvisorScript();
+    this.recommendationsArtifactsLifetime = conf.getRecommendationsArtifactsLifetime();
+    this.recommendationsArtifactsRolloverMax = conf.getRecommendationsArtifactsRolloverMax();
+
+    this.pythonStackAdvisorScript = conf.getStackAdvisorScript();
     this.saRunner = saRunner;
     this.metaInfo = metaInfo;
+    this.ambariServerConfigurationHandler = ambariServerConfigurationHandler;
   }
 
   /**
@@ -66,23 +82,29 @@ public class StackAdvisorHelper {
    */
   public synchronized ValidationResponse validate(StackAdvisorRequest request)
       throws StackAdvisorException {
-    requestId += 1;
+      requestId = generateRequestId();
 
-    StackAdvisorCommand<ValidationResponse> command = createValidationCommand(request
-        .getRequestType());
+    // TODO, need frontend to pass the Service Name that was modified.
+    // For now, hardcode.
+    // Once fixed, change StackAdvisorHelperTest.java to use the actual service name.
+    String serviceName = "ZOOKEEPER";
+    ServiceInfo.ServiceAdvisorType serviceAdvisorType = getServiceAdvisorType(request.getStackName(), request.getStackVersion(), serviceName);
+    StackAdvisorCommand<ValidationResponse> command = createValidationCommand(serviceName, request);
 
-    return command.invoke(request);
+    return command.invoke(request, serviceAdvisorType);
   }
 
-  StackAdvisorCommand<ValidationResponse> createValidationCommand(
-      StackAdvisorRequestType requestType) throws StackAdvisorException {
+  StackAdvisorCommand<ValidationResponse> createValidationCommand(String serviceName, StackAdvisorRequest request) throws StackAdvisorException {
+    StackAdvisorRequestType requestType = request.getRequestType();
+    ServiceInfo.ServiceAdvisorType serviceAdvisorType = getServiceAdvisorType(request.getStackName(), request.getStackVersion(), serviceName);
+
     StackAdvisorCommand<ValidationResponse> command;
     if (requestType == StackAdvisorRequestType.HOST_GROUPS) {
-      command = new ComponentLayoutValidationCommand(recommendationsDir, stackAdvisorScript,
-          requestId, saRunner, metaInfo);
+      command = new ComponentLayoutValidationCommand(recommendationsDir, recommendationsArtifactsLifetime, serviceAdvisorType,
+          requestId, saRunner, metaInfo, ambariServerConfigurationHandler);
     } else if (requestType == StackAdvisorRequestType.CONFIGURATIONS) {
-      command = new ConfigurationValidationCommand(recommendationsDir, stackAdvisorScript,
-          requestId, saRunner, metaInfo);
+      command = new ConfigurationValidationCommand(recommendationsDir, recommendationsArtifactsLifetime, serviceAdvisorType,
+          requestId, saRunner, metaInfo, ambariServerConfigurationHandler);
     } else {
       throw new StackAdvisorRequestException(String.format("Unsupported request type, type=%s",
           requestType));
@@ -101,32 +123,70 @@ public class StackAdvisorHelper {
    */
   public synchronized RecommendationResponse recommend(StackAdvisorRequest request)
       throws StackAdvisorException {
-    requestId += 1;
+      requestId = generateRequestId();
 
-    StackAdvisorCommand<RecommendationResponse> command = createRecommendationCommand(request
-        .getRequestType());
+    // TODO, need to pass the service Name that was modified.
+    // For now, hardcode
+    String serviceName = "ZOOKEEPER";
 
-    return command.invoke(request);
+    ServiceInfo.ServiceAdvisorType serviceAdvisorType = getServiceAdvisorType(request.getStackName(), request.getStackVersion(), serviceName);
+    StackAdvisorCommand<RecommendationResponse> command = createRecommendationCommand(serviceName, request);
+
+    return command.invoke(request, serviceAdvisorType);
   }
 
-  StackAdvisorCommand<RecommendationResponse> createRecommendationCommand(
-      StackAdvisorRequestType requestType) throws StackAdvisorException {
+  StackAdvisorCommand<RecommendationResponse> createRecommendationCommand(String serviceName, StackAdvisorRequest request) throws StackAdvisorException {
+    StackAdvisorRequestType requestType = request.getRequestType();
+    ServiceInfo.ServiceAdvisorType serviceAdvisorType = getServiceAdvisorType(request.getStackName(), request.getStackVersion(), serviceName);
+
     StackAdvisorCommand<RecommendationResponse> command;
     if (requestType == StackAdvisorRequestType.HOST_GROUPS) {
-      command = new ComponentLayoutRecommendationCommand(recommendationsDir, stackAdvisorScript,
-          requestId, saRunner, metaInfo);
+      command = new ComponentLayoutRecommendationCommand(recommendationsDir, recommendationsArtifactsLifetime, serviceAdvisorType,
+          requestId, saRunner, metaInfo, ambariServerConfigurationHandler);
     } else if (requestType == StackAdvisorRequestType.CONFIGURATIONS) {
-      command = new ConfigurationRecommendationCommand(recommendationsDir, stackAdvisorScript,
-          requestId, saRunner, metaInfo);
+      command = new ConfigurationRecommendationCommand(recommendationsDir, recommendationsArtifactsLifetime, serviceAdvisorType,
+          requestId, saRunner, metaInfo, ambariServerConfigurationHandler);
+    } else if (requestType == StackAdvisorRequestType.SSO_CONFIGURATIONS) {
+      command = new SingleSignOnConfigurationRecommendationCommand(recommendationsDir, recommendationsArtifactsLifetime, serviceAdvisorType,
+          requestId, saRunner, metaInfo, ambariServerConfigurationHandler);
     } else if (requestType == StackAdvisorRequestType.CONFIGURATION_DEPENDENCIES) {
-      command = new ConfigurationDependenciesRecommendationCommand(recommendationsDir, stackAdvisorScript,
-          requestId, saRunner, metaInfo);
+      command = new ConfigurationDependenciesRecommendationCommand(recommendationsDir, recommendationsArtifactsLifetime, serviceAdvisorType,
+          requestId, saRunner, metaInfo, ambariServerConfigurationHandler);
     } else {
       throw new StackAdvisorRequestException(String.format("Unsupported request type, type=%s",
           requestType));
     }
 
     return command;
+  }
+
+  /**
+   * Get the Service Advisor type that the service defines for the specified stack and version. If an error, return null.
+   * @param stackName Stack Name
+   * @param stackVersion Stack Version
+   * @param serviceName Service Name
+   * @return Service Advisor type for that Stack, Version, and Service
+   */
+  private ServiceInfo.ServiceAdvisorType getServiceAdvisorType(String stackName, String stackVersion, String serviceName) {
+    try {
+      ServiceInfo service = metaInfo.getService(stackName, stackVersion, serviceName);
+      ServiceInfo.ServiceAdvisorType serviceAdvisorType = service.getServiceAdvisorType();
+
+      return serviceAdvisorType;
+    } catch (AmbariException e) {
+      ;
+    }
+    return null;
+  }
+
+  /**
+   * Returns an incremented requestId. Rollsover back to 0 in case the requestId >= recommendationsArtifactsrollovermax
+   * @return {int requestId}
+   */
+  private int generateRequestId(){
+      requestId += 1;
+      return requestId % recommendationsArtifactsRolloverMax;
+
   }
 
 }

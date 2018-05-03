@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,11 +18,13 @@
 
 package org.apache.ambari.server.view;
 
-import org.apache.ambari.server.configuration.Configuration;
-import org.apache.ambari.server.controller.internal.URLStreamProvider;
-import org.apache.ambari.view.ViewContext;
-import org.junit.Assert;
-import org.junit.Test;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.aryEq;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.eq;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.verify;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -33,13 +35,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-import static org.easymock.EasyMock.anyObject;
-import static org.easymock.EasyMock.aryEq;
-import static org.easymock.EasyMock.createNiceMock;
-import static org.easymock.EasyMock.eq;
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.verify;
+import org.apache.ambari.server.configuration.Configuration;
+import org.apache.ambari.server.controller.internal.URLStreamProvider;
+import org.apache.ambari.view.ViewContext;
+import org.junit.Assert;
+import org.junit.Test;
 
 public class ViewURLStreamProviderTest {
 
@@ -51,10 +51,10 @@ public class ViewURLStreamProviderTest {
     InputStream inputStream = createNiceMock(InputStream.class);
     ViewContext viewContext = createNiceMock(ViewContext.class);
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec"), eq("requestMethod"), aryEq("params".getBytes()), eq(headerMap))).andReturn(urlConnection);
@@ -77,10 +77,10 @@ public class ViewURLStreamProviderTest {
     InputStream inputStream = createNiceMock(InputStream.class);
     ViewContext viewContext = createNiceMock(ViewContext.class);
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec"), eq("requestMethod"), aryEq((byte[]) null), eq(headerMap))).andReturn(urlConnection);
@@ -103,10 +103,10 @@ public class ViewURLStreamProviderTest {
     InputStream inputStream = createNiceMock(InputStream.class);
     ViewContext viewContext = createNiceMock(ViewContext.class);
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec?doAs=joe"), eq("requestMethod"), aryEq("params".getBytes()), eq(headerMap))).andReturn(urlConnection);
@@ -129,10 +129,10 @@ public class ViewURLStreamProviderTest {
     InputStream inputStream = createNiceMock(InputStream.class);
     ViewContext viewContext = createNiceMock(ViewContext.class);
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec?doAs=joe"), eq("requestMethod"), aryEq("params".getBytes()), eq(headerMap))).andReturn(urlConnection);
@@ -158,10 +158,10 @@ public class ViewURLStreamProviderTest {
 
     InputStream body = new ByteArrayInputStream("params".getBytes());
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec"), eq("requestMethod"), aryEq("params".getBytes()), eq(headerMap))).andReturn(urlConnection);
@@ -184,10 +184,10 @@ public class ViewURLStreamProviderTest {
     InputStream inputStream = createNiceMock(InputStream.class);
     ViewContext viewContext = createNiceMock(ViewContext.class);
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec"), eq("requestMethod"), aryEq((byte[]) null), eq(headerMap))).andReturn(urlConnection);
@@ -212,10 +212,10 @@ public class ViewURLStreamProviderTest {
 
     InputStream body = new ByteArrayInputStream("params".getBytes());
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec?doAs=joe"), eq("requestMethod"), aryEq("params".getBytes()), eq(headerMap))).andReturn(urlConnection);
@@ -240,10 +240,10 @@ public class ViewURLStreamProviderTest {
 
     InputStream body = new ByteArrayInputStream("params".getBytes());
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec?doAs=joe"), eq("requestMethod"), aryEq("params".getBytes()), eq(headerMap))).andReturn(urlConnection);
@@ -266,10 +266,10 @@ public class ViewURLStreamProviderTest {
     HttpURLConnection urlConnection = createNiceMock(HttpURLConnection.class);
     ViewContext viewContext = createNiceMock(ViewContext.class);
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec"),
@@ -293,10 +293,10 @@ public class ViewURLStreamProviderTest {
     HttpURLConnection urlConnection = createNiceMock(HttpURLConnection.class);
     ViewContext viewContext = createNiceMock(ViewContext.class);
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec?doAs=joe"), eq("requestMethod"), aryEq("params".getBytes()), eq(headerMap))).andReturn(urlConnection);
@@ -321,10 +321,10 @@ public class ViewURLStreamProviderTest {
     HttpURLConnection urlConnection = createNiceMock(HttpURLConnection.class);
     ViewContext viewContext = createNiceMock(ViewContext.class);
 
-    Map<String, String> headers = new HashMap<String, String>();
+    Map<String, String> headers = new HashMap<>();
     headers.put("header", "headerValue");
 
-    Map<String, List<String>> headerMap = new HashMap<String, List<String>>();
+    Map<String, List<String>> headerMap = new HashMap<>();
     headerMap.put("header", Collections.singletonList("headerValue"));
 
     expect(streamProvider.processURL(eq("spec?doAs=joe"), eq("requestMethod"), aryEq("params".getBytes()), eq(headerMap))).andReturn(urlConnection);
@@ -348,11 +348,11 @@ public class ViewURLStreamProviderTest {
     Properties ambariProperties = new Properties();
     Configuration configuration = new Configuration(ambariProperties);
     Assert.assertEquals(
-        Configuration.PROXY_ALLOWED_HOST_PORTS_DEFAULT,
-        configuration.getConfigsMap().get(Configuration.PROXY_ALLOWED_HOST_PORTS));
+        Configuration.PROXY_ALLOWED_HOST_PORTS.getDefaultValue(),
+        configuration.getProxyHostAndPorts());
     ViewURLStreamProvider.HostPortRestrictionHandler hprh =
         viewURLStreamProvider.new HostPortRestrictionHandler(
-            configuration.getProperty(Configuration.PROXY_ALLOWED_HOST_PORTS));
+            configuration.getProxyHostAndPorts());
     Assert.assertFalse(hprh.proxyCallRestricted());
     Assert.assertTrue(hprh.allowProxy("host1.com", null));
     Assert.assertTrue(hprh.allowProxy(null, null));
@@ -361,11 +361,11 @@ public class ViewURLStreamProviderTest {
     Assert.assertTrue(hprh.allowProxy(" host1.com ", "8080"));
 
     ambariProperties = new Properties();
-    ambariProperties.setProperty(Configuration.PROXY_ALLOWED_HOST_PORTS, "");
+    ambariProperties.setProperty(Configuration.PROXY_ALLOWED_HOST_PORTS.getKey(), "");
     configuration = new Configuration(ambariProperties);
     hprh =
         viewURLStreamProvider.new HostPortRestrictionHandler(
-            configuration.getProperty(Configuration.PROXY_ALLOWED_HOST_PORTS));
+            configuration.getProxyHostAndPorts());
     Assert.assertFalse(hprh.proxyCallRestricted());
     Assert.assertTrue(hprh.allowProxy("host1.com", null));
     Assert.assertTrue(hprh.allowProxy(null, null));
@@ -374,11 +374,11 @@ public class ViewURLStreamProviderTest {
     Assert.assertTrue(hprh.allowProxy(" host1.com ", "8080"));
 
     ambariProperties = new Properties();
-    ambariProperties.setProperty(Configuration.PROXY_ALLOWED_HOST_PORTS, "host1.com:*");
+    ambariProperties.setProperty(Configuration.PROXY_ALLOWED_HOST_PORTS.getKey(), "host1.com:*");
     configuration = new Configuration(ambariProperties);
     hprh =
         viewURLStreamProvider.new HostPortRestrictionHandler(
-            configuration.getProperty(Configuration.PROXY_ALLOWED_HOST_PORTS));
+            configuration.getProxyHostAndPorts());
     Assert.assertTrue(hprh.proxyCallRestricted());
     Assert.assertTrue(hprh.allowProxy("host1.com", null));
     Assert.assertTrue(hprh.allowProxy(null, null));
@@ -387,11 +387,11 @@ public class ViewURLStreamProviderTest {
     Assert.assertFalse(hprh.allowProxy(" host2.com ", "8080"));
 
     ambariProperties = new Properties();
-    ambariProperties.setProperty(Configuration.PROXY_ALLOWED_HOST_PORTS, " host1.com:80 ,host2.org:443, host2.org:22");
+    ambariProperties.setProperty(Configuration.PROXY_ALLOWED_HOST_PORTS.getKey(), " host1.com:80 ,host2.org:443, host2.org:22");
     configuration = new Configuration(ambariProperties);
     hprh =
         viewURLStreamProvider.new HostPortRestrictionHandler(
-            configuration.getProperty(Configuration.PROXY_ALLOWED_HOST_PORTS));
+            configuration.getProxyHostAndPorts());
     Assert.assertTrue(hprh.proxyCallRestricted());
     Assert.assertTrue(hprh.allowProxy("host1.com", "80"));
     Assert.assertFalse(hprh.allowProxy("host1.com", "20"));
